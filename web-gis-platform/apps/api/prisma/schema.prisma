@@ -1,0 +1,70 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum SystemRole {
+  SUPERADMIN
+  USER
+}
+
+enum ProjectRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+model User {
+  id              String          @id @default(uuid())
+  email           String          @unique
+  password        String?         // Hashed bcrypt (salt = 12, optional for Google users)
+  googleId        String?         @unique
+  fullName        String
+  role            SystemRole      @default(USER)
+  avatarUrl       String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  createdProjects Project[]       @relation("CreatedProjects")
+  memberships     ProjectMember[]
+}
+
+model ProjectMember {
+  id         String      @id @default(uuid())
+  projectId  String
+  userId     String
+  role       ProjectRole @default(VIEWER)
+  assignedAt DateTime    @default(now())
+
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+}
+
+model Project {
+  id           String          @id @default(uuid())
+  name         String
+  description  String?
+  createdAt    DateTime        @default(now())
+  centerLon    Float
+  centerLat    Float
+  epsg         Int             @default(32648)
+  domUrl       String?
+  metadataUrl  String?
+  modelUrl     String?
+  pointCloudId String?
+  calibration  String?
+  
+  isPublic     Boolean         @default(false)
+  createdById  String?
+  createdBy    User?           @relation("CreatedProjects", fields: [createdById], references: [id], onDelete: SetNull)
+  members      ProjectMember[]
+}

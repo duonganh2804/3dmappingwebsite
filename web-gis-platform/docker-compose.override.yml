@@ -1,0 +1,44 @@
+# ════════════════════════════════════════════════════════════════
+#  docker-compose.override.yml — CHỈ DÙNG KHI PHÁT TRIỂN LOCAL
+#
+#  File này tự động được docker-compose đọc khi không chỉ định file.
+#  Ghi đè cấu hình production để phù hợp cho môi trường dev:
+#  - API chạy tsx (hot-reload) thay vì node dist/server.js
+#  - Web chạy Vite dev server thay vì Nginx
+#  - Mount source code vào container để edit trực tiếp
+# ════════════════════════════════════════════════════════════════
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: ./apps/api
+      # Override để dùng Dockerfile.dev (không cần build TypeScript)
+      dockerfile: Dockerfile.dev
+    container_name: webgis_api_dev
+    command: npm run dev
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount source code để hot-reload
+      - ./apps/api:/app
+      - /app/node_modules
+      # Mount tools và data GIS
+      - ./tools:/app/tools:ro
+      - C:/Users/duong/3dmaping:/data/gis
+    environment:
+      NODE_ENV: development
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile.dev
+    container_name: webgis_web_dev
+    command: npm run dev -- --host
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+    environment:
+      NODE_ENV: development

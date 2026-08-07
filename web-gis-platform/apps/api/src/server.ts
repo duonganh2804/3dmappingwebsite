@@ -9,10 +9,12 @@ import rateLimit from 'express-rate-limit';
 import { register, login, googleLogin, refresh, logout, me } from './controllers/authController';
 import { getProjectMembers, addProjectMember, updateProjectMemberRole, removeProjectMember } from './controllers/memberController';
 import { authenticateToken, optionalAuth, requireProjectRole, AuthRequest } from './middlewares/authMiddleware';
-import { translateTileset } from '../../../tools/3d-optimizer/src/translator';
+import { translateTileset } from './utils/translator';
+import { parseAndUnifyCoordinates } from './utils/coordinateConverter';
 import { uploadProjectFilesToR2 } from './r2Service';
+import { sendLeadNotificationEmail } from './utils/emailService';
 import { spawn } from 'child_process';
-import { PrismaClient } from './generated/prisma/client';
+import { PrismaClient } from './generated/prisma';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 const app = express();
@@ -51,33 +53,37 @@ app.post('/api/projects/:id/members', authenticateToken, requireProjectRole('OWN
 app.patch('/api/projects/:id/members/:userId', authenticateToken, requireProjectRole('OWNER'), updateProjectMemberRole);
 app.delete('/api/projects/:id/members/:userId', authenticateToken, requireProjectRole('OWNER'), removeProjectMember);
 
-// Lưu trữ log tiến trình tạm thời để trả về cho Frontend hiển thị thời gian thực
+// ─── Pipeline State ────────────────────────────────────────────────────────
+// Tracking trạng thái xử lý ngầm để frontend biết được tiến độ
 let processLogs: string[] = [];
-
-// Ghi đè console.log của compressor để bắn sang frontend
-const originalLog = console.log;
-const originalError = console.error;
-
-console.log = (...args) => {
-  const message = args.join(' ');
-  processLogs.push(`[INFO] ${message}`);
-  originalLog.apply(console, args);
+let pipelineState: {
+  isProcessing: boolean;
+  projectId: string | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  success: boolean | null;
+} = {
+  isProcessing: false,
+  projectId: null,
+  startedAt: null,
+  finishedAt: null,
+  success: null
 };
 
-console.error = (...args) => {
-  const message = args.join(' ');
-  processLogs.push(`[ERROR] ${message}`);
-  originalError.apply(console, args);
-};
-
-// API lấy logs
+// API lấy logs + trạng thái pipeline (polling từ frontend)
 app.get('/api/logs', (req, res) => {
-  res.json({ logs: processLogs });
+  res.json({ logs: processLogs, pipeline: pipelineState });
+});
+
+// API lấy chỉ trạng thái (nhẹ hơn, không cần toàn bộ logs)
+app.get('/api/logs/status', (req, res) => {
+  res.json({ pipeline: pipelineState });
 });
 
 // API xóa logs
 app.post('/api/logs/clear', (req, res) => {
   processLogs = [];
+  pipelineState = { isProcessing: false, projectId: null, startedAt: null, finishedAt: null, success: null };
   res.json({ success: true });
 });
 
@@ -95,15 +101,49 @@ app.post('/api/optimize/batch', authenticateToken, async (req: AuthRequest, res)
     : path.resolve(inputDir + '_Processed');
 
   processLogs = [];
+  pipelineState = {
+    isProcessing: true,
+    projectId: projectId || null,
+    startedAt: Date.now(),
+    finishedAt: null,
+    success: null
+  };
   processLogs.push(`🚀 Bắt đầu gọi Python build.py xử lý thư mục: ${resolvedInput}`);
   if (projectId) {
     processLogs.push(`📌 Dự án mục tiêu: ${projectId}`);
   }
 
-  const pythonProcess = spawn('python3.12', [
+  // Ưu tiên biến môi trường PYTHON_CMD (dùng khi chạy Docker/Linux/CI)
+  let pythonCmd = process.env.PYTHON_CMD || '';
+
+  if (!pythonCmd) {
+    const isWindows = process.platform === 'win32';
+    if (isWindows) {
+      const userProfile = process.env.USERPROFILE || 'C:\\Users\\duong';
+      const localPython312 = path.join(userProfile, 'AppData\\Local\\Programs\\Python\\Python312\\python.exe');
+      
+      if (fs.existsSync(localPython312)) {
+        pythonCmd = localPython312;
+      } else if (fs.existsSync('C:\\Python312\\python.exe')) {
+        pythonCmd = 'C:\\Python312\\python.exe';
+      } else if (fs.existsSync('C:\\Python314\\python.exe')) {
+        pythonCmd = 'C:\\Python314\\python.exe';
+      } else {
+        pythonCmd = 'python';
+      }
+    } else {
+      // Linux/macOS/Docker: dùng python3 mặc định
+      pythonCmd = 'python3';
+    }
+  }
+
+  processLogs.push(`🐍 Sử dụng Python: ${pythonCmd}`);
+
+  const pythonProcess = spawn(pythonCmd, [
     '-u',
     'tools/3d-optimizer/src/build_optimized.py',
     resolvedInput,
+    '-o',
     resolvedOutput,
     '--epsg', String(epsg || 32648)
   ], { cwd: path.resolve(__dirname, '../../..') });
@@ -123,6 +163,23 @@ app.post('/api/optimize/batch', authenticateToken, async (req: AuthRequest, res)
   });
 
   pythonProcess.on('close', async (code) => {
+    if (code !== 0) {
+      processLogs.push(`❌ Lỗi: Tiến trình build.py thất bại với mã lỗi (Exit code: ${code}).`);
+      pipelineState.isProcessing = false;
+      pipelineState.finishedAt = Date.now();
+      pipelineState.success = false;
+      if (projectId) {
+        processLogs.push(`🗑️ Đang dọn dẹp và xóa dự án lỗi khỏi cơ sở dữ liệu (ID: ${projectId})...`);
+        try {
+          await prisma.project.delete({ where: { id: projectId } });
+          processLogs.push(`✅ Đã xóa dự án lỗi thành công để tránh làm nhiễm bẩn dữ liệu.`);
+        } catch (delErr: any) {
+          processLogs.push(`⚠️ Không thể tự động xóa dự án khỏi DB: ${delErr.message}`);
+        }
+      }
+      return;
+    }
+
     processLogs.push(`🎉 Hoàn tất toàn bộ tiến trình xử lý thư mục! (Exit code: ${code})`);
     
     if (projectId) {
@@ -161,13 +218,26 @@ app.post('/api/optimize/batch', authenticateToken, async (req: AuthRequest, res)
           }
         });
         processLogs.push(`💾 Đã đồng bộ thành công URLs và tọa độ dự án vào Database!`);
+        processLogs.push(`__PIPELINE_DONE__`);
+        pipelineState.isProcessing = false;
+        pipelineState.finishedAt = Date.now();
+        pipelineState.success = true;
       } catch (err: any) {
         processLogs.push(`❌ Lỗi đồng bộ dữ liệu lên Cloud: ${err.message}`);
+        processLogs.push(`__PIPELINE_DONE__`);
+        pipelineState.isProcessing = false;
+        pipelineState.finishedAt = Date.now();
+        pipelineState.success = false;
       }
+    } else {
+      processLogs.push(`__PIPELINE_DONE__`);
+      pipelineState.isProcessing = false;
+      pipelineState.finishedAt = Date.now();
+      pipelineState.success = true;
     }
   });
 
-  res.json({ success: true, message: 'Tiến trình build.py đã được kích hoạt ngầm.' });
+  res.json({ success: true, message: 'Tiến trình build.py đã được kích hoạt ngầm.', projectId });
 });
 
 // API chỉ upload file lên R2 + cập nhật DB
@@ -268,8 +338,9 @@ app.get('/api/projects', optionalAuth, async (req: AuthRequest, res) => {
 // API lấy chi tiết 1 dự án
 app.get('/api/projects/:id', optionalAuth, requireProjectRole('VIEWER'), async (req: AuthRequest, res) => {
   try {
+    const id = req.params.id as string;
     const project = await prisma.project.findUnique({
-      where: { id: req.params.id },
+      where: { id },
       include: {
         members: {
           include: {
@@ -290,13 +361,24 @@ app.post('/api/projects', authenticateToken, async (req: AuthRequest, res) => {
   try {
     const { name, description, centerLon, centerLat, epsg, domUrl, metadataUrl, modelUrl, pointCloudId, isPublic } = req.body;
     
+    let finalLon = parseFloat(centerLon) || 0;
+    let finalLat = parseFloat(centerLat) || 0;
+    const epsgNum = parseInt(epsg, 10) || 32648;
+
+    if (finalLon !== 0 || finalLat !== 0) {
+      const unified = parseAndUnifyCoordinates(finalLon, finalLat, epsgNum);
+      finalLon = unified.lon;
+      finalLat = unified.lat;
+      console.log(`[API Coordinate Unification] Original: [${centerLon}, ${centerLat}] -> Unified WGS84: [${finalLon}, ${finalLat}] (Converted: ${unified.isConverted})`);
+    }
+
     const project = await prisma.project.create({
       data: {
         name,
         description,
-        centerLon,
-        centerLat,
-        epsg: epsg || 32648,
+        centerLon: finalLon,
+        centerLat: finalLat,
+        epsg: epsgNum,
         domUrl,
         metadataUrl,
         modelUrl,
@@ -320,9 +402,28 @@ app.post('/api/projects', authenticateToken, async (req: AuthRequest, res) => {
 // API cập nhật dự án
 app.put('/api/projects/:id', authenticateToken, requireProjectRole('EDITOR'), async (req: AuthRequest, res) => {
   try {
+    const id = req.params.id as string;
+    const data = { ...req.body };
+
+    if (data.centerLon !== undefined || data.centerLat !== undefined) {
+      const existingProject = await prisma.project.findUnique({ where: { id } });
+      if (existingProject) {
+        const currentEpsg = data.epsg !== undefined ? (parseInt(data.epsg, 10) || 32648) : existingProject.epsg;
+        let lon = parseFloat(data.centerLon) || existingProject.centerLon;
+        let lat = parseFloat(data.centerLat) || existingProject.centerLat;
+
+        if (lon !== 0 || lat !== 0) {
+          const unified = parseAndUnifyCoordinates(lon, lat, currentEpsg);
+          data.centerLon = unified.lon;
+          data.centerLat = unified.lat;
+          console.log(`[API Coordinate Unification Update] Original: [${lon}, ${lat}] -> Unified WGS84: [${data.centerLon}, ${data.centerLat}]`);
+        }
+      }
+    }
+
     const project = await prisma.project.update({
-      where: { id: req.params.id },
-      data: req.body
+      where: { id },
+      data
     });
     res.json(project);
   } catch (error: any) {
@@ -331,10 +432,102 @@ app.put('/api/projects/:id', authenticateToken, requireProjectRole('EDITOR'), as
 });
 
 // API xóa dự án
-app.delete('/api/projects/:id', authenticateToken, requireProjectRole('OWNER'), async (req: AuthRequest, res) => {
+// ── 3. DEMO LEADS & CONTACT SALES ROUTES ──
+
+// API Gửi Yêu Cầu Book a Demo (Công Khai)
+app.post('/api/demo-leads', async (req, res) => {
   try {
-    await prisma.project.delete({ where: { id: req.params.id } });
-    res.json({ success: true, message: 'Đã xóa dự án' });
+    const { email, fullName, jobTitle, company, phone, message, source } = req.body;
+
+    if (!email || !message) {
+      return res.status(400).json({ error: 'Vui lòng cung cấp Email và Nội dung yêu cầu' });
+    }
+
+    // 1. Lưu thông tin vào Database PostgreSQL (Model DemoLead)
+    const lead = await prisma.demoLead.create({
+      data: {
+        email,
+        fullName: fullName || null,
+        jobTitle: jobTitle || null,
+        company: company || null,
+        phone: phone || null,
+        message,
+        source: source || null,
+        status: 'NEW'
+      }
+    });
+
+    // 2. Gửi Email thông báo trực tiếp đến email công ty duongnguyen280403@gmail.com
+    sendLeadNotificationEmail({
+      email,
+      fullName,
+      jobTitle,
+      company,
+      phone,
+      message,
+      source
+    }).catch(err => console.error('[Background Email Error]:', err));
+
+    res.status(201).json({
+      success: true,
+      message: 'Cảm ơn bạn! Yêu cầu Demo đã được gửi thành công. Đội ngũ chuyên gia sẽ liên hệ với bạn trong thời gian sớm nhất.',
+      lead
+    });
+  } catch (error: any) {
+    console.error('Lỗi lưu Yêu cầu Demo:', error);
+    res.status(500).json({ error: error.message || 'Lỗi xử lý yêu cầu Demo' });
+  }
+});
+
+// API Admin lấy danh sách các Yêu Cầu Demo (Chỉ SuperAdmin)
+app.get('/api/admin/demo-leads', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    if (req.user?.role !== 'SUPERADMIN') {
+      return res.status(403).json({ error: 'Chỉ Quản trị viên mới có quyền xem danh sách yêu cầu Demo' });
+    }
+
+    const leads = await prisma.demoLead.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json(leads);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API Admin cập nhật trạng thái Yêu cầu Demo (NEW | CONTACTED | CLOSED)
+app.patch('/api/admin/demo-leads/:id', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    if (req.user?.role !== 'SUPERADMIN') {
+      return res.status(403).json({ error: 'Chỉ Quản trị viên mới có quyền cập nhật' });
+    }
+
+    const id = req.params.id as string;
+    const { status } = req.body;
+
+    const updated = await prisma.demoLead.update({
+      where: { id },
+      data: { status }
+    });
+
+    res.json(updated);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// API Admin xóa Yêu cầu Demo
+app.delete('/api/admin/demo-leads/:id', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    if (req.user?.role !== 'SUPERADMIN') {
+      return res.status(403).json({ error: 'Chỉ Quản trị viên mới có quyền xóa' });
+    }
+
+    const id = req.params.id as string;
+    await prisma.demoLead.delete({ where: { id } });
+
+    res.json({ success: true, message: 'Đã xóa yêu cầu demo' });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }
@@ -343,3 +536,4 @@ app.delete('/api/projects/:id', authenticateToken, requireProjectRole('OWNER'), 
 app.listen(PORT, () => {
   console.log(`[API Server] Đang chạy tại http://localhost:${PORT}`);
 });
+

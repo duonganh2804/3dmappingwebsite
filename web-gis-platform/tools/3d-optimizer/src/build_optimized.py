@@ -24,7 +24,8 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
-# Tự động kiểm tra và cài đặt các thư viện phụ thuộc bằng pip
+# Kiểm tra thư viện — KHÔNG tự động cài đặt vì dễ dùng nhầm Python version
+# Nếu thiếu thư viện, hãy chạy: pip install -r tools/3d-optimizer/requirements.txt
 REQUIRED_LIBS = {
     'py3dtiles': 'py3dtiles',
     'pyproj': 'pyproj',
@@ -35,23 +36,23 @@ REQUIRED_LIBS = {
     'imagecodecs': 'imagecodecs'
 }
 
-def auto_install_dependencies():
-    print("Checking dependencies...")
+def check_dependencies():
+    missing = []
     for module_name, pip_name in REQUIRED_LIBS.items():
         try:
             __import__(module_name)
         except ImportError:
-            print(f"  Installing missing dependency: {pip_name}...")
-            try:
-                subprocess.run([sys.executable, "-m", "pip", "install", pip_name], check=True)
-                print(f"  Successfully installed {pip_name}!")
-            except Exception as e:
-                print(f"  WARNING: Failed to auto-install {pip_name}: {e}")
+            missing.append(pip_name)
+    
+    if missing:
+        print(f"⚠️  Thiếu thư viện Python: {', '.join(missing)}")
+        print(f"   Vui lòng chạy lệnh sau để cài đặt:")
+        print(f"   pip install {' '.join(missing)}")
+        print(f"   Hoặc: pip install -r tools/3d-optimizer/requirements.txt")
 
-# Chạy cài đặt trước khi import các thư viện bên thứ ba
-auto_install_dependencies()
+check_dependencies()
 
-# Import các thư viện sau khi đã cài đặt thành công
+# Import các thư viện
 try:
     from PIL import Image
     # Tăng giới hạn kích thước ảnh tối đa của PIL để mở được file TIF dung lượng lớn (1.4GB)
@@ -88,8 +89,35 @@ def windows_to_local(project_dir: Path, win_path: str) -> Optional[str]:
 
 # ─── finders ────────────────────────────────────────────────────────
 
-def find_las_dir(project_dir: Path) -> Optional[Path]:
-    """Tìm thư mục chứa file LAS gốc."""
+def find_best_las(project_dir: Path) -> tuple:
+    """
+    Tìm file/thư mục LAS tốt nhất theo thứ tự ưu tiên:
+    1. File LAS đã xuất (Results/Export/*.las) — đã xử lý, chất lượng cao nhất
+    2. Thư mục LAS từ AT_Temp (nhiều file LAS thô)
+    Returns: (source_type, path) where source_type is 'file' or 'dir'
+    """
+    # Ưu tiên 1: File LAS đã xuất từ DJI Terra (Results/Export)
+    export_las = sorted(project_dir.glob('Results/Export/*.las'))
+    if not export_las:
+        # Tìm rộng hơn trong toàn bộ Results
+        export_las = sorted(project_dir.glob('Results/**/*.las'))
+        # Loại bỏ các file nhỏ (< 100MB) — thường là file thô không đầy đủ
+        export_las = [f for f in export_las if f.stat().st_size > 100 * 1024 * 1024]
+    if export_las:
+        # Chọn file LAS lớn nhất (thường là file đã merge đầy đủ)
+        best = max(export_las, key=lambda f: f.stat().st_size)
+        size_gb = best.stat().st_size / (1024**3)
+        print(f"  📁 Tìm thấy file LAS đã xuất: {best.name} ({size_gb:.2f} GB)")
+        return ('file', best)
+
+    # Ưu tiên 2: Thư mục AT_Temp (nhiều file LAS thô)
+    at_dirs = sorted(project_dir.glob('Reconstruction/AT_Temp/AT_*/LasFile/'), reverse=True)
+    if at_dirs:
+        las_count = len(list(at_dirs[0].glob('*.las')))
+        print(f"  📁 Tìm thấy {las_count} file LAS thô tại AT_Temp/{at_dirs[0].parent.name}")
+        return ('dir', at_dirs[0])
+
+    # Ưu tiên 3: Thư mục Model_Temp
     for cfg_path in project_dir.glob('Reconstruction/Model_Temp/*/Model/model_config.json'):
         try:
             cfg = json.loads(cfg_path.read_text())
@@ -99,13 +127,20 @@ def find_las_dir(project_dir: Path) -> Optional[Path]:
                 if local:
                     p = Path(local).parent
                     if p.exists():
-                        return p
+                        return ('dir', p)
         except Exception:
             pass
 
-    at_dirs = sorted(project_dir.glob('Reconstruction/AT_Temp/AT_*/LasFile/'), reverse=True)
-    if at_dirs:
-        return at_dirs[0]
+    return (None, None)
+
+
+def find_las_dir(project_dir: Path) -> Optional[Path]:
+    """Legacy wrapper — trả về thư mục LAS (backward compat)."""
+    src_type, src_path = find_best_las(project_dir)
+    if src_type == 'dir':
+        return src_path
+    if src_type == 'file':
+        return src_path.parent
     return None
 
 
@@ -203,134 +238,206 @@ def _patch_evlr(path: Path):
         print(f"  ⚠️ Cảnh báo _patch_evlr: {e}")
 
 def process_pointcloud(project_dir: Path, output_dir: Path, epsg: int = 32648) -> bool:
-    """Gộp toàn bộ file LAS -> file LAS trung gian (đã cắt ranh giới), sau đó convert thành 3D Tiles chuẩn."""
+    """
+    Tìm file LAS tốt nhất và convert sang 3D Tiles.
+    Ưu tiên file LAS đã xuất (Results/Export) trước, sau đó AT_Temp.
+    Dùng py3dtiles trực tiếp qua sys.executable (đảm bảo đúng Python env).
+    """
     print("\n━━━ Point Cloud (LAS -> 3D Tiles tileset.json) ━━━")
-    
-    las_dir = find_las_dir(project_dir)
-    if not las_dir:
-        print("  SKIP: Không tìm thấy file LAS nào.")
+
+    # ── 1. Tìm nguồn LAS tốt nhất ──────────────────────────────────
+    src_type, src_path = find_best_las(project_dir)
+    if src_type is None:
+        print("  SKIP: Không tìm thấy file LAS nào trong dự án.")
         return False
 
-    las_files = sorted(las_dir.glob('*.las'))
-    if not las_files:
-        print("  SKIP: Thư mục LasFile trống.")
-        return False
-
-    print(f"  Tìm thấy {len(las_files)} file LAS thô trong {las_dir.name}.")
     print(f"  Hệ tọa độ đầu vào: EPSG:{epsg}")
-
-    clip_wkt = find_model_polygon_wkt(project_dir)
 
     out_pc_dir = output_dir / 'pointcloud'
     if out_pc_dir.exists():
         shutil.rmtree(out_pc_dir)
     out_pc_dir.mkdir(parents=True, exist_ok=True)
-    
-    temp_las = output_dir / 'temp_cropped.las'
 
-    pdal_bin = Path("C:/Users/duong/anaconda3/envs/gis_env/Library/bin/pdal.exe")
-    if not pdal_bin.exists():
-        pdal_bin = shutil.which('pdal') or 'pdal'
+    # Map EPSG đặc biệt (VN2000) sang UTM 48N mà py3dtiles hiểu được
+    srs_in = "32648" if epsg in (9214, 5899, 10575) else str(epsg)
 
-    # 1. Tạo pipeline gộp tất cả LAS file và cắt theo ranh giới mô hình 3D
-    print(f"  Đang tạo PDAL Pipeline gộp {len(las_files)} file LAS...")
-    pipeline = []
-    tags = []
-    for i, las_file in enumerate(las_files):
-        tag = f"r{i}"
-        tags.append(tag)
-        pipeline.append({
-            "type": "readers.las",
-            "filename": str(las_file).replace('\\', '/'),
-            "tag": tag
-        })
-    
-    pipeline.append({"type": "filters.merge", "inputs": tags, "tag": "m"})
+    # ── 2. Chuẩn bị danh sách file LAS để convert ──────────────────
+    temp_las = output_dir / 'temp_processed.las'
+    inputs_to_convert = []
 
-    last_tag = "m"
-    if clip_wkt:
-        print(f"  ✂️ Áp dụng bộ lọc cắt xén ranh giới mô hình 3D (Polygon Crop)...")
-        pipeline.append({
-            "type": "filters.crop",
-            "inputs": ["m"],
-            "polygon": clip_wkt,
-            "tag": "c"
-        })
-        last_tag = "c"
+    # Tìm PDAL trong hệ thống
+    pdal_bin = shutil.which('pdal')
+    if not pdal_bin:
+        for candidate in [
+            'C:/Users/duong/anaconda3/envs/gis_env/Library/bin/pdal.exe',
+            'C:/OSGeo4W/bin/pdal.exe',
+            'C:/Program Files/QGIS 3.34/bin/pdal.exe',
+        ]:
+            if Path(candidate).exists():
+                pdal_bin = candidate
+                break
 
-    pipeline.append({
-        "type": "writers.las",
-        "inputs": [last_tag],
-        "filename": str(temp_las).replace('\\', '/'),
-        "a_srs": f"EPSG:{epsg}"
-    })
-
-    pipeline_path = output_dir / '.pipeline.json'
-    pipeline_path.write_text(json.dumps(pipeline, indent=2), encoding='utf-8')
-
-    cmd = [str(pdal_bin), "pipeline", str(pipeline_path)]
-    print(f"  Đang thực thi PDAL Pipeline...")
-    pdal_ok = False
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', timeout=600)
-        if res.returncode == 0 and temp_las.exists():
-            size_mb = temp_las.stat().st_size / (1024 * 1024)
-            print(f"  ✅ Đã tạo thành công file LAS trung gian (đã cắt ranh giới): {size_mb:.1f} MB")
-            pdal_ok = True
+    if src_type == 'file':
+        file_size_gb = src_path.stat().st_size / (1024**3)
+        # Nếu file lớn hơn 3 GB và có PDAL, tự động downsample (decimate) để tránh treo/hết bộ nhớ
+        if file_size_gb > 3.0 and pdal_bin:
+            step = 10 if file_size_gb > 15.0 else 5
+            print(f"  ⚡ File LAS quá lớn ({file_size_gb:.2f} GB). Tự động downsample (decimate step={step}) bằng PDAL...")
+            pipeline = [
+                {"type": "readers.las", "filename": str(src_path).replace('\\', '/')},
+                {"type": "filters.decimation", "step": step},
+                {"type": "writers.las", "filename": str(temp_las).replace('\\', '/'), "a_srs": f"EPSG:{epsg}"}
+            ]
+            pipeline_path = output_dir / '.pipeline_decimate.json'
+            pipeline_path.write_text(json.dumps(pipeline, indent=2), encoding='utf-8')
+            try:
+                res = subprocess.run([str(pdal_bin), 'pipeline', str(pipeline_path)],
+                                     capture_output=True, text=True, encoding='utf-8', timeout=1200)
+                if res.returncode == 0 and temp_las.exists():
+                    size_mb = temp_las.stat().st_size / (1024 * 1024)
+                    print(f"  OK Downsample thành công: {size_mb:.1f} MB")
+                    inputs_to_convert = [str(temp_las)]
+                else:
+                    print(f"  Warning PDAL downsample lỗi: {res.stderr[:300]}. Sẽ dùng file gốc.")
+                    inputs_to_convert = [str(src_path)]
+            except Exception as e:
+                print(f"  Warning Exception PDAL downsample: {e}. Sẽ dùng file gốc.")
+                inputs_to_convert = [str(src_path)]
+            finally:
+                if pipeline_path.exists():
+                    pipeline_path.unlink(missing_ok=True)
         else:
-            print(f"  ⚠️ Lỗi khi gộp PDAL pipeline: {res.stderr[:300]}")
-    except Exception as e:
-        print(f"  ⚠️ Exception khi chạy PDAL pipeline: {e}")
+            inputs_to_convert = [str(src_path)]
+            print(f"  Dùng file LAS đã xuất: {src_path.name}")
 
-    # Map EPSG đặc biệt (VN2000) sang UTM 48N
-    if epsg in (9214, 5899, 10575):
-        srs_in = "32648"
-    else:
-        srs_in = str(epsg)
+    elif src_type == 'dir':
+        las_files = sorted(src_path.glob('*.las'))
+        if not las_files:
+            print("  SKIP: Thư mục LasFile trống.")
+            return False
+        print(f"  Tìm thấy {len(las_files)} file LAS trong {src_path.name}.")
 
-    # 2. Chạy py3dtiles convert
-    if pdal_ok:
-        inputs_to_convert = [str(temp_las)]
-    else:
-        print("  ⚠️ PDAL thất bại, chuyển sang convert trực tiếp các file LAS thô không qua bộ lọc...")
-        inputs_to_convert = [str(f) for f in las_files]
+        pdal_ok = False
+        if pdal_bin:
+            print(f"  Đang gộp {len(las_files)} file LAS bằng PDAL...")
+            clip_wkt = find_model_polygon_wkt(project_dir)
+            pipeline = []
+            tags = []
+            for i, lf in enumerate(las_files):
+                tag = f"r{i}"
+                tags.append(tag)
+                pipeline.append({"type": "readers.las", "filename": str(lf).replace('\\', '/'), "tag": tag})
+            pipeline.append({"type": "filters.merge", "inputs": tags, "tag": "m"})
+            last_tag = "m"
+            
+            # Tự động decimate nếu số lượng file nhiều (tránh file gộp quá nặng)
+            if len(las_files) > 10:
+                print("  ⚡ Số lượng file LAS lớn. Tự động thêm decimation step=5...")
+                pipeline.append({"type": "filters.decimation", "inputs": ["m"], "step": 5, "tag": "d"})
+                last_tag = "d"
 
-    print(f"  ⏳ Đang chạy py3dtiles để convert sang 3D Tiles...")
+            if clip_wkt:
+                print("  Applying polygon crop filter...")
+                pipeline.append({"type": "filters.crop", "inputs": [last_tag], "polygon": clip_wkt, "tag": "c"})
+                last_tag = "c"
+                
+            pipeline.append({"type": "writers.las", "inputs": [last_tag],
+                             "filename": str(temp_las).replace('\\', '/'), "a_srs": f"EPSG:{epsg}"})
+            pipeline_path = output_dir / '.pipeline.json'
+            pipeline_path.write_text(json.dumps(pipeline, indent=2), encoding='utf-8')
+            try:
+                res = subprocess.run([str(pdal_bin), 'pipeline', str(pipeline_path)],
+                                     capture_output=True, text=True, encoding='utf-8', timeout=1200)
+                if res.returncode == 0 and temp_las.exists():
+                    size_mb = temp_las.stat().st_size / (1024 * 1024)
+                    print(f"  OK Gộp và lọc PDAL thành công: {size_mb:.1f} MB")
+                    inputs_to_convert = [str(temp_las)]
+                    pdal_ok = True
+                else:
+                    print(f"  Warning PDAL pipeline lỗi: {res.stderr[:300]}")
+            except Exception as e:
+                print(f"  Warning Exception PDAL: {e}")
+            finally:
+                if pipeline_path.exists():
+                    pipeline_path.unlink(missing_ok=True)
+
+        if not pdal_ok:
+            print("  PDAL không khả dụng, convert trực tiếp từng file LAS...")
+            inputs_to_convert = [str(f) for f in las_files]
+
+    if not inputs_to_convert:
+        print("  SKIP: Không có file LAS nào để convert.")
+        return False
+
+    # ── 3. Chạy py3dtiles convert ───────────────────────────────────
+    # Dùng sys.executable để đảm bảo đúng Python environment (không dùng 'py -3.12')
+    print(f"  Converting {len(inputs_to_convert)} file(s) sang 3D Tiles...", flush=True)
     convert_cmd = [
-        "py", "-3.12", "-m", "py3dtiles.command_line", "convert",
+        sys.executable, "-m", "py3dtiles.command_line", "convert",
         *inputs_to_convert,
         "--out", str(out_pc_dir),
         "--srs_in", srs_in,
-        "--srs_out", "4978", # ECEF cho Cesium
-        "--jobs", "4",
+        "--srs_out", "4978",  # ECEF cho Cesium/CesiumJS
+        "--jobs", "2",
         "--color_scale", "256",
         "--overwrite"
     ]
     
-    print(f"  Lệnh convert: {' '.join(convert_cmd[:6])} ...")
+    # Trên Windows, vô hiệu hóa process pool để tránh bị treo/chết luồng âm thầm
+    if os.name == 'nt':
+        convert_cmd.append("--disable-processpool")
+
+    print(f"  Python: {sys.executable}", flush=True)
+    print(f"  Input: {[Path(i).name for i in inputs_to_convert]}", flush=True)
+    print(f"  Output: {out_pc_dir}", flush=True)
+
     try:
-        res_convert = subprocess.run(convert_cmd, capture_output=True, text=True, encoding='utf-8', timeout=1800)
-        # Xóa file LAS tạm
+        # Chạy Popen để stream output theo thời gian thực thay vì buffer toàn bộ
+        process = subprocess.Popen(
+            convert_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding='utf-8',
+            errors='replace'
+        )
+
+        # Đọc stdout theo thời gian thực
+        while True:
+            output = process.stdout.readline()
+            if output == '' and process.poll() is not None:
+                break
+            if output:
+                print(f"  [py3dtiles] {output.strip()}", flush=True)
+
+        rc = process.poll()
+        stderr_output = process.stderr.read()
+
+        # Dọn file tạm
         if temp_las.exists():
             try:
                 temp_las.unlink(missing_ok=True)
             except Exception as e:
-                print(f"  ⚠️ Cảnh báo không thể xóa file tạm {temp_las.name} ngay lập tức (Windows File Lock): {e}")
-            
+                print(f"  Warning Không xóa được file tạm (sẽ tự xóa sau): {e}", flush=True)
+
         tileset_file = out_pc_dir / 'tileset.json'
-        if res_convert.returncode == 0 and tileset_file.exists():
-            print(f"  ✅ py3dtiles: Đã chuyển đổi thành công sang 3D Tiles chuẩn (tileset.json)!")
+        if rc == 0 and tileset_file.exists():
+            # Tính tổng số tile
+            tile_count = len(list(out_pc_dir.rglob('*.pnts'))) + len(list(out_pc_dir.rglob('*.b3dm')))
+            size_mb = sum(f.stat().st_size for f in out_pc_dir.rglob('*') if f.is_file()) / (1024*1024)
+            print(f"  OK 3D Tiles OK: {tile_count} tiles, {size_mb:.1f} MB tong cong", flush=True)
             return True
         else:
-            print(f"  ❌ py3dtiles convert thất bại (exit code: {res_convert.returncode}): {res_convert.stderr[:500]}")
+            stderr_preview = (stderr_output or '')[:800]
+            print(f"  ERROR py3dtiles convert that bai (exit {rc}):", flush=True)
+            print(f"  {stderr_preview}", flush=True)
             return False
+
     except Exception as e:
-        print(f"  ❌ Lỗi khi chạy py3dtiles convert: {e}")
+        print(f"  ERROR Exception: {e}", flush=True)
         if temp_las.exists():
-            try:
-                temp_las.unlink(missing_ok=True)
-            except Exception:
-                pass
+            try: temp_las.unlink(missing_ok=True)
+            except: pass
         return False
 
 
@@ -606,8 +713,11 @@ def process_dom_tif(project_dir: Path, output_dir: Path, epsg: int = 32648, max_
                 print(f"  ⚠️ Lỗi khi phân tích PRJ: {e}")
 
         if epsg in (9214, 5899, 10575) or "+proj=tmerc" in crs_in:
-            crs_in = "+proj=tmerc +lat_0=0 +lon_0=105.75 +k=0.9999 +x_0=500000 +y_0=0 +ellps=WGS84 +units=m +no_defs"
-            print("  Sử dụng hệ tọa độ VN2000 TP.HCM (Kinh tuyến trục 105.75)")
+            lon0 = 105.75
+            if epsg == 5899:
+                lon0 = 105.00
+            crs_in = f"+proj=tmerc +lat_0=0 +lon_0={lon0} +k=0.9999 +x_0=500000 +y_0=0 +ellps=WGS84 +towgs84=-191.9,-39.3,-111,0,0,0,0 +units=m +no_defs"
+            print(f"  Sử dụng hệ tọa độ VN2000 (Kinh tuyến trục {lon0}) với tham số dịch chuyển towgs84")
             
         transformer = Transformer.from_crs(crs_in, "EPSG:4326", always_xy=True)
         lon_min, lat_min = transformer.transform(xmin, ymin)
@@ -627,7 +737,16 @@ def process_dom_tif(project_dir: Path, output_dir: Path, epsg: int = 32648, max_
 
         png_out = out_dom_dir / 'dom.png'
         img_resized.save(png_out, 'PNG')
-        print(f"  Lưu thành công ảnh Web: {png_out.name} ({png_out.stat().st_size / 1024 / 1024:.2f} MB)")
+        print(f"  Lưu thành công ảnh PNG: {png_out.name} ({png_out.stat().st_size / 1024 / 1024:.2f} MB)")
+
+        # Xuất thêm dom.jpg (nhỏ hơn – dùng cho Cesium WebGL)
+        try:
+            jpg_out = out_dom_dir / 'dom.jpg'
+            img_rgb = img_resized.convert('RGB')  # JPEG không hỗ trợ Alpha
+            img_rgb.save(jpg_out, 'JPEG', quality=88, optimize=True)
+            print(f"  Lưu thành công ảnh JPEG: {jpg_out.name} ({jpg_out.stat().st_size / 1024 / 1024:.2f} MB)")
+        except Exception as e:
+            print(f"  ⚠️ Không thể xuất dom.jpg: {e}")
         
         metadata = {
             "west": lon_min,

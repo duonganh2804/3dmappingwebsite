@@ -1,0 +1,20 @@
+# Web GIS 3D Optimizer — Python Dependencies
+# Cài đặt bằng lệnh: pip install -r requirements.txt
+
+# Xử lý Point Cloud (3D Tiles, COPC)
+py3dtiles>=12.1.0
+laspy[lazrs,laszip]>=2.7.0   # Bắt buộc để py3dtiles đọc được file .las/.laz
+
+# Hệ tọa độ địa lý
+pyproj>=3.6.0
+
+# Xử lý ảnh raster (DOM TIF -> PNG/JPEG)
+Pillow>=10.0.0
+tifffile>=2024.1.1
+imagecodecs>=2024.1.1
+
+# Xử lý mesh 3D (OBJ -> GLB)
+trimesh>=4.0.0
+
+# Đọc Shapefile
+pyshp>=2.3.0

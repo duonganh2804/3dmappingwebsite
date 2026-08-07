@@ -68,3 +68,24 @@ model Project {
   createdBy    User?           @relation("CreatedProjects", fields: [createdById], references: [id], onDelete: SetNull)
   members      ProjectMember[]
 }
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  CLOSED
+}
+
+model DemoLead {
+  id          String     @id @default(uuid())
+  email       String
+  fullName    String?
+  jobTitle    String?
+  company     String?
+  phone       String?
+  message     String
+  source      String?    // How did you hear about us?
+  status      LeadStatus @default(NEW)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+

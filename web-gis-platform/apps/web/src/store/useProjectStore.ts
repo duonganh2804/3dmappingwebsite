@@ -1,5 +1,17 @@
 import { create } from 'zustand';
 
+export interface ProjectMember {
+  id: string;
+  projectId: string;
+  userId: string;
+  role: 'OWNER' | 'EDITOR' | 'VIEWER';
+  user?: {
+    id: string;
+    email: string;
+    fullName: string;
+  };
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -12,6 +24,9 @@ export interface Project {
   modelUrl?: string;
   pointCloudId?: string;
   calibration?: string;
+  isPublic?: boolean;
+  createdById?: string;
+  members?: ProjectMember[];
 }
 
 interface ProjectState {

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { 
   ChevronDown, 
   ChevronRight, 
+  ChevronLeft,
   Ruler, 
   Square, 
   ArrowUpDown, 
@@ -14,11 +15,14 @@ import {
   Navigation, 
   Layers, 
   Filter, 
-  Info
+  Info,
+  Image
 } from 'lucide-react';
 import type { ToolMode } from './CesiumViewer';
 
 interface PotreeSidebarProps {
+  isOpen?: boolean;
+  onToggleOpen?: () => void;
   // Mode đo đạc
   currentMode: ToolMode;
   onModeChange: (mode: ToolMode) => void;
@@ -35,7 +39,7 @@ interface PotreeSidebarProps {
   setShowDom: (show: boolean) => void;
   showPointCloud: boolean;
   setShowPointCloud: (show: boolean) => void;
-
+ 
   // Appearance controls (Point cloud & Camera settings)
   pointSize: number;
   onPointSizeChange: (size: number) => void;
@@ -49,9 +53,12 @@ interface PotreeSidebarProps {
   onProjectionChange: (ortho: boolean) => void;
   onFocusProject: () => void;
   onFocusPointCloud?: () => void;
+  onFocusDom: () => void;
 }
 
 export function PotreeSidebar({
+  isOpen: controlledIsOpen,
+  onToggleOpen,
   currentMode,
   onModeChange,
   onClear,
@@ -74,8 +81,20 @@ export function PotreeSidebar({
   isOrthographic,
   onProjectionChange,
   onFocusProject,
-  onFocusPointCloud
+  onFocusPointCloud,
+  onFocusDom
 }: PotreeSidebarProps) {
+  const [localIsOpen, setLocalIsOpen] = useState(true);
+  const isOpen = controlledIsOpen !== undefined ? controlledIsOpen : localIsOpen;
+
+  const handleToggle = () => {
+    if (onToggleOpen) {
+      onToggleOpen();
+    } else {
+      setLocalIsOpen(!localIsOpen);
+    }
+  };
+
   // State quản lý việc thu gọn/mở rộng các nhóm accordion
   const [expandedSections, setExpandedSections] = useState({
     appearance: true,
@@ -90,7 +109,9 @@ export function PotreeSidebar({
   };
 
   return (
-    <div className="absolute top-0 left-0 z-20 w-[320px] h-screen bg-slate-950/95 border-r border-slate-800 text-slate-300 flex flex-col font-sans select-none overflow-y-auto">
+    <div className={`absolute top-0 left-0 z-20 w-[320px] h-screen bg-slate-950/95 border-r border-slate-800 text-slate-300 flex flex-col font-sans select-none transition-transform duration-300 ease-in-out ${
+      isOpen ? 'translate-x-0' : '-translate-x-full'
+    }`}>
       {/* Header chính */}
       <div className="p-4 border-b border-slate-900 bg-slate-900/60 flex items-center justify-between">
         <div className="flex flex-col">
@@ -343,22 +364,30 @@ export function PotreeSidebar({
                   </div>
 
                   {/* Focus buttons */}
-                  <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div className="grid grid-cols-3 gap-1.5 mt-2">
                     <button
                       onClick={onFocusProject}
-                      className="py-2 px-2 rounded-lg border border-slate-800 bg-slate-900/40 text-slate-300 hover:bg-slate-900 hover:text-white flex items-center justify-center gap-1 text-[11px] transition-all font-semibold"
+                      className="py-2 px-1 rounded-lg border border-slate-800 bg-slate-900/40 text-slate-300 hover:bg-slate-900 hover:text-white flex flex-col items-center justify-center gap-0.5 text-[9px] transition-all font-semibold"
                       title="Bay camera quay lại vị trí dự án Vườn Ươm"
                     >
-                      <Navigation size={13} className="text-sky-400 rotate-45" />
+                      <Navigation size={12} className="text-sky-400 rotate-45" />
                       <span>Bay tới Dự án</span>
                     </button>
                     <button
                       onClick={onFocusPointCloud}
-                      className="py-2 px-2 rounded-lg border border-sky-500/30 bg-sky-950/20 text-sky-300 hover:bg-sky-900/40 hover:text-white flex items-center justify-center gap-1 text-[11px] transition-all font-semibold shadow-[0_0_10px_rgba(14,165,233,0.1)]"
+                      className="py-2 px-1 rounded-lg border border-sky-500/30 bg-sky-950/20 text-sky-300 hover:bg-sky-900/40 hover:text-white flex flex-col items-center justify-center gap-0.5 text-[9px] transition-all font-semibold shadow-[0_0_10px_rgba(14,165,233,0.1)]"
                       title="Bay camera trực tiếp tới vị trí Đám mây điểm Point Cloud"
                     >
-                      <MapPin size={13} className="text-sky-400" />
+                      <MapPin size={12} className="text-sky-400" />
                       <span>Bay tới Point Cloud</span>
+                    </button>
+                    <button
+                      onClick={onFocusDom}
+                      className="py-2 px-1 rounded-lg border border-emerald-500/30 bg-emerald-950/20 text-emerald-300 hover:bg-emerald-900/40 hover:text-white flex flex-col items-center justify-center gap-0.5 text-[9px] transition-all font-semibold shadow-[0_0_10px_rgba(16,185,129,0.1)]"
+                      title="Bay camera trực tiếp tới vị trí Ảnh phẳng hàng không DOM"
+                    >
+                      <Image size={12} className="text-emerald-400" />
+                      <span>Bay tới Ảnh DOM</span>
                     </button>
                   </div>
                 </div>
@@ -472,6 +501,19 @@ export function PotreeSidebar({
           )}
         </div>
       </div>
+
+      {/* Nút đóng/mở sidebar (Toggle Handle) */}
+      <button
+        onClick={handleToggle}
+        className="absolute top-1/2 -translate-y-1/2 left-full -ml-[1px] z-30 flex items-center justify-center w-6 h-20 bg-slate-950/95 hover:bg-slate-900 border border-l-0 border-slate-800 rounded-r-xl cursor-pointer text-slate-400 hover:text-white transition-all group focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-500"
+        title={isOpen ? "Thu gọn menu" : "Mở rộng menu"}
+      >
+        {isOpen ? (
+          <ChevronLeft size={16} className="transition-transform group-hover:-translate-x-0.5" />
+        ) : (
+          <ChevronRight size={16} className="transition-transform group-hover:translate-x-0.5" />
+        )}
+      </button>
     </div>
   );
 }

@@ -13,6 +13,7 @@ export const ViewerPage: React.FC = () => {
   const { setCurrentProject } = useProjectStore();
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   useEffect(() => {
     const loadProject = async () => {
@@ -49,7 +50,7 @@ export const ViewerPage: React.FC = () => {
   return (
     <div className="relative w-full h-screen overflow-hidden bg-black">
       {/* Nút quay lại Dashboard đặt trên bản đồ */}
-      <div className="absolute top-4 left-4 z-50">
+      <div className={`absolute top-4 z-50 transition-all duration-300 ease-in-out ${isSidebarOpen ? 'left-[340px]' : 'left-4'}`}>
         <Button 
           variant="secondary" 
           size="sm" 
@@ -62,7 +63,11 @@ export const ViewerPage: React.FC = () => {
       </div>
       
       {/* Component chứa Cesium Map Core */}
-      <CesiumViewer projectId={project.id} />
+      <CesiumViewer 
+        projectId={project.id} 
+        isSidebarOpen={isSidebarOpen}
+        onToggleSidebar={setIsSidebarOpen}
+      />
     </div>
   );
 };

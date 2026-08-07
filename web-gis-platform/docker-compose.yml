@@ -1,5 +1,17 @@
 version: '3.8'
+
+# ════════════════════════════════════════════════════════════════
+#  Web GIS Platform — Docker Compose
+#  Chạy toàn bộ stack: Database + API + Web Frontend
+#
+#  Bắt đầu: docker-compose up -d
+#  Xây dựng lại: docker-compose up -d --build
+#  Dừng: docker-compose down
+# ════════════════════════════════════════════════════════════════
+
 services:
+
+  # ── PostgreSQL / PostGIS Database ──────────────────────────────
   db:
     image: postgis/postgis:15-3.3
     container_name: webgis_db
@@ -11,7 +23,62 @@ services:
       - "5432:5432"
     volumes:
       - postgis_data:/var/lib/postgresql/data
+    networks:
+      - webgis_net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d webgis"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── API Backend (Node.js + Python 3.12 GIS) ────────────────────
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: webgis_api
+    env_file:
+      - ./apps/api/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/webgis?schema=public
+      NODE_ENV: production
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount thư mục dữ liệu GIS từ máy host vào container để tool có thể xử lý
+      - ./tools:/app/tools:ro
+      # Mount thư mục data GIS của user để pipeline có thể đọc dữ liệu gốc
+      # QUAN TRỌNG: Thay đổi đường dẫn bên trái phù hợp với máy của bạn
+      - C:/Users/duong/3dmaping:/data/gis
+    networks:
+      - webgis_net
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Web Frontend (React + Vite → Nginx) ───────────────────────
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: webgis_web
+    ports:
+      - "80:80"
+    networks:
+      - webgis_net
+    depends_on:
+      - api
+    restart: unless-stopped
+
+# ── Development override: dùng khi code local ─────────────────
+# Tạo file docker-compose.override.yml để override khi dev
 
 volumes:
   postgis_data:
+
+networks:
+  webgis_net:
+    driver: bridge

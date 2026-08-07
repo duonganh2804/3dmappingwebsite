@@ -151,14 +151,36 @@ export const uploadProjectFilesToR2 = async (
 ): Promise<{ domUrl?: string; modelUrl?: string; metadataUrl?: string; pointCloudUrl?: string }> => {
   const results: { domUrl?: string; modelUrl?: string; metadataUrl?: string; pointCloudUrl?: string } = {};
 
-  const files = [
-    { localName: 'dom/dom.png', key: `projects/${projectId}/dom.png`, field: 'domUrl' as const },
+  // Ưu tiên dom.jpg (nhỏ hơn, tương thích WebGL Cesium), fallback sang dom.png
+  const jpgLocalPath = path.join(outputDir, 'dom/dom.jpg');
+  const pngLocalPath = path.join(outputDir, 'dom/dom.png');
+
+  if (await fs.pathExists(jpgLocalPath)) {
+    try {
+      results.domUrl = await uploadFileToR2(jpgLocalPath, `projects/${projectId}/dom.jpg`);
+      console.log(`[R2 Upload] ✅ dom.jpg: ${results.domUrl}`);
+    } catch (err: any) {
+      console.error(`[R2 Upload] ❌ Lỗi upload dom.jpg: ${err.message}`);
+    }
+  } else if (await fs.pathExists(pngLocalPath)) {
+    try {
+      results.domUrl = await uploadFileToR2(pngLocalPath, `projects/${projectId}/dom.png`);
+      console.log(`[R2 Upload] ⚠️ Không có dom.jpg, fallback dom.png: ${results.domUrl}`);
+    } catch (err: any) {
+      console.error(`[R2 Upload] ❌ Lỗi upload dom.png: ${err.message}`);
+    }
+  } else {
+    console.log(`[R2 Upload] ⚠️ Không tìm thấy dom.jpg hoặc dom.png`);
+  }
+
+  // Upload GLB và Metadata
+  const otherFiles = [
     { localName: 'glb/model.glb', key: `projects/${projectId}/model.glb`, field: 'modelUrl' as const },
     { localName: 'dom/metadata.json', key: `projects/${projectId}/metadata.json`, field: 'metadataUrl' as const }
   ];
 
-  // 1. Upload DOM, GLB và Metadata
-  for (const file of files) {
+  // 1. Upload GLB và Metadata
+  for (const file of otherFiles) {
     const localPath = path.join(outputDir, file.localName);
     if (await fs.pathExists(localPath)) {
       try {
@@ -170,6 +192,7 @@ export const uploadProjectFilesToR2 = async (
       console.log(`[R2 Upload] ⚠️ Bỏ qua (không tồn tại): ${localPath}`);
     }
   }
+
 
   // 2. Upload Point Cloud (COPC tiles hoặc single COPC hoặc 3D Tiles)
   const copcFullPath = path.join(outputDir, 'pointcloud/cloud_full.copc.laz');

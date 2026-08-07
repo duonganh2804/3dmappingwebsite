@@ -15,6 +15,8 @@ import {
   X,
 } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
+import Globe3DHero from '../components/Globe3DHero';
+import logoImg from '../assets/logo.webp';
 
 /*
  * Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5
@@ -41,32 +43,7 @@ function useScrollReveal(threshold = 0.15) {
   return { ref, visible };
 }
 
-/* ── GLOBE CSS ART ── */
-function GlobeCSSArt() {
-  return (
-    <div className="lp-globe-wrapper" aria-hidden="true">
-      <div className="lp-globe">
-        <div className="lp-globe-core" />
-        <div className="lp-globe-ring lp-globe-ring--1" />
-        <div className="lp-globe-ring lp-globe-ring--2" />
-        <div className="lp-globe-ring lp-globe-ring--3" />
-        <div className="lp-globe-lines">
-          {[0, 30, 60, 90, 120, 150].map((deg) => (
-            <div key={deg} className="lp-globe-meridian" style={{ '--rotation': `${deg}deg` } as React.CSSProperties} />
-          ))}
-          {[-60, -30, 0, 30, 60].map((deg) => (
-            <div key={deg} className="lp-globe-parallel" style={{ '--offset': `${deg}px` } as React.CSSProperties} />
-          ))}
-        </div>
-        <div className="lp-globe-glow" />
-        {/* Location Pins */}
-        <div className="lp-globe-pin" style={{ '--px': '42%', '--py': '38%' } as React.CSSProperties} />
-        <div className="lp-globe-pin lp-globe-pin--2" style={{ '--px': '58%', '--py': '55%' } as React.CSSProperties} />
-        <div className="lp-globe-pin lp-globe-pin--3" style={{ '--px': '65%', '--py': '30%' } as React.CSSProperties} />
-      </div>
-    </div>
-  );
-}
+
 
 /* ── FEATURE ROW ── */
 interface FeatureRowProps {
@@ -122,18 +99,161 @@ function LayerStackVisual() {
 
 /* ── TERRAIN VISUAL ── */
 function TerrainVisual() {
+  const videoUrl = 'https://pub-1d5704adea5c46b3920fd8f19e3c3480.r2.dev/videos/Video%203D%20Mapping%20nh%C3%A0%20m%C3%A1y%20nhi%E1%BB%87t%20%C4%91i%E1%BB%87n%20Long%20Ph%C3%BA%20v1.mp4';
+  const [showLightbox, setShowLightbox] = React.useState(false);
+
   return (
-    <div className="lp-visual-terrain" aria-hidden="true">
-      <div className="lp-terrain-grid" />
-      <div className="lp-terrain-contour lp-terrain-contour--1" />
-      <div className="lp-terrain-contour lp-terrain-contour--2" />
-      <div className="lp-terrain-contour lp-terrain-contour--3" />
-      <div className="lp-terrain-hud">
-        <div className="lp-terrain-hud__row"><span>LAT</span><span>10.7769° N</span></div>
-        <div className="lp-terrain-hud__row"><span>LNG</span><span>106.7009° E</span></div>
-        <div className="lp-terrain-hud__row"><span>ALT</span><span>124.8 m</span></div>
+    <>
+      <div 
+        className="lp-visual-terrain corner-ticks tech-card" 
+        onClick={() => setShowLightbox(true)}
+        style={{ 
+          width: '100%', 
+          aspectRatio: '16/9', 
+          overflow: 'hidden', 
+          borderRadius: '16px', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          background: '#000', 
+          position: 'relative',
+          cursor: 'pointer',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          boxShadow: '0 12px 32px rgba(0, 0, 0, 0.3)'
+        }}
+      >
+        <video 
+          src={videoUrl}
+          autoPlay
+          loop
+          muted
+          playsInline
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+        />
+        
+        {/* Sleek Zoom Hover Overlay */}
+        <div className="lp-video-overlay" style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'rgba(0, 0, 0, 0.4)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '12px',
+          opacity: 0,
+          transition: 'opacity 0.3s ease',
+          zIndex: 5
+        }}>
+          {/* Pulsing Expand Icon */}
+          <div style={{
+            background: 'var(--lp-accent)',
+            borderRadius: '50%',
+            width: '56px',
+            height: '56px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            boxShadow: '0 0 20px var(--lp-accent)'
+          }}>
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+            </svg>
+          </div>
+          <span style={{ 
+            color: '#fff', 
+            fontSize: '13px', 
+            fontWeight: '600', 
+            fontFamily: 'var(--lp-font-mono)', 
+            letterSpacing: '0.05em',
+            textShadow: '0 2px 4px rgba(0,0,0,0.5)'
+          }}>
+            XEM TOÀN MÀN HÌNH
+          </span>
+        </div>
+        
+        <style>{`
+          .lp-visual-terrain:hover .lp-video-overlay {
+            opacity: 1;
+          }
+        `}</style>
       </div>
-    </div>
+
+      {/* Fullscreen Theater Lightbox Modal */}
+      {showLightbox && (
+        <div 
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(3, 7, 18, 0.96)',
+            backdropFilter: 'blur(20px)',
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '40px'
+          }} 
+          onClick={() => setShowLightbox(false)}
+        >
+          {/* Close Button */}
+          <button 
+            style={{
+              position: 'absolute',
+              top: '24px',
+              right: '24px',
+              background: 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              color: '#fff',
+              borderRadius: '50%',
+              width: '48px',
+              height: '48px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.2s',
+              zIndex: 100000
+            }} 
+            onClick={() => setShowLightbox(false)}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255, 255, 255, 0.15)';
+              (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.05)';
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255, 255, 255, 0.08)';
+              (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)';
+            }}
+          >
+            <X size={24} />
+          </button>
+
+          {/* Large Video Box */}
+          <div 
+            style={{ 
+              maxWidth: '1280px', 
+              width: '100%', 
+              aspectRatio: '16/9', 
+              borderRadius: '16px', 
+              overflow: 'hidden', 
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)', 
+              background: '#000',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              position: 'relative'
+            }} 
+            onClick={(e) => e.stopPropagation()}
+          >
+            <video 
+              src={videoUrl}
+              controls
+              autoPlay
+              playsInline
+              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+            />
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -216,6 +336,30 @@ const TRANSLATIONS = {
     calcBtn: "Get estimate",
 
     // Resources Dropdown
+    resCategoryLearn: "Learn about Web GIS",
+    resCategoryEdu: "Education & News",
+    resInsiderTitle: "Web GIS Insider",
+    resInsiderDesc: "Latest 3D spatial tech insights & roadmap.",
+    resPlaybooksTitle: "Survey Playbooks",
+    resPlaybooksDesc: "Step-by-step Drone, LiDAR & BIM workflows.",
+    resWebinarsTitle: "Live Webinars",
+    resWebinarsDesc: "Watch 3D GIS masterclasses & live demos.",
+    resPodcastTitle: "Spatial Podcast",
+    resPodcastDesc: "Conversations on surveying & digital twins.",
+    resNewsletterTitle: "Tech Newsletter",
+    resNewsletterDesc: "Monthly updates on OGC standards & WebGL2.",
+    resBlogTitle: "GIS Tech Blog",
+    resBlogDesc: "Deep dives into 3D Tiles, VN-2000 & COPC.",
+    resStoriesTitle: "Customer Stories",
+    resStoriesDesc: "How leaders succeed with 3D Spatial Maps.",
+    resPressTitle: "Press Releases",
+    resPressDesc: "Company milestones & technology partnerships.",
+    resMediaTitle: "Media Coverage",
+    resMediaDesc: "Press highlights & spatial industry reviews.",
+    resAcademyTitle: "Web GIS Academy",
+    resAcademyDesc: "Free courses on reality capture & 3D tiles.",
+    academyBannerText: "Master 3D reality capture with interactive GIS courses",
+    academyBannerBtn: "Start learning",
     docs: "Documentation",
     docsDesc: "Developer API references and SDK guides.",
     caseStudies: "Case Studies",
@@ -234,6 +378,16 @@ const TRANSLATIONS = {
     scheduleDemoDesc: "Book a personalized walkthrough with our GIS team.",
     apiAccess: "API Access",
     apiAccessDesc: "Generate keys for custom scripting and automation.",
+    getStarted: "Get started",
+    getSupport: "Get support",
+    connectWithUs: "Connect with us",
+    startATrial: "Start a trial",
+    helpCenter: "Help Center",
+    contactSupport: "Contact support",
+    liveOfficeHours: "Live office hours",
+    industryEvents: "Industry events",
+    joinOurCommunity: "Join our community",
+    newsletterSignUp: "Newsletter sign up",
 
     // Hero Section
     heroBadge: "Web GIS Platform · OGC Standard · WebGL2",
@@ -246,22 +400,22 @@ const TRANSLATIONS = {
     scrollExplore: "SCROLL TO EXPLORE",
 
     // Stats Section
-    gsdVal: "< 2 cm",
-    gsdLabel: "GSD Accuracy",
+    gsdVal: "< 1.5 cm",
+    gsdLabel: "CHCNAV LiDAR Precision",
     fpsVal: "60 FPS",
     fpsLabel: "Smooth 3D Rendering",
-    cloudVal: "100M+",
-    cloudLabel: "Point Cloud Points",
-    ogcVal: "OGC Standards",
-    ogcLabel: "3D Tiles · WMS · WFS",
+    cloudVal: "200M+",
+    cloudLabel: "Point Cloud Processing",
+    ogcVal: "SAOLATEK",
+    ogcLabel: "Vietnam Drone Solutions",
 
     // Features Section
     feature1Label: "DATA LAYERS",
     feature1Heading: "Overlay Geographic Data Layers",
     feature1Body: "Flexibly combine Point Cloud COPC, 3D Mesh, BIM/IFC models, DEM terrain, and Vector data under VN-2000 / WGS84 coordinate systems. Toggle visibility and opacity of each layer in real time.",
     feature2Label: "FIELD SURVEY",
-    feature2Heading: "Reconstruct 3D Models from Drone & LiDAR",
-    feature2Body: "Upload Drone images or LiDAR scans. The system automatically processes photogrammetry to generate Orthomosaics, Draco 3D Meshes, and classified point clouds with centimeter-level accuracy.",
+    feature2Heading: "CHCNAV LiDAR & SAOLATEK Drone Integration",
+    feature2Body: "Process raw LiDAR scans and drone imagery processed through CoPre & CoProcess software. Seamlessly integrate with SAOLATEK professional drone systems to reconstruct high-accuracy 3D Tiles, Draco 3D Meshes, and classified COPC point clouds.",
     feature3Label: "SPATIAL ANALYTICS",
     feature3Heading: "Instant Precision Measurement & Analysis",
     feature3Body: "Measure 3D distance, height, area, and cut-and-fill volume directly on the map. Export reports in GeoJSON, CSV, or PDF formats with a single click.",
@@ -357,6 +511,30 @@ const TRANSLATIONS = {
     calcBtn: "Nhận ước tính",
 
     // Resources Dropdown
+    resCategoryLearn: "Tìm hiểu về Web GIS",
+    resCategoryEdu: "Đào tạo & Tin tức",
+    resInsiderTitle: "Bản tin 3D GIS Insider",
+    resInsiderDesc: "Xu hướng công nghệ không gian 3D & lộ trình.",
+    resPlaybooksTitle: "Quy trình Khảo sát (Playbooks)",
+    resPlaybooksDesc: "Quy trình khảo sát Drone, LiDAR & mô hình BIM.",
+    resWebinarsTitle: "Hội thảo Trực tuyến (Webinars)",
+    resWebinarsDesc: "Xem các buổi hướng dẫn & Demo 3D GIS thực tế.",
+    resPodcastTitle: "Podcast Không gian",
+    resPodcastDesc: "Góc nhìn về trắc địa & Chuyển đổi số 3D.",
+    resNewsletterTitle: "Bản tin Kỹ thuật (Newsletter)",
+    resNewsletterDesc: "Cập nhật hàng tháng về chuẩn OGC & WebGL2.",
+    resBlogTitle: "Blog Kỹ thuật GIS",
+    resBlogDesc: "Bài viết chuyên sâu về 3D Tiles, VN-2000 & COPC.",
+    resStoriesTitle: "Câu chuyện Khách hàng",
+    resStoriesDesc: "Ứng dụng thực tế trong Quy hoạch & Xây dựng.",
+    resPressTitle: "Thông cáo Báo chí",
+    resPressDesc: "Tin tức công ty & Hợp tác chiến lược.",
+    resMediaTitle: "Điểm tin Truyền thông",
+    resMediaDesc: "Bài viết báo chí & Đánh giá chuyên môn.",
+    resAcademyTitle: "Học viện Web GIS (Academy)",
+    resAcademyDesc: "Khóa học miễn phí về khảo sát & dữ liệu 3D.",
+    academyBannerText: "Nâng cao kỹ năng khảo sát 3D với các khóa học miễn phí",
+    academyBannerBtn: "Khám phá ngay",
     docs: "Tài liệu kỹ thuật",
     docsDesc: "Tài liệu API cho nhà phát triển và hướng dẫn SDK.",
     caseStudies: "Nghiên cứu điển hình",
@@ -375,6 +553,16 @@ const TRANSLATIONS = {
     scheduleDemoDesc: "Đăng ký buổi làm việc riêng cùng đội ngũ chuyên gia.",
     apiAccess: "Truy cập API",
     apiAccessDesc: "Khởi tạo mã khóa để tích hợp kịch bản và tự động hóa.",
+    getStarted: "Bắt đầu",
+    getSupport: "Hỗ trợ",
+    connectWithUs: "Kết nối với chúng tôi",
+    startATrial: "Dùng thử miễn phí",
+    helpCenter: "Trung tâm trợ giúp",
+    contactSupport: "Liên hệ hỗ trợ",
+    liveOfficeHours: "Tư vấn trực tiếp",
+    industryEvents: "Sự kiện ngành",
+    joinOurCommunity: "Tham gia cộng đồng",
+    newsletterSignUp: "Đăng ký nhận bản tin",
 
     // Hero Section
     heroBadge: "Nền tảng Web GIS · Chuẩn OGC · WebGL2",
@@ -387,22 +575,22 @@ const TRANSLATIONS = {
     scrollExplore: "CUỘN ĐỂ KHÁM PHÁ",
 
     // Stats Section
-    gsdVal: "< 2 cm",
-    gsdLabel: "Độ chính xác GSD",
+    gsdVal: "< 1.5 cm",
+    gsdLabel: "Độ chính xác LiDAR CHCNAV",
     fpsVal: "60 FPS",
     fpsLabel: "Render 3D mượt mà",
-    cloudVal: "100M+",
-    cloudLabel: "Điểm Point Cloud",
-    ogcVal: "Chuẩn OGC",
-    ogcLabel: "3D Tiles · WMS · WFS",
+    cloudVal: "200M+",
+    cloudLabel: "Xử lý Điểm Point Cloud",
+    ogcVal: "SAOLATEK",
+    ogcLabel: "Drone & Giải pháp Việt Nam",
 
     // Features Section
     feature1Label: "ĐA TẦNG DỮ LIỆU",
     feature1Heading: "Chồng xếp dữ liệu địa lý theo từng lớp",
     feature1Body: "Kết hợp linh hoạt Point Cloud COPC, Mesh 3D, mô hình BIM/IFC, terrain DEM và Vector trong cùng một hệ tọa độ VN-2000 / WGS84. Mỗi lớp có thể bật / tắt và điều chỉnh độ trong suốt theo thời gian thực.",
     feature2Label: "KHẢO SÁT THỰC ĐỊA",
-    feature2Heading: "Tái tạo mô hình 3D từ Drone và LiDAR",
-    feature2Body: "Tải lên tập ảnh Drone hoặc dữ liệu quét LiDAR, hệ thống tự động xử lý photogrammetry tạo ra Orthomosaic, Mesh 3D Draco và đám mây điểm phân loại với độ chính xác cấp xen-ti-mét.",
+    feature2Heading: "Tích hợp thiết bị CHCNAV & Drone SAOLATEK",
+    feature2Body: "Đồng bộ hóa dữ liệu quét LiDAR và ảnh UAV từ thiết bị CHCNAV qua phần mềm xử lý CoPre & CoProcess. Kết hợp cùng các dòng Drone chuyên dụng từ SAOLATEK Việt Nam để tạo lập mô hình 3D Tiles, mây điểm COPC và bản đồ trực giao độ phân giải cao.",
     feature3Label: "PHÂN TÍCH KHÔNG GIAN",
     feature3Heading: "Đo đạc và phân tích chính xác tức thời",
     feature3Body: "Đo khoảng cách 3D, chiều cao, diện tích và thể tích đào đắp (Cut & Fill) trực tiếp trên bản đồ. Xuất báo cáo định dạng GeoJSON, CSV hoặc PDF chỉ với một thao tác.",
@@ -498,6 +686,30 @@ const TRANSLATIONS = {
     calcBtn: "获取估算",
 
     // Resources Dropdown
+    resCategoryLearn: "了解 Web GIS 平台",
+    resCategoryEdu: "教育培训与新闻",
+    resInsiderTitle: "3D GIS 内部资讯",
+    resInsiderDesc: "最新的三维空间技术趋势与产品路线。",
+    resPlaybooksTitle: "测绘作业指南 (Playbooks)",
+    resPlaybooksDesc: "无人机、LiDAR 与 BIM 三维建模标准流程。",
+    resWebinarsTitle: "线上研讨会 (Webinars)",
+    resWebinarsDesc: "观看三维 GIS 专家讲座与实机演示。",
+    resPodcastTitle: "空间技术播客 (Podcast)",
+    resPodcastDesc: "探讨测绘地理信息与数字孪生前沿。",
+    resNewsletterTitle: "技术月刊 (Newsletter)",
+    resNewsletterDesc: "每月获取 OGC 标准与 WebGL2 渲染引擎更新。",
+    resBlogTitle: "GIS 技术博客",
+    resBlogDesc: "深入探讨 3D Tiles、VN-2000 与 COPC 点云。",
+    resStoriesTitle: "客户成功案例",
+    resStoriesDesc: "了解各行业客户利用 3D 地图的真实案例。",
+    resPressTitle: "新闻发布",
+    resPressDesc: "公司里程碑、重大更新与技术合作伙伴。",
+    resMediaTitle: "媒体报道",
+    resMediaDesc: "权威媒体报道与地理信息行业评测。",
+    resAcademyTitle: "Web GIS 学院 (Academy)",
+    resAcademyDesc: "实景捕捉与三维数据处理免费课程。",
+    academyBannerText: "通过互动式 3D GIS 课程掌握三维实景捕捉",
+    academyBannerBtn: "开始学习",
     docs: "开发者文档",
     docsDesc: "面向开发者的 API 参考文档与集成 SDK 指南。",
     caseStudies: "行业案例研究",
@@ -516,6 +728,16 @@ const TRANSLATIONS = {
     scheduleDemoDesc: "预约与技术团队进行 1 对 1 的产品演示与答疑。",
     apiAccess: "API 访问权限",
     apiAccessDesc: "生成开发者密钥以实现自定义脚本集成与自动化。",
+    getStarted: "开始使用",
+    getSupport: "获取支持",
+    connectWithUs: "与我们联系",
+    startATrial: "开始试用",
+    helpCenter: "帮助中心",
+    contactSupport: "联系支持",
+    liveOfficeHours: "在线答疑时间",
+    industryEvents: "行业活动",
+    joinOurCommunity: "加入我们的社区",
+    newsletterSignUp: "订阅新闻资讯",
 
     // Hero Section
     heroBadge: "Web GIS 平台 · OGC 标准 · WebGL2",
@@ -1353,45 +1575,45 @@ export const LandingPage: React.FC = () => {
           font-size: 13px;
         }
 
-        /* ── HERO (H1 Marquee — full-bleed dark globe) ── */
+        /* ── HERO (Google Maps 3D Maps Demo Style) ── */
         .lp-hero {
           position: relative;
+          min-height: 100vh;
           min-height: 100svh;
           display: flex;
-          flex-direction: column;
           align-items: center;
-          justify-content: center;
-          text-align: center;
-          padding: 120px 24px 80px;
+          justify-content: flex-start;
+          padding: 120px 8% 80px;
           overflow: hidden;
+          background-color: #030712;
         }
         .lp-hero__bg {
           position: absolute;
           inset: 0;
-          background: radial-gradient(ellipse 80% 60% at 50% 40%,
-            oklch(60% 0.22 240 / 0.08) 0%,
-            transparent 70%),
-            radial-gradient(ellipse 60% 40% at 70% 70%,
-            oklch(55% 0.18 150 / 0.04) 0%,
-            transparent 60%);
+          background: 
+            radial-gradient(circle at 75% 50%, rgba(26, 115, 232, 0.15) 0%, transparent 55%),
+            radial-gradient(circle at 20% 30%, rgba(0, 229, 255, 0.08) 0%, transparent 45%);
           pointer-events: none;
+          z-index: 1;
         }
         .lp-hero__grid {
           position: absolute;
           inset: 0;
           background-image:
-            linear-gradient(to right, oklch(100% 0 0 / 0.03) 1px, transparent 1px),
-            linear-gradient(to bottom, oklch(100% 0 0 / 0.03) 1px, transparent 1px);
-          background-size: 48px 48px;
+            linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+          background-size: 64px 64px;
           pointer-events: none;
+          z-index: 1;
         }
         .lp-hero__content {
           position: relative;
-          z-index: 2;
-          max-width: 840px;
+          z-index: 10;
+          max-width: 580px;
           display: flex;
           flex-direction: column;
-          align-items: center;
+          align-items: flex-start;
+          text-align: left;
           gap: 24px;
           opacity: 0;
           transform: translateY(24px);
@@ -1405,59 +1627,119 @@ export const LandingPage: React.FC = () => {
           display: inline-flex;
           align-items: center;
           gap: 8px;
-          padding: 6px 14px;
-          background: oklch(60% 0.22 240 / 0.1);
-          border: 1px solid oklch(60% 0.22 240 / 0.3);
+          padding: 6px 16px;
+          background: rgba(26, 115, 232, 0.15);
+          border: 1px solid rgba(66, 133, 244, 0.4);
           border-radius: 100px;
           font-family: var(--lp-font-mono);
           font-size: 12px;
-          color: var(--lp-accent);
+          color: #4285F4;
           letter-spacing: 0.04em;
         }
         .lp-hero__badge-dot {
           width: 6px;
           height: 6px;
           border-radius: 50%;
-          background: var(--lp-accent);
+          background: #4285F4;
+          box-shadow: 0 0 10px #4285F4;
           animation: lp-pulse 2s ease-in-out infinite;
         }
         @keyframes lp-pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.4; transform: scale(0.85); }
         }
         .lp-hero__heading {
-          font-size: clamp(2.5rem, 7vw, 5rem);
-          font-weight: 800;
-          line-height: 1.05;
-          letter-spacing: -0.03em;
-          color: var(--lp-ink);
-          max-width: 780px;
+          font-size: clamp(2.4rem, 5.5vw, 4.5rem);
+          font-weight: 700;
+          line-height: 1.1;
+          letter-spacing: -0.02em;
+          color: #ffffff;
         }
         .lp-hero__heading em {
           font-style: normal;
-          color: var(--lp-accent);
+          color: #4285F4;
+          background: linear-gradient(135deg, #4285F4 0%, #00E5FF 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
         }
         .lp-hero__sub {
-          font-size: clamp(1rem, 2vw, 1.2rem);
-          color: var(--lp-ink-muted);
+          font-size: clamp(1rem, 1.8vw, 1.15rem);
+          color: rgba(255, 255, 255, 0.72);
           line-height: 1.65;
-          max-width: 560px;
+          max-width: 520px;
         }
         .lp-hero__actions {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 14px;
           flex-wrap: wrap;
-          justify-content: center;
+        }
+        .lp-hero__actions .lp-btn--primary {
+          background: #1a73e8;
+          color: #ffffff;
+          border-radius: 8px;
+          padding: 12px 24px;
+          font-weight: 600;
+          box-shadow: 0 4px 20px rgba(26, 115, 232, 0.4);
+          transition: all 0.25s ease;
+        }
+        .lp-hero__actions .lp-btn--primary:hover {
+          background: #1557b0;
+          box-shadow: 0 6px 28px rgba(26, 115, 232, 0.6);
+          transform: translateY(-1px);
+        }
+        .lp-hero__actions .lp-btn--ghost {
+          border-color: rgba(255, 255, 255, 0.2);
+          color: #ffffff;
+          border-radius: 8px;
+          padding: 12px 24px;
+        }
+        .lp-hero__actions .lp-btn--ghost:hover {
+          background: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.4);
         }
         .lp-hero__globe {
           position: absolute;
-          bottom: -120px;
-          left: 50%;
-          transform: translateX(-50%);
-          z-index: 1;
-          opacity: 0.4;
-          pointer-events: none;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          z-index: 2;
+          pointer-events: auto;
+        }
+
+        /* Light Mode Hero Variations */
+        .lp-hero.lp-hero--light {
+          background-color: #f8fafc;
+          transition: background-color 0.4s ease;
+        }
+        .lp-hero.lp-hero--light .lp-hero__bg {
+          background: 
+            radial-gradient(circle at 75% 50%, rgba(26, 115, 232, 0.18) 0%, transparent 60%),
+            radial-gradient(circle at 20% 30%, rgba(0, 229, 255, 0.12) 0%, transparent 50%);
+        }
+        .lp-hero.lp-hero--light .lp-hero__grid {
+          background-image:
+            linear-gradient(to right, rgba(15, 23, 42, 0.05) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(15, 23, 42, 0.05) 1px, transparent 1px);
+        }
+        .lp-hero.lp-hero--light .lp-hero__heading {
+          color: #0f172a;
+        }
+        .lp-hero.lp-hero--light .lp-hero__sub {
+          color: #475569;
+        }
+        .lp-hero.lp-hero--light .lp-hero__badge {
+          background: rgba(26, 115, 232, 0.1);
+          border-color: rgba(26, 115, 232, 0.35);
+          color: #1e40af;
+        }
+        .lp-hero.lp-hero--light .lp-btn--ghost {
+          border-color: rgba(15, 23, 42, 0.25);
+          color: #0f172a;
+        }
+        .lp-hero.lp-hero--light .lp-btn--ghost:hover {
+          background: rgba(15, 23, 42, 0.06);
+          border-color: rgba(15, 23, 42, 0.4);
         }
         .lp-hero__scroll-hint {
           position: absolute;
@@ -2116,14 +2398,8 @@ export const LandingPage: React.FC = () => {
 
         {/* ── NAV ── */}
         <nav className={`lp-nav ${scrolled ? 'lp-nav--scrolled' : ''}`} role="navigation" aria-label="Main navigation">
-          <button className="lp-nav__logo" onClick={() => navigate('/')} aria-label="DroneDeploy — trang chủ">
-            <div className="lp-nav__logo-mark">
-              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="12" cy="12" r="10" fill="#FFFFFF" />
-                <path d="M8 8L16 11L11 16L8 8Z" fill="#000000" />
-              </svg>
-            </div>
-            <span className="lp-nav__brand">DroneDeploy</span>
+          <button className="lp-nav__logo" onClick={() => navigate('/')} aria-label="Web GIS Platform — Trang chủ" style={{ display: 'flex', alignItems: 'center', gap: '8px', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>
+            <img src={logoImg} alt="Web GIS Logo" style={{ height: '38px', width: 'auto', objectFit: 'contain' }} />
           </button>
 
           <ul className="lp-nav__links" role="list">
@@ -2223,17 +2499,6 @@ export const LandingPage: React.FC = () => {
 
                   </div>
 
-                  {/* Mega Menu Bottom Banner */}
-                  <div className="lp-nav__mega-bottom">
-                    <div className="lp-nav__mega-cta-left">
-                      <span className="lp-nav__mega-badge">{t('roadmap')}</span>
-                      <span className="lp-nav__mega-cta-text">{t('roadmapDesc')}</span>
-                    </div>
-                    <button className="lp-btn lp-btn--pill-solid lp-btn--sm" onClick={() => navigate('/dashboard')}>
-                      {t('viewProgress')}
-                    </button>
-                  </div>
-
                 </div>
               )}
             </li>
@@ -2304,16 +2569,6 @@ export const LandingPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Bottom Banner */}
-                    <div className="lp-nav__mega-bottom" style={{ marginLeft: '-4px', marginRight: '-4px', marginBottom: '-4px' }}>
-                      <div className="lp-nav__mega-cta-left">
-                        <span className="lp-nav__mega-badge">{t('calcBadge')}</span>
-                        <span className="lp-nav__mega-cta-text">{t('calcText')}</span>
-                      </div>
-                      <button className="lp-btn lp-btn--pill-solid lp-btn--sm" onClick={() => navigate('/dashboard')}>
-                        {t('calcBtn')}
-                      </button>
-                    </div>
                   </div>
                 </div>
               )}
@@ -2327,21 +2582,69 @@ export const LandingPage: React.FC = () => {
                 {t('resources')} <ChevronDown size={14} className="lp-nav__chevron" />
               </button>
               {activeDropdown === 'resources' && (
-                <div className="lp-nav__dropdown tactile-glass">
-                  <div className="lp-nav__dropdown-grid">
-                    <div className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                      <div className="lp-nav__dropdown-title">{t('docs')}</div>
-                      <div className="lp-nav__dropdown-desc">{t('docsDesc')}</div>
+                <div className="lp-nav__dropdown lp-nav__dropdown--mega tactile-glass" style={{ width: '620px', left: '50%', transform: 'translateX(-40%)' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', padding: '4px' }}>
+                    
+                    {/* Category 1: Learn about Web GIS */}
+                    <div className="lp-nav__mega-col">
+                      <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--lp-accent-amber)', marginBottom: '14px', paddingBottom: '6px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                        {t('resCategoryLearn')}
+                      </div>
+                      <ul className="lp-nav__mega-col-links">
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
+                          <div className="lp-nav__dropdown-title">{t('resInsiderTitle')}</div>
+                          <div className="lp-nav__dropdown-desc">{t('resInsiderDesc')}</div>
+                        </li>
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
+                          <div className="lp-nav__dropdown-title">{t('resPlaybooksTitle')}</div>
+                          <div className="lp-nav__dropdown-desc">{t('resPlaybooksDesc')}</div>
+                        </li>
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
+                          <div className="lp-nav__dropdown-title">{t('resWebinarsTitle')}</div>
+                          <div className="lp-nav__dropdown-desc">{t('resWebinarsDesc')}</div>
+                        </li>
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
+                          <div className="lp-nav__dropdown-title">{t('resPodcastTitle')}</div>
+                          <div className="lp-nav__dropdown-desc">{t('resPodcastDesc')}</div>
+                        </li>
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
+                          <div className="lp-nav__dropdown-title">{t('resNewsletterTitle')}</div>
+                          <div className="lp-nav__dropdown-desc">{t('resNewsletterDesc')}</div>
+                        </li>
+                      </ul>
                     </div>
-                    <div className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                      <div className="lp-nav__dropdown-title">{t('caseStudies')}</div>
-                      <div className="lp-nav__dropdown-desc">{t('caseStudiesDesc')}</div>
+
+                    {/* Category 2: Education & News */}
+                    <div className="lp-nav__mega-col">
+                      <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--lp-accent-amber)', marginBottom: '14px', paddingBottom: '6px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                        {t('resCategoryEdu')}
+                      </div>
+                      <ul className="lp-nav__mega-col-links">
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
+                          <div className="lp-nav__dropdown-title">{t('resBlogTitle')}</div>
+                          <div className="lp-nav__dropdown-desc">{t('resBlogDesc')}</div>
+                        </li>
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
+                          <div className="lp-nav__dropdown-title">{t('resStoriesTitle')}</div>
+                          <div className="lp-nav__dropdown-desc">{t('resStoriesDesc')}</div>
+                        </li>
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
+                          <div className="lp-nav__dropdown-title">{t('resPressTitle')}</div>
+                          <div className="lp-nav__dropdown-desc">{t('resPressDesc')}</div>
+                        </li>
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
+                          <div className="lp-nav__dropdown-title">{t('resMediaTitle')}</div>
+                          <div className="lp-nav__dropdown-desc">{t('resMediaDesc')}</div>
+                        </li>
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
+                          <div className="lp-nav__dropdown-title">{t('resAcademyTitle')}</div>
+                          <div className="lp-nav__dropdown-desc">{t('resAcademyDesc')}</div>
+                        </li>
+                      </ul>
                     </div>
-                    <div className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                      <div className="lp-nav__dropdown-title">{t('sandbox')}</div>
-                      <div className="lp-nav__dropdown-desc">{t('sandboxDesc')}</div>
-                    </div>
+
                   </div>
+
                 </div>
               )}
             </li>
@@ -2354,21 +2657,65 @@ export const LandingPage: React.FC = () => {
                 {t('connect')} <ChevronDown size={14} className="lp-nav__chevron" />
               </button>
               {activeDropdown === 'connect' && (
-                <div className="lp-nav__dropdown tactile-glass">
-                  <div className="lp-nav__dropdown-grid">
-                    <div className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                      <div className="lp-nav__dropdown-title">{t('community')}</div>
-                      <div className="lp-nav__dropdown-desc">{t('communityDesc')}</div>
+                <div className="lp-nav__dropdown lp-nav__dropdown--mega tactile-glass" style={{ width: '640px', left: '50%', transform: 'translateX(-45%)' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px 24px', padding: '4px' }}>
+                    {/* Column Headers */}
+                    <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--lp-accent-amber)', paddingBottom: '6px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                      {t('getStarted')}
                     </div>
-                    <div className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                      <div className="lp-nav__dropdown-title">{t('support')}</div>
-                      <div className="lp-nav__dropdown-desc">{t('supportDesc')}</div>
+                    <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--lp-accent-amber)', paddingBottom: '6px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                      {t('getSupport')}
+                    </div>
+                    <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--lp-accent-amber)', paddingBottom: '6px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                      {t('connectWithUs')}
+                    </div>
+
+                    {/* Column 1: Get started */}
+                    <div className="lp-nav__mega-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <ul className="lp-nav__mega-col-links">
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/register')}>
+                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('startATrial')}</div>
+                        </li>
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/book-demo')}>
+                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('contactSales')}</div>
+                        </li>
+                      </ul>
+                    </div>
+
+                    {/* Column 2: Get Support */}
+                    <div className="lp-nav__mega-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <ul className="lp-nav__mega-col-links">
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
+                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('helpCenter')}</div>
+                        </li>
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
+                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('contactSupport')}</div>
+                        </li>
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/book-demo')}>
+                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('liveOfficeHours')}</div>
+                        </li>
+                      </ul>
+                    </div>
+
+                    {/* Column 3: Connect with us */}
+                    <div className="lp-nav__mega-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <ul className="lp-nav__mega-col-links">
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
+                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('industryEvents')}</div>
+                        </li>
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
+                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('joinOurCommunity')}</div>
+                        </li>
+                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
+                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('newsletterSignUp')}</div>
+                        </li>
+                      </ul>
                     </div>
                   </div>
                 </div>
               )}
             </li>
-            <li><a href="#api" className="lp-nav__link">{t('pricing')}</a></li>
+            <li><button onClick={() => navigate('/pricing')} className="lp-nav__link" style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>{t('pricing')}</button></li>
           </ul>
 
           <div className="lp-nav__cta">
@@ -2427,13 +2774,18 @@ export const LandingPage: React.FC = () => {
               <div className="theme-toggle__thumb" />
             </button>
             {isAuthenticated ? (
-              <button id="nav-dashboard-btn" className="lp-btn lp-btn--pill-ghost lp-btn--sm" onClick={() => navigate('/dashboard')}>
-                {t('dashboard')} ({user?.fullName.split(' ')[0]}) <ArrowRight size={14} />
-              </button>
+              <>
+                <button id="nav-dashboard-btn" className="lp-btn lp-btn--pill-ghost lp-btn--sm" onClick={() => navigate('/dashboard')}>
+                  {t('dashboard')} ({user?.fullName.split(' ')[0]}) <ArrowRight size={14} />
+                </button>
+                <button id="nav-start-btn" className="lp-btn lp-btn--pill-solid lp-btn--sm" onClick={() => navigate('/book-demo')}>
+                  {t('bookDemo')}
+                </button>
+              </>
             ) : (
               <>
                 <button id="nav-login-btn" className="lp-btn lp-btn--pill-ghost lp-btn--sm" onClick={() => navigate('/login')}>{t('login')}</button>
-                <button id="nav-start-btn" className="lp-btn lp-btn--pill-solid lp-btn--sm" onClick={() => navigate('/dashboard')}>
+                <button id="nav-start-btn" className="lp-btn lp-btn--pill-solid lp-btn--sm" onClick={() => navigate('/book-demo')}>
                   {t('bookDemo')}
                 </button>
               </>
@@ -2453,14 +2805,8 @@ export const LandingPage: React.FC = () => {
         {mobileMenuOpen && (
           <div className="lp-mobile-drawer" role="dialog" aria-modal="true" aria-label="Mobile navigation menu">
             <div className="lp-mobile-drawer__header">
-              <button className="lp-nav__logo" onClick={() => { setMobileMenuOpen(false); navigate('/'); }} aria-label="DroneDeploy — trang chủ">
-                <div className="lp-nav__logo-mark">
-                  <svg viewBox="0 0 24 24" width="28" height="28" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="12" cy="12" r="10" fill="#FFFFFF" />
-                    <path d="M8 8L16 11L11 16L8 8Z" fill="#000000" />
-                  </svg>
-                </div>
-                <span className="lp-nav__brand">DroneDeploy</span>
+              <button className="lp-nav__logo" onClick={() => { setMobileMenuOpen(false); navigate('/'); }} aria-label="Web GIS Platform — Trang chủ" style={{ display: 'flex', alignItems: 'center', gap: '8px', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>
+                <img src={logoImg} alt="Web GIS Logo" style={{ height: '34px', width: 'auto', objectFit: 'contain' }} />
               </button>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <button 
@@ -2599,18 +2945,53 @@ export const LandingPage: React.FC = () => {
                   {t('resources')} <ChevronDown size={16} style={{ transform: activeDropdown === 'resources' ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
                 </button>
                 {activeDropdown === 'resources' && (
-                  <div className="lp-mobile-drawer__dropdown">
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('docs')}</div>
-                      <div className="lp-mobile-drawer__dropdown-desc">{t('docsDesc')}</div>
+                  <div className="lp-mobile-drawer__dropdown" style={{ maxHeight: '320px', overflowY: 'auto' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      {t('resCategoryLearn')}
                     </div>
                     <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('caseStudies')}</div>
-                      <div className="lp-mobile-drawer__dropdown-desc">{t('caseStudiesDesc')}</div>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('resInsiderTitle')}</div>
+                      <div className="lp-mobile-drawer__dropdown-desc">{t('resInsiderDesc')}</div>
                     </div>
                     <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('sandbox')}</div>
-                      <div className="lp-mobile-drawer__dropdown-desc">{t('sandboxDesc')}</div>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('resPlaybooksTitle')}</div>
+                      <div className="lp-mobile-drawer__dropdown-desc">{t('resPlaybooksDesc')}</div>
+                    </div>
+                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('resWebinarsTitle')}</div>
+                      <div className="lp-mobile-drawer__dropdown-desc">{t('resWebinarsDesc')}</div>
+                    </div>
+                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('resPodcastTitle')}</div>
+                      <div className="lp-mobile-drawer__dropdown-desc">{t('resPodcastDesc')}</div>
+                    </div>
+                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('resNewsletterTitle')}</div>
+                      <div className="lp-mobile-drawer__dropdown-desc">{t('resNewsletterDesc')}</div>
+                    </div>
+
+                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '14px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      {t('resCategoryEdu')}
+                    </div>
+                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('resBlogTitle')}</div>
+                      <div className="lp-mobile-drawer__dropdown-desc">{t('resBlogDesc')}</div>
+                    </div>
+                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('resStoriesTitle')}</div>
+                      <div className="lp-mobile-drawer__dropdown-desc">{t('resStoriesDesc')}</div>
+                    </div>
+                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('resPressTitle')}</div>
+                      <div className="lp-mobile-drawer__dropdown-desc">{t('resPressDesc')}</div>
+                    </div>
+                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('resMediaTitle')}</div>
+                      <div className="lp-mobile-drawer__dropdown-desc">{t('resMediaDesc')}</div>
+                    </div>
+                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('resAcademyTitle')}</div>
+                      <div className="lp-mobile-drawer__dropdown-desc">{t('resAcademyDesc')}</div>
                     </div>
                   </div>
                 )}
@@ -2623,22 +3004,56 @@ export const LandingPage: React.FC = () => {
                   {t('connect')} <ChevronDown size={16} style={{ transform: activeDropdown === 'connect' ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
                 </button>
                 {activeDropdown === 'connect' && (
-                  <div className="lp-mobile-drawer__dropdown">
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('community')}</div>
-                      <div className="lp-mobile-drawer__dropdown-desc">{t('communityDesc')}</div>
+                  <div className="lp-mobile-drawer__dropdown" style={{ maxHeight: '320px', overflowY: 'auto' }}>
+                    {/* Get started */}
+                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      {t('getStarted')}
+                    </div>
+                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/register'); }}>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('startATrial')}</div>
+                    </div>
+                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/book-demo'); }}>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('contactSales')}</div>
+                    </div>
+
+                    {/* Get Support */}
+                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '14px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      {t('getSupport')}
                     </div>
                     <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('support')}</div>
-                      <div className="lp-mobile-drawer__dropdown-desc">{t('supportDesc')}</div>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('helpCenter')}</div>
+                    </div>
+                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('contactSupport')}</div>
+                    </div>
+                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/book-demo'); }}>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('liveOfficeHours')}</div>
+                    </div>
+
+                    {/* Connect with us */}
+                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '14px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      {t('connectWithUs')}
+                    </div>
+                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('industryEvents')}</div>
+                    </div>
+                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('joinOurCommunity')}</div>
+                    </div>
+                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
+                      <div className="lp-mobile-drawer__dropdown-title">{t('newsletterSignUp')}</div>
                     </div>
                   </div>
                 )}
               </li>
               <li>
-                <a href="#api" className="lp-mobile-drawer__link-btn" onClick={() => setMobileMenuOpen(false)}>
+                <button 
+                  className="lp-mobile-drawer__link-btn" 
+                  onClick={() => { setMobileMenuOpen(false); navigate('/pricing'); }}
+                  style={{ background: 'none', border: 'none', width: '100%', textAlign: 'left', font: 'inherit', padding: '12px 24px', cursor: 'pointer' }}
+                >
                   {t('pricing')}
-                </a>
+                </button>
               </li>
             </ul>
 
@@ -2684,9 +3099,13 @@ export const LandingPage: React.FC = () => {
         )}
 
         {/* ── HERO ── */}
-        <section className="lp-hero" id="platform" aria-label="Hero — Web GIS 3D">
+        <section className={`lp-hero ${!isDarkMode ? 'lp-hero--light' : ''}`} id="platform" aria-label="Hero — Web GIS 3D">
           <div className="lp-hero__bg" />
           <div className="lp-hero__grid" />
+
+          <div className="lp-hero__globe">
+            <Globe3DHero isLightMode={!isDarkMode} />
+          </div>
 
           <div className={`lp-hero__content ${heroVisible ? 'lp-hero__content--visible' : ''}`}>
             <div className="lp-hero__badge">
@@ -2707,10 +3126,6 @@ export const LandingPage: React.FC = () => {
                 {t('learnMore')} <ChevronDown size={16} />
               </a>
             </div>
-          </div>
-
-          <div className="lp-hero__globe">
-            <GlobeCSSArt />
           </div>
 
           <div className="lp-hero__scroll-hint" aria-hidden="true">

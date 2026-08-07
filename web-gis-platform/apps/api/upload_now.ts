@@ -10,8 +10,8 @@ import { PrismaClient } from './src/generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import path from 'path';
 
-const PROJECT_ID = '181271b1-cda2-48bf-b1ad-abdd88f5899e';
-const OUTPUT_DIR = 'c:\\Users\\duong\\Web GIS\\Vuon_Uom_26062026_Processed';
+const PROJECT_ID = '0261fee6-221e-49c9-b23c-196746f37dd6';
+const OUTPUT_DIR = 'C:\\Users\\duong\\3dmaping\\QuyNhon_31072026_output';
 
 const adapter = new PrismaPg({
   connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@127.0.0.1:5432/webgis?schema=public'

@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { PrismaClient } from '../generated/prisma/client';
+import { PrismaClient } from '../generated/prisma';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { AuthRequest } from '../middlewares/authMiddleware';
 
@@ -11,7 +11,7 @@ const prisma = new PrismaClient({ adapter });
 // 1. Lấy danh sách thành viên dự án
 export const getProjectMembers = async (req: AuthRequest, res: Response) => {
   try {
-    const projectId = req.params.id;
+    const projectId = req.params.id as string;
 
     const members = await prisma.projectMember.findMany({
       where: { projectId },
@@ -38,7 +38,7 @@ export const getProjectMembers = async (req: AuthRequest, res: Response) => {
 // 2. Thêm / Mời thành viên vào dự án theo Email
 export const addProjectMember = async (req: AuthRequest, res: Response) => {
   try {
-    const projectId = req.params.id;
+    const projectId = req.params.id as string;
     const { email, role } = req.body; // role: 'OWNER' | 'EDITOR' | 'VIEWER'
 
     if (!email || !role) {
@@ -98,8 +98,8 @@ export const addProjectMember = async (req: AuthRequest, res: Response) => {
 // 3. Cập nhật cấp quyền của thành viên trong dự án
 export const updateProjectMemberRole = async (req: AuthRequest, res: Response) => {
   try {
-    const projectId = req.params.id;
-    const userId = req.params.userId;
+    const projectId = req.params.id as string;
+    const userId = req.params.userId as string;
     const { role } = req.body; // 'OWNER' | 'EDITOR' | 'VIEWER'
 
     if (!role) {
@@ -123,7 +123,7 @@ export const updateProjectMemberRole = async (req: AuthRequest, res: Response) =
 
     res.json({
       success: true,
-      message: `Đã cập nhật quyền của ${updatedMember.user.fullName} thành ${role}.`,
+      message: `Đã cập nhật quyền thành viên thành ${role}.`,
       member: updatedMember
     });
   } catch (err: any) {
@@ -135,8 +135,8 @@ export const updateProjectMemberRole = async (req: AuthRequest, res: Response) =
 // 4. Xóa thành viên khỏi dự án
 export const removeProjectMember = async (req: AuthRequest, res: Response) => {
   try {
-    const projectId = req.params.id;
-    const userId = req.params.userId;
+    const projectId = req.params.id as string;
+    const userId = req.params.userId as string;
 
     // Không cho phép tự xóa chính mình nếu là Owner duy nhất (xử lý phía FE hoặc check count)
     await prisma.projectMember.delete({

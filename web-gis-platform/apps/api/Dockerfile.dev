@@ -1,0 +1,36 @@
+# Dockerfile.dev — Development only
+# Node.js + Python 3.12 với hot-reload cho tsx
+FROM node:20-slim
+
+# Cài Python 3.12 và thư viện hệ thống GIS
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-dev \
+    gcc \
+    g++ \
+    cmake \
+    libproj-dev \
+    proj-bin \
+    libgeos-dev \
+    libjpeg-dev \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Cài Node.js dependencies trước (cache layer)
+COPY package*.json ./
+RUN npm install
+
+# Cài Python GIS packages — TÍCH HỢP SẴN, không cần cài lại
+COPY ../../tools/3d-optimizer/requirements.txt /tmp/requirements.txt
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt --break-system-packages
+
+ENV NODE_ENV=development
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 3000
+
+# Volume mount sẽ override thư mục /app với source code thực
+CMD ["npm", "run", "dev"]

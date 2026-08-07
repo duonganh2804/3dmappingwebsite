@@ -103,6 +103,11 @@ export const requireProjectRole = (requiredRole: 'OWNER' | 'EDITOR' | 'VIEWER') 
         return res.status(401).json({ success: false, message: 'Vui lòng đăng nhập để truy cập dự án này.' });
       }
 
+      // Cho phép sửa đổi/hiệu chỉnh nếu dự án chưa có chủ sở hữu (legacy hoặc global projects)
+      if (!project.createdById) {
+        return next();
+      }
+
       // Nếu là người tạo dự án (createdBy) -> Tự động có quyền OWNER
       if (project.createdById === req.user.id) {
         return next();

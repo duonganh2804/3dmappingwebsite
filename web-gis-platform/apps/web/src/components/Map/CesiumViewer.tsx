@@ -4,6 +4,7 @@ import 'cesium/Build/Cesium/Widgets/widgets.css';
 import { PotreeSidebar } from './PotreeSidebar';
 import { OptimizerPanel } from './OptimizerPanel';
 import { fetchProjectById, updateProject } from '../../services/api';
+import { useAuthStore } from '../../store/useAuthStore';
 
 export type ToolMode = 'none' | 'distance' | 'height' | 'area';
 
@@ -30,6 +31,39 @@ function calculatePolygonArea(positions: Cesium.Cartesian3[]): number {
   return Math.abs(area) / 2;
 }
 
+// Component hỗ trợ nhập số mượt mà cho Calibration Panel (cho phép gõ -, 0., xóa trắng mà không bị reset về 0)
+const CalibNumberInput: React.FC<{
+  value: number;
+  onChange: (val: number) => void;
+  step?: string;
+  className?: string;
+}> = ({ value, onChange, step = "any", className = "" }) => {
+  const [text, setText] = useState<string>(value !== undefined && value !== null ? value.toString() : '0');
+
+  useEffect(() => {
+    setText(value !== undefined && value !== null ? value.toString() : '0');
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const valStr = e.target.value;
+    setText(valStr);
+    const parsed = parseFloat(valStr);
+    if (!isNaN(parsed)) {
+      onChange(parsed);
+    }
+  };
+
+  return (
+    <input
+      type="number"
+      step={step}
+      value={text}
+      onChange={handleChange}
+      className={className}
+    />
+  );
+};
+
 // Hàm tính tâm điểm (Centroid) đa giác để đặt nhãn kết quả
 function calculateCentroid(positions: Cesium.Cartesian3[]): Cesium.Cartesian3 {
   const sum = new Cesium.Cartesian3();
@@ -39,7 +73,15 @@ function calculateCentroid(positions: Cesium.Cartesian3[]): Cesium.Cartesian3 {
   return Cesium.Cartesian3.multiplyByScalar(sum, 1 / positions.length, new Cesium.Cartesian3());
 }
 
-export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) => {
+export const CesiumViewer: React.FC<{ 
+  projectId?: string;
+  isSidebarOpen?: boolean;
+  onToggleSidebar?: (open: boolean) => void;
+}> = ({ 
+  projectId,
+  isSidebarOpen = true,
+  onToggleSidebar
+}) => {
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
 
   const cesiumContainer = useRef<HTMLDivElement>(null);
@@ -48,8 +90,12 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
 
   const modelRef = useRef<Cesium.Model | null>(null);
   const domLayerRef = useRef<Cesium.ImageryLayer | null>(null);
+  const domFetchCounterRef = useRef(0);
   const pointCloudRef = useRef<Cesium.Cesium3DTileset | null>(null);
   const measureDataSourceRef = useRef<Cesium.CustomDataSource | null>(null);
+
+  const { user } = useAuthStore();
+  const isAdmin = user?.role === 'SUPERADMIN';
 
   const [project, setProject] = useState<any>(null);
   const [toolMode, setToolMode] = useState<ToolMode>('none');
@@ -86,15 +132,20 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
     domLon: 0,
     domLat: 0,
     domScale: 1.0,
+    domHeading: 0,
     pcLon: 0,
     pcLat: 0,
-    pcHeight: 0
+    pcHeight: 0,
+    pcHeading: 0
   });
   const [activeTarget, setActiveTarget] = useState<'model' | 'dom' | 'pointcloud' | 'none'>('none');
   const [stepSize, setStepSize] = useState(1.0); // bước nhảy mét mặc định là 1m thay vì 0.1m
   const originalBoundsRef = useRef({ west: 0, east: 0, south: 0, north: 0 });
   const offsetsRef = useRef(offsets);
   const initialPcTranslationRef = useRef<Cesium.Cartesian3 | null>(null);
+  const loadedPointCloudTilesetsRef = useRef<Cesium.Cesium3DTileset[]>([]);
+  const domImageRef = useRef<HTMLImageElement | null>(null);
+  const domImageSrcRef = useRef<string | null>(null);
 
   useEffect(() => {
     offsetsRef.current = offsets;
@@ -135,7 +186,8 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
           domScale: 1.0,
           pcLon: 0,
           pcLat: 0,
-          pcHeight: 0
+          pcHeight: 0,
+          pcHeading: 0
         });
       }
     }
@@ -144,23 +196,11 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
   // Lưu trữ bounds cơ sở của dự án để tính offset
   useEffect(() => {
     if (!project) return;
-    const baseLon = project.centerLon || 106.8099;
-    const baseLat = project.centerLat || 10.8404;
-    let lon = baseLon;
-    let lat = baseLat;
-    if (lon < 90 && lat > 90) {
-      lon = baseLat;
-      lat = baseLon;
-    }
-
-    const deltaLatitude = 142.222 / 111111;
-    const deltaLongitude = 143.532 / (111111 * Math.cos(lat * Math.PI / 180));
-
     originalBoundsRef.current = {
-      west: lon - deltaLongitude / 2,
-      east: lon + deltaLongitude / 2,
-      south: lat - deltaLatitude / 2,
-      north: lat + deltaLatitude / 2
+      west: 0,
+      east: 0,
+      south: 0,
+      north: 0
     };
   }, [project]);
 
@@ -190,14 +230,14 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
     );
   }, [offsets.modelLon, offsets.modelLat, offsets.modelHeight, offsets.modelHeading, project]);
 
-  // Cập nhật thời gian thực ảnh DOM khi tinh chỉnh (offset/scale)
+  // Cập nhật thời gian thực ảnh DOM khi tinh chỉnh (offset/scale) với Debounce 250ms (DUY NHẤT)
   useEffect(() => {
     const viewer = viewerRef.current;
-    if (!viewer || viewer.isDestroyed() || !project) return;
+    if (!viewer || viewer.isDestroyed() || !project || !project.domUrl) return;
 
     let isCurrent = true;
 
-    const updateDomRealtime = async () => {
+    const timer = setTimeout(async () => {
       const baseLon = project.centerLon || 106.8099;
       const baseLat = project.centerLat || 10.8404;
       let lon = baseLon;
@@ -207,6 +247,41 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
         lat = baseLon;
       }
 
+      // Đọc metadata.json của DOM nếu chưa có bounds gốc
+      if (originalBoundsRef.current.west === 0) {
+        if (project.metadataUrl) {
+          try {
+            const res = await fetch(project.metadataUrl);
+            const meta = await res.json();
+            if (meta.west && meta.east && meta.south && meta.north) {
+              originalBoundsRef.current = {
+                west: meta.west,
+                east: meta.east,
+                south: meta.south,
+                north: meta.north
+              };
+              console.log("Đã đọc bounding box DOM từ metadata.json:", meta);
+            }
+          } catch (e) {
+            console.warn("Không thể đọc metadata.json DOM, dùng khoảng vị trí mặc định.");
+          }
+        }
+
+        // Nếu vẫn bằng 0 (fetch lỗi hoặc không có metadataUrl), tính bounds mặc định
+        if (originalBoundsRef.current.west === 0) {
+          const deltaLatitude = 142.222 / 111111;
+          const deltaLongitude = 143.532 / (111111 * Math.cos(lat * Math.PI / 180));
+          originalBoundsRef.current = {
+            west: lon - deltaLongitude / 2,
+            east: lon + deltaLongitude / 2,
+            south: lat - deltaLatitude / 2,
+            north: lat + deltaLatitude / 2
+          };
+          console.log("Đã tính bounding box DOM mặc định:", originalBoundsRef.current);
+        }
+      }
+
+      // Lấy bounds gốc (nếu có)
       let west = originalBoundsRef.current.west;
       let east = originalBoundsRef.current.east;
       let south = originalBoundsRef.current.south;
@@ -224,50 +299,151 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
       // Áp dụng scale
       const centerLon = (west + east) / 2;
       const centerLat = (south + north) / 2;
-      const halfWidth = ((east - west) / 2) * offsets.domScale;
-      const halfHeight = ((north - south) / 2) * offsets.domScale;
+      const halfWidth = ((east - west) / 2) * (offsets.domScale || 1.0);
+      const halfHeight = ((north - south) / 2) * (offsets.domScale || 1.0);
 
-      const finalWest = centerLon - halfWidth + offsets.domLon;
-      const finalEast = centerLon + halfWidth + offsets.domLon;
-      const finalSouth = centerLat - halfHeight + offsets.domLat;
-      const finalNorth = centerLat + halfHeight + offsets.domLat;
-
-      const domRectangle = Cesium.Rectangle.fromDegrees(finalWest, finalSouth, finalEast, finalNorth);
-      const domUrl = project.domUrl || '/dom.png';
+      const domUrl = project.domUrl;
 
       try {
-        const provider = await Cesium.SingleTileImageryProvider.fromUrl(domUrl, {
-          rectangle: domRectangle,
+        // Tải hình ảnh dưới dạng Blob để giải quyết CORS và tránh làm bẩn (tainting) canvas
+        let img = domImageRef.current;
+        if (!img || domImageSrcRef.current !== domUrl) {
+          const res = await fetch(domUrl + "?cb=" + Date.now(), { mode: 'cors' });
+          if (!res.ok) throw new Error("Fetch DOM image failed");
+          const blob = await res.blob();
+          const blobUrl = URL.createObjectURL(blob);
+
+          img = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => {
+              URL.revokeObjectURL(blobUrl);
+              resolve(image);
+            };
+            image.onerror = (e) => {
+              URL.revokeObjectURL(blobUrl);
+              reject(e);
+            };
+            image.src = blobUrl;
+          });
+          if (!isCurrent) return;
+          domImageRef.current = img;
+          domImageSrcRef.current = domUrl;
+        }
+
+        // Giới hạn độ phân giải của canvas vẽ xoay tối đa là 2048 để tránh crash bộ nhớ GPU của trình duyệt với ảnh trực giao siêu lớn
+        const maxCanvasSize = 2048;
+        let W = img.width;
+        let H = img.height;
+        if (W > maxCanvasSize || H > maxCanvasSize) {
+          const scale = maxCanvasSize / Math.max(W, H);
+          W = Math.round(W * scale);
+          H = Math.round(H * scale);
+        }
+
+        const D = Math.ceil(Math.sqrt(W * W + H * H));
+
+        // Tạo canvas hình vuông có kích thước đường chéo D để vẽ xoay không bị cắt góc
+        const canvas = document.createElement('canvas');
+        canvas.width = D;
+        canvas.height = D;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error("Canvas context is null");
+
+        // Xoay và vẽ ảnh vào tâm canvas
+        ctx.translate(D / 2, D / 2);
+        ctx.rotate(Cesium.Math.toRadians(offsets.domHeading || 0));
+        ctx.drawImage(img, -W / 2, -H / 2, W, H);
+
+        // Mở rộng bounds tương ứng với đường chéo để đảm bảo scale hiển thị chính xác
+        const newHalfWidth = halfWidth * (D / W);
+        const newHalfHeight = halfHeight * (D / H);
+
+        const finalWest = centerLon - newHalfWidth + (offsets.domLon || 0);
+        const finalEast = centerLon + newHalfWidth + (offsets.domLon || 0);
+        const finalSouth = centerLat - newHalfHeight + (offsets.domLat || 0);
+        const finalNorth = centerLat + newHalfHeight + (offsets.domLat || 0);
+
+        if (
+          isNaN(finalWest) || isNaN(finalEast) || isNaN(finalSouth) || isNaN(finalNorth) ||
+          finalWest >= finalEast || finalSouth >= finalNorth ||
+          finalWest < -180 || finalEast > 180 || finalSouth < -90 || finalNorth > 90
+        ) {
+          throw new Error("Invalid bounds coordinates");
+        }
+
+        const newDomRectangle = Cesium.Rectangle.fromDegrees(finalWest, finalSouth, finalEast, finalNorth);
+
+        const provider = new Cesium.SingleTileImageryProvider({
+          url: canvas.toDataURL(),
+          rectangle: newDomRectangle,
         });
 
-        // Chỉ add và remove khi effect này là effect mới nhất (tránh chồng chéo bất đồng bộ)
-        if (!isCurrent) return;
+        if (!isCurrent || viewer.isDestroyed()) return;
 
-        if (domLayerRef.current) {
-          viewer.imageryLayers.remove(domLayerRef.current);
+        const oldLayer = domLayerRef.current;
+        const newLayer = viewer.imageryLayers.addImageryProvider(provider);
+        newLayer.show = showDom;
+        newLayer.colorToAlpha = Cesium.Color.BLACK;
+        newLayer.colorToAlphaThreshold = 0.15;
+        
+        viewer.imageryLayers.raiseToTop(newLayer);
+        domLayerRef.current = newLayer;
+
+        if (oldLayer && !viewer.isDestroyed() && !oldLayer.isDestroyed() && viewer.imageryLayers.contains(oldLayer)) {
+          viewer.imageryLayers.remove(oldLayer, true);
+        }
+      } catch (canvasErr) {
+        console.warn("⚠️ Không thể tạo ảnh DOM xoay bằng canvas. Chuyển sang nạp ảnh gốc không xoay làm dự phòng:", canvasErr);
+        
+        const finalWest = centerLon - halfWidth + (offsets.domLon || 0);
+        const finalEast = centerLon + halfWidth + (offsets.domLon || 0);
+        const finalSouth = centerLat - halfHeight + (offsets.domLat || 0);
+        const finalNorth = centerLat + halfHeight + (offsets.domLat || 0);
+
+        if (
+          isNaN(finalWest) || isNaN(finalEast) || isNaN(finalSouth) || isNaN(finalNorth) ||
+          finalWest >= finalEast || finalSouth >= finalNorth ||
+          finalWest < -180 || finalEast > 180 || finalSouth < -90 || finalNorth > 90
+        ) {
+          return;
         }
 
-        const domLayer = viewer.imageryLayers.addImageryProvider(provider);
-        domLayerRef.current = domLayer;
-        domLayer.show = showDom;
-      } catch (err) {
-        if (isCurrent) {
-          console.error("Lỗi khi cập nhật ảnh DOM realtime:", err);
+        const domRectangle = Cesium.Rectangle.fromDegrees(finalWest, finalSouth, finalEast, finalNorth);
+
+        try {
+          const provider = await Cesium.SingleTileImageryProvider.fromUrl(domUrl + "?cb=" + Date.now(), {
+            rectangle: domRectangle,
+          });
+
+          if (!isCurrent || viewer.isDestroyed()) return;
+
+          const oldLayer = domLayerRef.current;
+          const newLayer = viewer.imageryLayers.addImageryProvider(provider);
+          newLayer.show = showDom;
+          newLayer.colorToAlpha = Cesium.Color.BLACK;
+          newLayer.colorToAlphaThreshold = 0.15;
+          
+          viewer.imageryLayers.raiseToTop(newLayer);
+          domLayerRef.current = newLayer;
+
+          if (oldLayer && !viewer.isDestroyed() && !oldLayer.isDestroyed() && viewer.imageryLayers.contains(oldLayer)) {
+            viewer.imageryLayers.remove(oldLayer, true);
+          }
+        } catch (err) {
+          console.error("Lỗi nghiêm trọng khi nạp ảnh DOM dự phòng:", err);
         }
       }
-    };
-
-    updateDomRealtime();
+    }, 250);
 
     return () => {
       isCurrent = false;
+      clearTimeout(timer);
     };
-  }, [offsets.domLon, offsets.domLat, offsets.domScale, showDom, project]);
+  }, [offsets.domLon, offsets.domLat, offsets.domScale, offsets.domHeading, showDom, project]);
 
   // Cập nhật vị trí Point Cloud theo thời gian thực khi Admin hiệu chỉnh
   useEffect(() => {
-    if (!pointCloudRef.current || !project || !initialPcTranslationRef.current) return;
-    const tileset = pointCloudRef.current;
+    if (!pointCloudRef.current || pointCloudRef.current.isDestroyed() || !project || !initialPcTranslationRef.current) return;
 
     const baseLon = project.centerLon || 106.8099;
     const baseLat = project.centerLat || 10.8404;
@@ -275,6 +451,7 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
     const pcLon = offsets.pcLon || 0;
     const pcLat = offsets.pcLat || 0;
     const pcHeight = offsets.pcHeight || 0;
+    const pcHeading = offsets.pcHeading || 0;
 
     const basePos = Cesium.Cartesian3.fromDegrees(baseLon, baseLat, 0);
     const offsetPos = Cesium.Cartesian3.fromDegrees(baseLon + pcLon, baseLat + pcLat, pcHeight);
@@ -286,27 +463,54 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
       new Cesium.Cartesian3()
     );
 
-    tileset.modelMatrix = Cesium.Matrix4.fromTranslation(totalTranslation);
-  }, [offsets.pcLon, offsets.pcLat, offsets.pcHeight, project]);
+    // Áp dụng rotation heading cho point cloud realtime
+    const headingRad = Cesium.Math.toRadians(pcHeading);
+    const hpr = new Cesium.HeadingPitchRoll(headingRad, 0, 0);
+    const rotationQuat = Cesium.Quaternion.fromHeadingPitchRoll(hpr);
+    
+    const modelMatrix = Cesium.Matrix4.fromTranslationQuaternionRotationScale(
+      totalTranslation,
+      rotationQuat,
+      new Cesium.Cartesian3(1, 1, 1)
+    );
 
-  // Cập nhật Mật Độ Point Cloud (Screen Space Error & Memory Limit)
+    // Áp dụng đồng bộ cho tất cả các tilesets mây điểm đang nạp
+    loadedPointCloudTilesetsRef.current.forEach(ts => {
+      if (ts && !ts.isDestroyed()) {
+        ts.modelMatrix = modelMatrix.clone();
+      }
+    });
+  }, [offsets.pcLon, offsets.pcLat, offsets.pcHeight, offsets.pcHeading, project]);
+
+  // Cập nhật Mật Độ Point Cloud (Screen Space Error & Memory Limit) và Tối ưu hóa LOD, Foveated SSE
   useEffect(() => {
-    if (!pointCloudRef.current) return;
-    const tileset = pointCloudRef.current;
-    (tileset as any).skipLevelOfDetail = true;
-    (tileset as any).cullRequestsByFrustum = true;
-    (tileset as any).preferLeaves = true;
+    // Cập nhật đồng bộ cho tất cả các tilesets mây điểm đang nạp
+    loadedPointCloudTilesetsRef.current.forEach(tileset => {
+      if (!tileset || tileset.isDestroyed()) return;
 
+      // Tối ưu hóa hiệu năng và tốc độ load theo dạng LOD thực tế (game-like LOD)
+      (tileset as any).skipLevelOfDetail = false; // Tải lũy tiến: hiển thị nhanh điểm thô trước, nét dần khi zoom gần
+      (tileset as any).cullRequestsByFrustum = true; // Chỉ load các khối nằm trong tầm nhìn camera, hủy load khối ngoài tầm nhìn
+      (tileset as any).preferLeaves = false; // Tránh nhảy cóc trực tiếp đến các khối chi tiết cao gây nghẽn mạng
+      
+      // Bật foveated rendering để tải cực nhanh: tập trung siêu nét ở giữa màn hình (focus area)
+      (tileset as any).foveatedScreenSpaceError = true;
+      (tileset as any).foveatedConeSize = 0.3; // 30% diện tích tâm màn hình
+      (tileset as any).foveatedTimeDelay = 0.05;
+
+      if (pointDensity === 'max') {
+        tileset.maximumScreenSpaceError = 4.0; // Tăng SSE từ 1.0 lên 4.0 để tránh nghẽn tải hàng loạt, vẫn cực kỳ nét
+        (tileset as any).maximumMemoryUsage = 2048; // 2GB GPU Cache tối ưu
+      } else if (pointDensity === 'high') {
+        tileset.maximumScreenSpaceError = 12.0;
+        (tileset as any).maximumMemoryUsage = 1024;
+      } else {
+        tileset.maximumScreenSpaceError = 24.0;
+        (tileset as any).maximumMemoryUsage = 512;
+      }
+    });
     if (pointDensity === 'max') {
-      tileset.maximumScreenSpaceError = 1.0; // Render cực đại 238 triệu điểm cực kỳ mượt
-      (tileset as any).maximumMemoryUsage = 2048; // 2GB GPU Cache tối ưu
-      console.log("🔥 Đã bật chế độ Mật độ Point Cloud CỰC ĐẠI (238Tr điểm, SSE = 1.0)");
-    } else if (pointDensity === 'high') {
-      tileset.maximumScreenSpaceError = 4;
-      (tileset as any).maximumMemoryUsage = 1024;
-    } else {
-      tileset.maximumScreenSpaceError = 16;
-      (tileset as any).maximumMemoryUsage = 512;
+      console.log("🔥 Đã bật chế độ Mật độ Point Cloud CỰC ĐẠI với Foveated LOD (SSE = 4.0)");
     }
   }, [pointDensity]);
 
@@ -396,11 +600,19 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
             break;
           case 'q':
             e.preventDefault();
-            setOffsets(prev => ({ ...prev, domScale: Math.max(0.1, prev.domScale - 0.005) }));
+            setOffsets(prev => ({ ...prev, domHeading: ((prev.domHeading || 0) + 1) % 360 }));
             break;
           case 'e':
             e.preventDefault();
+            setOffsets(prev => ({ ...prev, domHeading: ((prev.domHeading || 0) - 1 + 360) % 360 }));
+            break;
+          case 'u':
+            e.preventDefault();
             setOffsets(prev => ({ ...prev, domScale: prev.domScale + 0.005 }));
+            break;
+          case 'o':
+            e.preventDefault();
+            setOffsets(prev => ({ ...prev, domScale: Math.max(0.1, prev.domScale - 0.005) }));
             break;
           case '+':
           case '=':
@@ -443,6 +655,14 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
             e.preventDefault();
             setOffsets(prev => ({ ...prev, pcHeight: (prev.pcHeight || 0) - step }));
             break;
+          case 'q':
+            e.preventDefault();
+            setOffsets(prev => ({ ...prev, pcHeading: ((prev.pcHeading || 0) + 1) % 360 }));
+            break;
+          case 'e':
+            e.preventDefault();
+            setOffsets(prev => ({ ...prev, pcHeading: ((prev.pcHeading || 0) - 1 + 360) % 360 }));
+            break;
           case '+':
           case '=':
             e.preventDefault();
@@ -481,7 +701,7 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
     });
 
     viewerRef.current = viewer;
-    viewer.scene.pickTranslucentDepth = true;
+    viewer.scene.pickTranslucentDepth = false; // Tắt pickTranslucentDepth để tránh crash WebGL khi hủy viewer/unmount
     viewer.scene.globe.depthTestAgainstTerrain = true;
     viewer.scene.globe.maximumScreenSpaceError = isMobile ? 4.0 : 2.0; // Giảm chất lượng địa hình trên mobile để mượt hơn
 
@@ -497,7 +717,19 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
 
     return () => {
       if (viewer && !viewer.isDestroyed()) {
-        viewer.destroy();
+        // Hủy viewer bất đồng bộ trong event loop tiếp theo để tránh xung đột với luồng vẽ/picking hiện tại của Cesium
+        setTimeout(() => {
+          if (!viewer.isDestroyed()) {
+            try {
+              viewer.dataSources.removeAll(true);
+              viewer.entities.removeAll();
+              viewer.imageryLayers.removeAll(true);
+              viewer.destroy();
+            } catch (e) {
+              console.error("Lỗi khi hủy Cesium Viewer:", e);
+            }
+          }
+        }, 0);
       }
       viewerRef.current = null;
     };
@@ -512,19 +744,21 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
 
     // 1. Dọn dẹp sạch sẽ các lớp dữ liệu của dự án cũ trước khi nạp dự án mới
     try {
-      if (modelRef.current) {
+      if (modelRef.current && !viewer.isDestroyed() && !modelRef.current.isDestroyed()) {
         viewer.scene.primitives.remove(modelRef.current);
         modelRef.current = null;
       }
-      if (pointCloudRef.current) {
+      if (pointCloudRef.current && !viewer.isDestroyed() && !pointCloudRef.current.isDestroyed()) {
         viewer.scene.primitives.remove(pointCloudRef.current);
         pointCloudRef.current = null;
       }
-      if (domLayerRef.current) {
-        viewer.imageryLayers.remove(domLayerRef.current, false);
+      if (domLayerRef.current && !viewer.isDestroyed() && !domLayerRef.current.isDestroyed()) {
+        viewer.imageryLayers.remove(domLayerRef.current, true);
         domLayerRef.current = null;
       }
-      viewer.scene.primitives.removeAll();
+      if (!viewer.isDestroyed()) {
+        viewer.scene.primitives.removeAll();
+      }
       initialPcTranslationRef.current = null;
     } catch (cleanupErr) {
       console.warn("Lỗi dọn dẹp dự án cũ:", cleanupErr);
@@ -557,7 +791,7 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
           });
           return;
         }
-        
+
         let initLon = 0;
         let initLat = 0;
         let initHeight = 0.3;
@@ -582,7 +816,7 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
               initLat = parsed.modelLat ?? 0;
               initHeight = parsed.modelHeight ?? 0.3;
               initHeading = parsed.modelHeading ?? 0;
-            } catch (e) {}
+            } catch (e) { }
           }
         }
 
@@ -628,86 +862,6 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
       }
     };
 
-    // 2. Nạp ảnh phẳng hàng không DOM
-    const loadDomLayer = async () => {
-      let domScale = 1.0;
-      let domLon = 0;
-      let domLat = 0;
-
-      if (project.calibration) {
-        try {
-          const parsed = JSON.parse(project.calibration);
-          domScale = parsed.domScale ?? 1.0;
-          domLon = parsed.domLon ?? 0;
-          domLat = parsed.domLat ?? 0;
-        } catch (e) {
-          console.error("Lỗi parse calibration trong loadDomLayer:", e);
-        }
-      } else {
-        const saved = localStorage.getItem(`calibration_${project.id}`);
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            domScale = parsed.domScale ?? 1.0;
-            domLon = parsed.domLon ?? 0;
-            domLat = parsed.domLat ?? 0;
-          } catch (e) {}
-        }
-      }
-
-      const deltaLatitude = 142.222 / 111111;
-      const deltaLongitude = 143.532 / (111111 * Math.cos(latitude * Math.PI / 180));
-
-      let west = longitude - deltaLongitude / 2;
-      let east = longitude + deltaLongitude / 2;
-      let south = latitude - deltaLatitude / 2;
-      let north = latitude + deltaLatitude / 2;
-
-      if (project.metadataUrl) {
-        try {
-          const res = await fetch(project.metadataUrl);
-          const meta = await res.json();
-          west = meta.west || west;
-          east = meta.east || east;
-          south = meta.south || south;
-          north = meta.north || north;
-          originalBoundsRef.current = { west, east, south, north };
-          console.log("Đã đọc bounding box DOM từ metadata.json:", meta);
-        } catch (e) {
-          console.error("Không thể tải metadata DOM, dùng mặc định:", e);
-        }
-      }
-
-      const centerLon = (west + east) / 2;
-      const centerLat = (south + north) / 2;
-      const halfWidth = ((east - west) / 2) * domScale;
-      const halfHeight = ((north - south) / 2) * domScale;
-
-      const finalWest = centerLon - halfWidth + domLon;
-      const finalEast = centerLon + halfWidth + domLon;
-      const finalSouth = centerLat - halfHeight + domLat;
-      const finalNorth = centerLat + halfHeight + domLat;
-
-      const domRectangle = Cesium.Rectangle.fromDegrees(finalWest, finalSouth, finalEast, finalNorth);
-      const domUrl = project.domUrl;
-      if (!domUrl) {
-        console.log("Dự án này không có ảnh phẳng DOM.");
-        return;
-      }
-      console.log("Nạp ảnh DOM từ:", domUrl);
-
-      Cesium.SingleTileImageryProvider.fromUrl(domUrl, {
-        rectangle: domRectangle,
-      }).then((provider) => {
-        if (!isCurrent || viewer.isDestroyed()) return;
-        const domLayer = viewer.imageryLayers.addImageryProvider(provider);
-        domLayerRef.current = domLayer;
-        domLayer.show = showDom;
-      }).catch((error) => {
-        console.error("Lỗi khi nạp lớp ảnh DOM:", error);
-      });
-    };
-
     // Hàm hỗ trợ: Áp dụng calibration offset cho một tileset
     const applyPcCalibration = (tileset: Cesium.Cesium3DTileset, targetPos: Cesium.Cartesian3) => {
       if (!tileset.boundingSphere) return;
@@ -715,14 +869,15 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
       const initialTranslation = Cesium.Cartesian3.subtract(targetPos, bsCenter, new Cesium.Cartesian3());
       initialPcTranslationRef.current = initialTranslation;
 
-      let pcLon = 0, pcLat = 0, pcHeight = 0;
+      let pcLon = 0, pcLat = 0, pcHeight = 0, pcHeading = 0;
       if (project.calibration) {
         try {
           const parsed = JSON.parse(project.calibration);
           pcLon = parsed.pcLon ?? 0;
           pcLat = parsed.pcLat ?? 0;
           pcHeight = parsed.pcHeight ?? 0;
-        } catch (e) {}
+          pcHeading = parsed.pcHeading ?? 0;
+        } catch (e) { }
       } else {
         const saved = localStorage.getItem(`calibration_${project.id}`);
         if (saved) {
@@ -731,7 +886,8 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
             pcLon = parsed.pcLon ?? 0;
             pcLat = parsed.pcLat ?? 0;
             pcHeight = parsed.pcHeight ?? 0;
-          } catch (e) {}
+            pcHeading = parsed.pcHeading ?? 0;
+          } catch (e) { }
         }
       }
 
@@ -739,7 +895,16 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
       const offsetPos = Cesium.Cartesian3.fromDegrees(longitude + pcLon, latitude + pcLat, pcHeight);
       const deltaVector = Cesium.Cartesian3.subtract(offsetPos, basePos, new Cesium.Cartesian3());
       const totalTranslation = Cesium.Cartesian3.add(initialTranslation, deltaVector, new Cesium.Cartesian3());
-      tileset.modelMatrix = Cesium.Matrix4.fromTranslation(totalTranslation);
+
+      // Áp dụng rotation heading cho point cloud
+      const headingRad = Cesium.Math.toRadians(pcHeading);
+      const hpr = new Cesium.HeadingPitchRoll(headingRad, 0, 0);
+      const rotationQuat = Cesium.Quaternion.fromHeadingPitchRoll(hpr);
+      tileset.modelMatrix = Cesium.Matrix4.fromTranslationQuaternionRotationScale(
+        totalTranslation,
+        rotationQuat,
+        new Cesium.Cartesian3(1, 1, 1)
+      );
       console.log("📍 Đã định vị mây điểm chuẩn vị trí ban đầu!");
     };
 
@@ -756,12 +921,13 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
       try {
         // Trường hợp 1: URL trỏ tới file COPC đơn (.copc.laz) hoặc tileset.json 3D Tiles
         if ((pcId.startsWith('http') || pcId.startsWith('/')) &&
-            (pcId.endsWith('tileset.json') || pcId.endsWith('.laz') || pcId.endsWith('.copc.laz'))) {
+          (pcId.endsWith('tileset.json') || pcId.endsWith('.laz') || pcId.endsWith('.copc.laz'))) {
           console.log("Nạp Point Cloud COPC/3DTiles từ URL:", pcId);
           const tileset = await Cesium.Cesium3DTileset.fromUrl(pcId);
           if (!isCurrent || viewer.isDestroyed()) return;
           viewer.scene.primitives.add(tileset);
           pointCloudRef.current = tileset;
+          loadedPointCloudTilesetsRef.current = [tileset];
           tileset.show = showPointCloud;
           (tileset as any).skipLevelOfDetail = false;
           (tileset as any).cullRequestsByFrustum = true;
@@ -785,6 +951,7 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
               console.log(`Nạp ${tilesToLoad.length}/${indexData.tiles.length} COPC tiles từ R2...`);
 
               let firstTileset: Cesium.Cesium3DTileset | null = null;
+              loadedPointCloudTilesetsRef.current = [];
               for (const tileName of tilesToLoad) {
                 try {
                   const tileUrl = baseUrl + tileName;
@@ -797,6 +964,8 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
                   (ts as any).preferLeaves = false;
                   ts.maximumScreenSpaceError = isMobile ? 64 : 32;
                   (ts as any).maximumMemoryUsage = isMobile ? 128 : 512;
+                  
+                  loadedPointCloudTilesetsRef.current.push(ts);
                   if (!firstTileset) {
                     firstTileset = ts;
                     pointCloudRef.current = ts;
@@ -825,6 +994,7 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
           if (!isCurrent || viewer.isDestroyed()) return;
           viewer.scene.primitives.add(tileset);
           pointCloudRef.current = tileset;
+          loadedPointCloudTilesetsRef.current = [tileset];
           tileset.show = showPointCloud;
           (tileset as any).skipLevelOfDetail = false;
           (tileset as any).cullRequestsByFrustum = true;
@@ -842,28 +1012,48 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
     };
 
     loadOfflineModel();
-    loadDomLayer();
     loadPointCloud();
 
     return () => {
       isCurrent = false;
+      
+      // Nếu component đang unmount (viewer chuẩn bị hủy), ta không cần remove từng phần tử
+      // vì viewer.destroy() sẽ tự dọn dẹp WebGL ở tick tiếp theo.
+      // Việc remove đồng bộ trong luồng click unmount là nguyên nhân gây crash texture/framebuffer.
+      const isUnmounting = !viewerRef.current || viewerRef.current.isDestroyed();
+      if (isUnmounting) {
+        modelRef.current = null;
+        pointCloudRef.current = null;
+        loadedPointCloudTilesetsRef.current = [];
+        domLayerRef.current = null;
+        return;
+      }
+
       try {
-        if (modelRef.current) {
+        if (modelRef.current && !viewer.isDestroyed() && !modelRef.current.isDestroyed()) {
           viewer.scene.primitives.remove(modelRef.current);
           modelRef.current = null;
         }
-        if (pointCloudRef.current) {
-          viewer.scene.primitives.remove(pointCloudRef.current);
-          pointCloudRef.current = null;
-        }
-        if (domLayerRef.current) {
-          viewer.imageryLayers.remove(domLayerRef.current, false);
+        
+        // Dọn dẹp tất cả các tilesets mây điểm đang nạp
+        loadedPointCloudTilesetsRef.current.forEach(ts => {
+          if (ts && !viewer.isDestroyed() && !ts.isDestroyed()) {
+            viewer.scene.primitives.remove(ts);
+          }
+        });
+        loadedPointCloudTilesetsRef.current = [];
+        pointCloudRef.current = null;
+
+        if (domLayerRef.current && !viewer.isDestroyed() && !domLayerRef.current.isDestroyed()) {
+          viewer.imageryLayers.remove(domLayerRef.current, true);
           domLayerRef.current = null;
         }
-        viewer.scene.primitives.removeAll();
-      } catch (e) {}
+        if (!viewer.isDestroyed()) {
+          viewer.scene.primitives.removeAll();
+        }
+      } catch (e) { }
     };
-  }, [project?.id]);
+  }, [project]);
 
   // Xử lý bật tắt hiển thị mô hình 3D
   useEffect(() => {
@@ -881,18 +1071,23 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
 
   // Xử lý bật tắt hiển thị Đám mây điểm Point Cloud
   useEffect(() => {
-    if (pointCloudRef.current) {
-      pointCloudRef.current.show = showPointCloud;
-    }
+    loadedPointCloudTilesetsRef.current.forEach(ts => {
+      if (ts && !ts.isDestroyed()) {
+        ts.show = showPointCloud;
+      }
+    });
   }, [showPointCloud]);
 
   // Cập nhật Kích thước Điểm (Point Size) của Point Cloud
   useEffect(() => {
-    if (pointCloudRef.current) {
-      pointCloudRef.current.style = new Cesium.Cesium3DTileStyle({
-        pointSize: pointSize
-      });
-    }
+    const style = new Cesium.Cesium3DTileStyle({
+      pointSize: pointSize
+    });
+    loadedPointCloudTilesetsRef.current.forEach(ts => {
+      if (ts && !ts.isDestroyed()) {
+        ts.style = style;
+      }
+    });
   }, [pointSize]);
 
   // Cập nhật Góc nhìn (Field of View)
@@ -950,7 +1145,7 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
 
     let activePoints: Cesium.Cartesian3[] = [];
     let mousePosition: Cesium.Cartesian3 | null = null;
-    
+
     // Mảng lưu các entities tạm thời đang vẽ
     let tempEntities: Cesium.Entity[] = [];
 
@@ -989,11 +1184,11 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
           const lastPoint = activePoints[activePoints.length - 1];
           // Tính khoảng cách từ điểm cuối tới vị trí chuột
           const distSegment = Cesium.Cartesian3.distance(lastPoint, mousePosition);
-          
+
           // Tính tổng khoảng cách lũy kế
           let totalDist = 0;
           for (let i = 0; i < activePoints.length - 1; i++) {
-            totalDist += Cesium.Cartesian3.distance(activePoints[i], activePoints[i+1]);
+            totalDist += Cesium.Cartesian3.distance(activePoints[i], activePoints[i + 1]);
           }
           totalDist += distSegment;
 
@@ -1096,7 +1291,7 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
         if (activePoints.length > 1) {
           let totalDist = 0;
           for (let i = 0; i < activePoints.length - 1; i++) {
-            totalDist += Cesium.Cartesian3.distance(activePoints[i], activePoints[i+1]);
+            totalDist += Cesium.Cartesian3.distance(activePoints[i], activePoints[i + 1]);
           }
 
           measureDS.entities.add({
@@ -1131,14 +1326,14 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
         if (activePoints.length > 0) {
           const startPoint = activePoints[0];
           const endPoint = mousePosition;
-          
+
           // Điểm chiếu xuống mặt phẳng nằm ngang của điểm gốc
           const projPoint = getProjectedPoint(startPoint, endPoint);
 
           // Tính các khoảng cách đo
           const slantDist = Cesium.Cartesian3.distance(startPoint, endPoint);
           const horizDist = Cesium.Cartesian3.distance(startPoint, projPoint);
-          
+
           // Tính hiệu độ cao thực tế (chênh lệch Z)
           const cartoStart = Cesium.Cartographic.fromCartesian(startPoint);
           const cartoEnd = Cesium.Cartographic.fromCartesian(endPoint);
@@ -1256,7 +1451,7 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
         if (activePoints.length === 0) {
           // Điểm thứ 1: Gốc đo
           activePoints.push(cartesian);
-          
+
           measureDS.entities.add({
             position: cartesian,
             point: {
@@ -1276,7 +1471,7 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
           const slantDist = Cesium.Cartesian3.distance(startPoint, endPoint);
           const horizDist = Cesium.Cartesian3.distance(startPoint, projPoint);
           console.log(`Measured slant distance: ${slantDist.toFixed(2)}m, horizontal: ${horizDist.toFixed(2)}m`);
-          
+
           const cartoStart = Cesium.Cartographic.fromCartesian(startPoint);
           const cartoEnd = Cesium.Cartographic.fromCartesian(endPoint);
           const heightDiff = cartoEnd.height - cartoStart.height;
@@ -1388,7 +1583,7 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
 
         if (activePoints.length >= 1) {
           const pointsWithMouse = [...activePoints, mousePosition];
-          
+
           // Vẽ đường biên tạm nét đứt
           const hoverPoly = measureDS.entities.add({
             polyline: {
@@ -1504,15 +1699,44 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
   const handleFocusProject = () => {
     const viewer = viewerRef.current;
     if (!viewer || viewer.isDestroyed()) return;
-    viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(106.8099, 10.8404 - 0.002, 200),
-      orientation: {
-        heading: 0,
-        pitch: Cesium.Math.toRadians(-30),
-        roll: 0.0
-      },
-      duration: 2
-    });
+    setShowModel(true);
+
+    if (modelRef.current && modelRef.current.boundingSphere) {
+      viewer.camera.flyToBoundingSphere(modelRef.current.boundingSphere, {
+        duration: 2,
+        offset: new Cesium.HeadingPitchRange(
+          0,
+          Cesium.Math.toRadians(-35),
+          150
+        )
+      });
+    } else {
+      const baseLon = project?.centerLon || 106.8099;
+      const baseLat = project?.centerLat || 10.8404;
+      let longitude = baseLon;
+      let latitude = baseLat;
+      if (longitude < 90 && latitude > 90) {
+        longitude = baseLat;
+        latitude = baseLon;
+      }
+      const modelLon = offsets.modelLon || 0;
+      const modelLat = offsets.modelLat || 0;
+      const modelHeight = offsets.modelHeight || 0.3;
+
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(
+          longitude + modelLon,
+          (latitude + modelLat) - 0.002,
+          modelHeight + 150
+        ),
+        orientation: {
+          heading: 0,
+          pitch: Cesium.Math.toRadians(-30),
+          roll: 0.0
+        },
+        duration: 2
+      });
+    }
   };
 
   const handleFocusPointCloud = () => {
@@ -1539,6 +1763,61 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
     }
   };
 
+  const handleFocusDom = () => {
+    const viewer = viewerRef.current;
+    if (!viewer || viewer.isDestroyed() || !project) return;
+    setShowDom(true);
+
+    const baseLon = project.centerLon || 106.8099;
+    const baseLat = project.centerLat || 10.8404;
+    let lon = baseLon;
+    let lat = baseLat;
+    if (lon < 90 && lat > 90) {
+      lon = baseLat;
+      lat = baseLon;
+    }
+
+    let west = originalBoundsRef.current.west;
+    let east = originalBoundsRef.current.east;
+    let south = originalBoundsRef.current.south;
+    let north = originalBoundsRef.current.north;
+
+    if (west === 0) {
+      const deltaLatitude = 142.222 / 111111;
+      const deltaLongitude = 143.532 / (111111 * Math.cos(lat * Math.PI / 180));
+      west = lon - deltaLongitude / 2;
+      east = lon + deltaLongitude / 2;
+      south = lat - deltaLatitude / 2;
+      north = lat + deltaLatitude / 2;
+    }
+
+    // Áp dụng scale và offset hiện tại
+    const centerLon = (west + east) / 2;
+    const centerLat = (south + north) / 2;
+    const halfWidth = ((east - west) / 2) * (offsets.domScale || 1.0);
+    const halfHeight = ((north - south) / 2) * (offsets.domScale || 1.0);
+
+    const finalWest = centerLon - halfWidth + (offsets.domLon || 0);
+    const finalEast = centerLon + halfWidth + (offsets.domLon || 0);
+    const finalSouth = centerLat - halfHeight + (offsets.domLat || 0);
+    const finalNorth = centerLat + halfHeight + (offsets.domLat || 0);
+
+    if (
+      isNaN(finalWest) || isNaN(finalEast) || isNaN(finalSouth) || isNaN(finalNorth) ||
+      finalWest >= finalEast || finalSouth >= finalNorth ||
+      finalWest < -180 || finalEast > 180 || finalSouth < -90 || finalNorth > 90
+    ) {
+      console.warn("⚠️ Tọa độ ảnh DOM không hợp lệ để camera flyTo.");
+      return;
+    }
+
+    const domRectangle = Cesium.Rectangle.fromDegrees(finalWest, finalSouth, finalEast, finalNorth);
+    viewer.camera.flyTo({
+      destination: domRectangle,
+      duration: 2
+    });
+  };
+
   const handleClear = () => {
     measureDataSourceRef.current?.entities.removeAll();
     setMeasurementPoints([]);
@@ -1549,6 +1828,8 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
     <div className="relative w-full h-screen">
       {/* Component Potree Sidebar điều khiển bên trái */}
       <PotreeSidebar
+        isOpen={isSidebarOpen}
+        onToggleOpen={onToggleSidebar ? () => onToggleSidebar(!isSidebarOpen) : undefined}
         currentMode={toolMode}
         onModeChange={setToolMode}
         onClear={handleClear}
@@ -1572,6 +1853,7 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
         onProjectionChange={setIsOrthographic}
         onFocusProject={handleFocusProject}
         onFocusPointCloud={handleFocusPointCloud}
+        onFocusDom={handleFocusDom}
       />
 
       {/* Component Optimizer Panel */}
@@ -1582,151 +1864,251 @@ export const CesiumViewer: React.FC<{ projectId?: string }> = ({ projectId }) =>
       {/* Container chứa bản đồ 3D */}
       <div ref={cesiumContainer} className="absolute inset-0 z-0" />
 
-      {/* Bảng tinh chỉnh vị trí của Admin (Calibration) */}
-      <div className="absolute top-4 right-4 z-40 bg-slate-950/90 border border-slate-800 text-slate-300 p-4 rounded-2xl w-80 backdrop-blur-md text-xs space-y-3 shadow-2xl select-none font-sans">
-        <div className="flex items-center justify-between border-b border-slate-900 pb-2">
-          <span className="font-bold text-sky-400 tracking-wider">🔧 CALIBRATION PANEL (ADMIN)</span>
-          <button 
-            onClick={() => setActiveTarget(prev => prev === 'none' ? 'model' : 'none')}
-            className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
-              activeTarget !== 'none' 
-                ? 'bg-emerald-500/20 border border-emerald-500 text-emerald-400' 
-                : 'bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-400 hover:text-white'
-            }`}
-          >
-            {activeTarget !== 'none' ? 'BẬT' : 'TẮT'}
-          </button>
-        </div>
+      {/* Bảng tinh chỉnh vị trí của Admin (Calibration - Chỉ Admin hệ thống mới có quyền truy cập) */}
+      {isAdmin && (
+        <div className="absolute top-4 right-4 z-40 bg-slate-950/90 border border-slate-800 text-slate-300 p-4 rounded-2xl w-80 backdrop-blur-md text-xs space-y-3 shadow-2xl select-none font-sans">
+          <div className="flex items-center justify-between border-b border-slate-900 pb-2">
+            <span className="font-bold text-sky-400 tracking-wider">🔧 CALIBRATION PANEL (ADMIN)</span>
+            <button
+              onClick={() => setActiveTarget(prev => prev === 'none' ? 'model' : 'none')}
+              className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${activeTarget !== 'none'
+                  ? 'bg-emerald-500/20 border border-emerald-500 text-emerald-400'
+                  : 'bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-400 hover:text-white'
+                }`}
+            >
+              {activeTarget !== 'none' ? 'BẬT' : 'TẮT'}
+            </button>
+          </div>
 
-        {activeTarget !== 'none' && (
-          <div className="space-y-3">
-            {/* Chọn đối tượng hiệu chỉnh */}
-            <div className="flex gap-1.5 text-[10px]">
-              <button
-                onClick={() => setActiveTarget('model')}
-                className={`flex-1 py-1.5 rounded-lg border font-bold text-center transition-all ${
-                  activeTarget === 'model'
-                    ? 'bg-sky-500/20 border-sky-500 text-sky-400 shadow-[0_0_10px_rgba(14,165,233,0.15)]'
-                    : 'border-slate-800 bg-slate-900/40 text-slate-400 hover:text-white'
-                }`}
-              >
-                Model 3D
-              </button>
-              <button
-                onClick={() => setActiveTarget('dom')}
-                className={`flex-1 py-1.5 rounded-lg border font-bold text-center transition-all ${
-                  activeTarget === 'dom'
-                    ? 'bg-sky-500/20 border-sky-500 text-sky-400 shadow-[0_0_10px_rgba(14,165,233,0.15)]'
-                    : 'border-slate-800 bg-slate-900/40 text-slate-400 hover:text-white'
-                }`}
-              >
-                Ảnh DOM
-              </button>
-              <button
-                onClick={() => setActiveTarget('pointcloud')}
-                className={`flex-1 py-1.5 rounded-lg border font-bold text-center transition-all ${
-                  activeTarget === 'pointcloud'
-                    ? 'bg-sky-500/20 border-sky-500 text-sky-400 shadow-[0_0_10px_rgba(14,165,233,0.15)]'
-                    : 'border-slate-800 bg-slate-900/40 text-slate-400 hover:text-white'
-                }`}
-              >
-                Point Cloud
-              </button>
-            </div>
+          {activeTarget !== 'none' && (
+            <div className="space-y-3">
+              {/* Chọn đối tượng hiệu chỉnh */}
+              <div className="flex gap-1.5 text-[10px]">
+                <button
+                  onClick={() => setActiveTarget('model')}
+                  className={`flex-1 py-1.5 rounded-lg border font-bold text-center transition-all ${activeTarget === 'model'
+                      ? 'bg-sky-500/20 border-sky-500 text-sky-400 shadow-[0_0_10px_rgba(14,165,233,0.15)]'
+                      : 'border-slate-800 bg-slate-900/40 text-slate-400 hover:text-white'
+                    }`}
+                >
+                  Model 3D
+                </button>
+                <button
+                  onClick={() => setActiveTarget('dom')}
+                  className={`flex-1 py-1.5 rounded-lg border font-bold text-center transition-all ${activeTarget === 'dom'
+                      ? 'bg-sky-500/20 border-sky-500 text-sky-400 shadow-[0_0_10px_rgba(14,165,233,0.15)]'
+                      : 'border-slate-800 bg-slate-900/40 text-slate-400 hover:text-white'
+                    }`}
+                >
+                  Ảnh DOM
+                </button>
+                <button
+                  onClick={() => setActiveTarget('pointcloud')}
+                  className={`flex-1 py-1.5 rounded-lg border font-bold text-center transition-all ${activeTarget === 'pointcloud'
+                      ? 'bg-sky-500/20 border-sky-500 text-sky-400 shadow-[0_0_10px_rgba(14,165,233,0.15)]'
+                      : 'border-slate-800 bg-slate-900/40 text-slate-400 hover:text-white'
+                    }`}
+                >
+                  Point Cloud
+                </button>
+              </div>
 
-            {/* Thông số hiện tại */}
-            <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-900 space-y-1 font-mono text-[10px] text-slate-400">
-              {activeTarget === 'model' ? (
-                <>
-                  <div>Lon Offset: <span className="text-white font-bold">{offsets.modelLon.toFixed(7)}°</span></div>
-                  <div>Lat Offset: <span className="text-white font-bold">{offsets.modelLat.toFixed(7)}°</span></div>
-                  <div>Height (Z): <span className="text-emerald-400 font-bold">{offsets.modelHeight.toFixed(2)} m</span></div>
-                  <div>Heading (Yaw): <span className="text-amber-400 font-bold">{offsets.modelHeading.toFixed(1)}°</span></div>
-                </>
-              ) : activeTarget === 'dom' ? (
-                <>
-                  <div>Lon Offset: <span className="text-white font-bold">{offsets.domLon.toFixed(7)}°</span></div>
-                  <div>Lat Offset: <span className="text-white font-bold">{offsets.domLat.toFixed(7)}°</span></div>
-                  <div>Scale Ratio: <span className="text-sky-400 font-bold">x{offsets.domScale.toFixed(3)}</span></div>
-                </>
-              ) : (
-                <>
-                  <div>Lon Offset: <span className="text-white font-bold">{(offsets.pcLon || 0).toFixed(7)}°</span></div>
-                  <div>Lat Offset: <span className="text-white font-bold">{(offsets.pcLat || 0).toFixed(7)}°</span></div>
-                  <div>Height (Z): <span className="text-emerald-400 font-bold">{(offsets.pcHeight || 0).toFixed(2)} m</span></div>
-                </>
-              )}
-              <div className="border-t border-slate-900 pt-1 mt-1 flex justify-between">
-                <span>Bước dịch chuyển:</span>
-                <span className="text-sky-400 font-bold">{stepSize} m</span>
+              {/* Thông số hiện tại & Cho phép nhập tay trực tiếp */}
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-900 space-y-2 font-sans text-[11px] text-slate-300">
+                <div className="text-[10px] text-sky-400 font-bold uppercase tracking-wider mb-1.5 border-b border-slate-900 pb-1">
+                  Hiệu chỉnh thông số
+                </div>
+
+                {activeTarget === 'model' ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-400 font-mono">Lon Offset (°):</span>
+                      <CalibNumberInput
+                        step="0.0000001"
+                        value={offsets.modelLon}
+                        onChange={(val) => setOffsets(prev => ({ ...prev, modelLon: val }))}
+                        className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-white font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-400 font-mono">Lat Offset (°):</span>
+                      <CalibNumberInput
+                        step="0.0000001"
+                        value={offsets.modelLat}
+                        onChange={(val) => setOffsets(prev => ({ ...prev, modelLat: val }))}
+                        className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-white font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-400 font-mono">Cao độ (m):</span>
+                      <CalibNumberInput
+                        step="0.1"
+                        value={offsets.modelHeight}
+                        onChange={(val) => setOffsets(prev => ({ ...prev, modelHeight: val }))}
+                        className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-emerald-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-400 font-mono">Góc xoay (°):</span>
+                      <CalibNumberInput
+                        step="0.5"
+                        value={offsets.modelHeading}
+                        onChange={(val) => setOffsets(prev => ({ ...prev, modelHeading: val }))}
+                        className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-amber-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
+                      />
+                    </div>
+                  </div>
+                ) : activeTarget === 'dom' ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-400 font-mono">Lon Offset (°):</span>
+                      <CalibNumberInput
+                        step="0.0000001"
+                        value={offsets.domLon}
+                        onChange={(val) => setOffsets(prev => ({ ...prev, domLon: val }))}
+                        className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-white font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-400 font-mono">Lat Offset (°):</span>
+                      <CalibNumberInput
+                        step="0.0000001"
+                        value={offsets.domLat}
+                        onChange={(val) => setOffsets(prev => ({ ...prev, domLat: val }))}
+                        className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-white font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-400 font-mono">Tỉ lệ Scale (x):</span>
+                      <CalibNumberInput
+                        step="0.001"
+                        value={offsets.domScale}
+                        onChange={(val) => setOffsets(prev => ({ ...prev, domScale: val }))}
+                        className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-sky-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-400 font-mono">Góc xoay (°):</span>
+                      <CalibNumberInput
+                        step="0.5"
+                        value={offsets.domHeading || 0}
+                        onChange={(val) => setOffsets(prev => ({ ...prev, domHeading: val }))}
+                        className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-amber-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-400 font-mono">Lon Offset (°):</span>
+                      <CalibNumberInput
+                        step="0.0000001"
+                        value={offsets.pcLon || 0}
+                        onChange={(val) => setOffsets(prev => ({ ...prev, pcLon: val }))}
+                        className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-white font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-400 font-mono">Lat Offset (°):</span>
+                      <CalibNumberInput
+                        step="0.0000001"
+                        value={offsets.pcLat || 0}
+                        onChange={(val) => setOffsets(prev => ({ ...prev, pcLat: val }))}
+                        className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-white font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-400 font-mono">Cao độ (m):</span>
+                      <CalibNumberInput
+                        step="0.1"
+                        value={offsets.pcHeight || 0}
+                        onChange={(val) => setOffsets(prev => ({ ...prev, pcHeight: val }))}
+                        className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-emerald-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-400 font-mono">Góc xoay (°):</span>
+                      <CalibNumberInput
+                        step="0.5"
+                        value={offsets.pcHeading || 0}
+                        onChange={(val) => setOffsets(prev => ({ ...prev, pcHeading: val }))}
+                        className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-amber-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
+                      />
+                    </div>
+                  </div>
+                )}
+                <div className="border-t border-slate-900 pt-1.5 mt-1.5 flex justify-between text-[10px]">
+                  <span className="text-slate-500">Bước nhảy phím tắt:</span>
+                  <span className="text-sky-400 font-bold">{stepSize} m</span>
+                </div>
+              </div>
+
+              {/* Hướng dẫn phím tắt */}
+              <div className="text-[10px] text-slate-500 space-y-1 bg-slate-950/40 p-2 rounded-lg border border-slate-900/40 leading-relaxed font-sans">
+                <div className="font-bold text-slate-400 uppercase tracking-wider text-[9px] mb-1 font-sans">Bàn phím:</div>
+                <div>• <b>Mũi tên / I, K, J, L</b>: Di chuyển hướng Bắc/Nam/Tây/Đông</div>
+                {activeTarget === 'model' ? (
+                  <>
+                    <div>• <b>U / O</b>: Nâng cao / Hạ thấp cao độ</div>
+                    <div>• <b>Q / E</b>: Xoay mô hình sang Trái / Phải</div>
+                  </>
+                ) : activeTarget === 'dom' ? (
+                  <>
+                    <div>• <b>Q / E</b>: Xoay ảnh DOM sang Trái / Phải</div>
+                    <div>• <b>U / O</b>: Thu nhỏ / Phóng to kích thước (Scale)</div>
+                  </>
+                ) : (
+                  <>
+                    <div>• <b>U / O</b>: Nâng cao / Hạ thấp cao độ mây điểm</div>
+                    <div>• <b>Q / E</b>: Xoay mây điểm sang Trái / Phải</div>
+                  </>
+                )}
+                <div>• <b>+ / -</b>: Tăng / Giảm bước dịch chuyển</div>
+              </div>
+
+              {/* Nút hành động */}
+              <div className="flex gap-2 font-sans">
+                <button
+                  onClick={() => {
+                    setOffsets({
+                      modelLon: 0,
+                      modelLat: 0,
+                      modelHeight: 0.3,
+                      modelHeading: 0,
+                      domLon: 0,
+                      domLat: 0,
+                      domScale: 1.0,
+                      pcLon: 0,
+                      pcLat: 0,
+                      pcHeight: 0,
+                      pcHeading: 0
+                    });
+                  }}
+                  className="flex-1 py-1.5 rounded-lg border border-slate-800 bg-slate-900/40 hover:bg-slate-900 hover:text-white transition-colors font-medium text-center cursor-pointer"
+                >
+                  Reset
+                </button>
+                <button
+                  onClick={async () => {
+                    if (projectId) {
+                      localStorage.setItem(`calibration_${projectId}`, JSON.stringify(offsets));
+                      const success = await updateProject(projectId, { calibration: JSON.stringify(offsets) });
+                      if (success) {
+                        alert("💾 Đã lưu và đồng bộ thông số vị trí dự án vào Database thành công!");
+                      } else {
+                        alert("⚠️ Đã lưu nháp vào máy khách, nhưng không thể kết nối đồng bộ vào Database.");
+                      }
+                    }
+                  }}
+                  className="flex-1 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-center transition-colors shadow-lg shadow-sky-600/20 cursor-pointer"
+                >
+                  Lưu Vị Trí
+                </button>
               </div>
             </div>
-
-            {/* Hướng dẫn phím tắt */}
-            <div className="text-[10px] text-slate-500 space-y-1 bg-slate-950/40 p-2 rounded-lg border border-slate-900/40 leading-relaxed font-sans">
-              <div className="font-bold text-slate-400 uppercase tracking-wider text-[9px] mb-1 font-sans">Bàn phím:</div>
-              <div>• <b>Mũi tên / I, K, J, L</b>: Di chuyển hướng Bắc/Nam/Tây/Đông</div>
-              {activeTarget === 'model' ? (
-                <>
-                  <div>• <b>U / O</b>: Nâng cao / Hạ thấp cao độ</div>
-                  <div>• <b>Q / E</b>: Xoay mô hình sang Trái / Phải</div>
-                </>
-              ) : activeTarget === 'dom' ? (
-                <>
-                  <div>• <b>Q / E</b>: Thu nhỏ / Phóng to kích thước (Scale)</div>
-                </>
-              ) : (
-                <>
-                  <div>• <b>U / O</b>: Nâng cao / Hạ thấp cao độ mây điểm</div>
-                </>
-              )}
-              <div>• <b>+ / -</b>: Tăng / Giảm bước dịch chuyển</div>
-            </div>
-
-            {/* Nút hành động */}
-            <div className="flex gap-2 font-sans">
-              <button
-                onClick={() => {
-                  setOffsets({
-                    modelLon: 0,
-                    modelLat: 0,
-                    modelHeight: 0.3,
-                    modelHeading: 0,
-                    domLon: 0,
-                    domLat: 0,
-                    domScale: 1.0,
-                    pcLon: 0,
-                    pcLat: 0,
-                    pcHeight: 0
-                  });
-                }}
-                className="flex-1 py-1.5 rounded-lg border border-slate-800 bg-slate-900/40 hover:bg-slate-900 hover:text-white transition-colors font-medium text-center cursor-pointer"
-              >
-                Reset
-              </button>
-              <button
-                onClick={async () => {
-                  if (projectId) {
-                    // 1. Lưu dự phòng tại LocalStorage của máy
-                    localStorage.setItem(`calibration_${projectId}`, JSON.stringify(offsets));
-                    
-                    // 2. Lưu trực tiếp vào Database PostgreSQL để đồng bộ cho tất cả mọi người
-                    const success = await updateProject(projectId, { calibration: JSON.stringify(offsets) });
-                    if (success) {
-                      alert("💾 Đã lưu và đồng bộ thông số vị trí dự án vào Database thành công!");
-                    } else {
-                      alert("⚠️ Đã lưu nháp vào máy khách, nhưng không thể kết nối đồng bộ vào Database.");
-                    }
-                  }
-                }}
-                className="flex-1 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-center transition-colors shadow-lg shadow-sky-600/20 cursor-pointer"
-              >
-                Lưu Vị Trí
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* Hướng dẫn động nổi dưới đáy */}
       {toolMode !== 'none' && (

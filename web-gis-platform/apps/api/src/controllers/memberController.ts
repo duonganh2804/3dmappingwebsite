@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { Response } from 'express';
-import { PrismaClient } from '../generated/prisma';
+import { PrismaClient } from '../generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { AuthRequest } from '../middlewares/authMiddleware';
 

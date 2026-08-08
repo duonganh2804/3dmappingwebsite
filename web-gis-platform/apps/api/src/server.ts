@@ -13,7 +13,7 @@ import { parseAndUnifyCoordinates } from './utils/coordinateConverter';
 import { uploadProjectFilesToR2 } from './r2Service';
 import { sendLeadNotificationEmail } from './utils/emailService';
 import { spawn } from 'child_process';
-import { PrismaClient } from './generated/prisma';
+import { PrismaClient } from './generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 const app = express();

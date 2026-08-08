@@ -1,3 +1,8 @@
+// Thiết lập CESIUM_BASE_URL động phù hợp cho cả GitHub Pages và Local
+(window as any).CESIUM_BASE_URL = window.location.hostname.includes('github.io')
+  ? '/3dmappingwebsite/assets/cesium/'
+  : '/assets/cesium/';
+
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { GoogleOAuthProvider } from '@react-oauth/google'

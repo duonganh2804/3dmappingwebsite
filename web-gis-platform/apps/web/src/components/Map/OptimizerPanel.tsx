@@ -37,7 +37,7 @@ export function OptimizerPanel({ onClose, projectId }: OptimizerPanelProps) {
     if (isLoading) {
       intervalId = setInterval(async () => {
         try {
-          const res = await fetch('http://localhost:3000/api/logs');
+          const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/logs`);
           const data = await res.json();
           setLogs(data.logs);
           
@@ -63,9 +63,9 @@ export function OptimizerPanel({ onClose, projectId }: OptimizerPanelProps) {
     setLogs([]);
     try {
       // Clear logs cũ
-      await fetch('http://localhost:3000/api/logs/clear', { method: 'POST' });
+      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/logs/clear`, { method: 'POST' });
       
-      const res = await fetch('http://localhost:3000/api/optimize/batch', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/optimize/batch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -96,7 +96,7 @@ export function OptimizerPanel({ onClose, projectId }: OptimizerPanelProps) {
     setIsLoading(true);
     setLogs([]);
     try {
-      const res = await fetch('http://localhost:3000/api/optimize/translate', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/optimize/translate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

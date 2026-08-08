@@ -192,7 +192,7 @@ export const DashboardPage: React.FC = () => {
     if (!showPanel) return;
     const id = setInterval(async () => {
       try {
-        const res = await fetch('http://localhost:3000/api/logs');
+        const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/logs`);
         const data = await res.json();
         setPanelLogs(data.logs || []);
         const newPipeline: PipelineState = data.pipeline;
@@ -243,10 +243,10 @@ export const DashboardPage: React.FC = () => {
       setPipeline({ isProcessing: true, projectId: project.id, startedAt: Date.now(), finishedAt: null, success: null });
       setShowPanel(true);
 
-      await fetch('http://localhost:3000/api/logs/clear', { method: 'POST' });
+      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/logs/clear`, { method: 'POST' });
 
       const token = localStorage.getItem('accessToken');
-      const res = await fetch('http://localhost:3000/api/optimize/batch', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/optimize/batch`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -90,7 +90,7 @@ export const CesiumViewer: React.FC<{
 
   const modelRef = useRef<Cesium.Model | null>(null);
   const domLayerRef = useRef<Cesium.ImageryLayer | null>(null);
-  const domFetchCounterRef = useRef(0);
+  // const domFetchCounterRef = useRef(0);
   const pointCloudRef = useRef<Cesium.Cesium3DTileset | null>(null);
   const measureDataSourceRef = useRef<Cesium.CustomDataSource | null>(null);
 
@@ -184,6 +184,7 @@ export const CesiumViewer: React.FC<{
           domLon: 0,
           domLat: 0,
           domScale: 1.0,
+          domHeading: 0,
           pcLon: 0,
           pcLat: 0,
           pcHeight: 0,
@@ -2078,6 +2079,7 @@ export const CesiumViewer: React.FC<{
                       domLon: 0,
                       domLat: 0,
                       domScale: 1.0,
+                      domHeading: 0,
                       pcLon: 0,
                       pcLat: 0,
                       pcHeight: 0,

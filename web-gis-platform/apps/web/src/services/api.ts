@@ -1,6 +1,6 @@
 import type { Project } from '../store/useProjectStore';
 
-const API_BASE_URL = 'http://localhost:3000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 const getAuthHeaders = (): Record<string, string> => {
   const token = localStorage.getItem('accessToken');

@@ -38,7 +38,7 @@ export const ProjectMemberModal: React.FC<ProjectMemberModalProps> = ({ projectI
   const fetchMembers = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`http://localhost:3000/api/projects/${projectId}/members`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/projects/${projectId}/members`, {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {},
         credentials: 'include'
       });
@@ -67,7 +67,7 @@ export const ProjectMemberModal: React.FC<ProjectMemberModalProps> = ({ projectI
     setSubmitting(true);
 
     try {
-      const res = await fetch(`http://localhost:3000/api/projects/${projectId}/members`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/projects/${projectId}/members`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -97,7 +97,7 @@ export const ProjectMemberModal: React.FC<ProjectMemberModalProps> = ({ projectI
     setSuccess(null);
 
     try {
-      const res = await fetch(`http://localhost:3000/api/projects/${projectId}/members/${userId}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/projects/${projectId}/members/${userId}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -125,7 +125,7 @@ export const ProjectMemberModal: React.FC<ProjectMemberModalProps> = ({ projectI
     setSuccess(null);
 
     try {
-      const res = await fetch(`http://localhost:3000/api/projects/${projectId}/members/${userId}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/projects/${projectId}/members/${userId}`, {
         method: 'DELETE',
         headers: token ? { 'Authorization': `Bearer ${token}` } : {},
         credentials: 'include'

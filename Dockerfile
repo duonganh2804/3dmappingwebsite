@@ -5,10 +5,14 @@ WORKDIR /app
 
 # Copy package files of the API subproject
 COPY web-gis-platform/apps/api/package*.json ./
-RUN npm ci --omit=dev
+# Cài đặt toàn bộ dependencies để build
+RUN npm ci
 
 # Copy source code of the API subproject
 COPY web-gis-platform/apps/api/ .
+
+# Tạo kiểu dữ liệu Prisma Client trước khi build
+RUN npx prisma generate
 
 # Build TypeScript
 RUN npm run build
@@ -18,12 +22,16 @@ FROM node:20-slim AS production
 
 WORKDIR /app
 
-# Cài đặt Node.js dependencies production từ builder
-COPY --from=builder /app/node_modules ./node_modules
+# Chỉ cài đặt dependencies cho production
+COPY web-gis-platform/apps/api/package*.json ./
+RUN npm ci --omit=dev
+
+# Copy code đã biên dịch từ builder
 COPY --from=builder /app/dist ./dist
 
-# Copy prisma schema và generated client từ workspace root
+# Copy prisma schema và generate client tại runtime
 COPY web-gis-platform/apps/api/prisma ./prisma
+RUN npx prisma generate
 
 ENV NODE_ENV=production
 ENV PORT=7860

@@ -5,7 +5,13 @@
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>web</title>
+  <title>3D Mapping Platform</title>
+  <script>
+    // Phải chạy TRƯỚC khi bất kỳ ES module nào được load
+    window.CESIUM_BASE_URL = window.location.hostname.includes('github.io')
+      ? '/3dmappingwebsite/cesium/'
+      : '/cesium/';
+  </script>
 </head>
 
 <body>

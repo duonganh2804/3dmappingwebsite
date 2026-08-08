@@ -1,9 +1,8 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs-extra';
-import dotenv from 'dotenv';
-dotenv.config();
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { register, login, googleLogin, refresh, logout, me } from './controllers/authController';
@@ -18,7 +17,7 @@ import { PrismaClient } from './generated/prisma';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 7860;
 
 const adapter = new PrismaPg({
   connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@127.0.0.1:5432/webgis?schema=public'

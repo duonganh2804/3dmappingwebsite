@@ -10,10 +10,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>3D Mapping Platform</title>
   <script>
-    // Phải chạy TRƯỚC khi bất kỳ ES module nào được load
-    window.CESIUM_BASE_URL = window.location.hostname.includes('github.io')
-      ? '/3dmappingwebsite/cesium/'
-      : '/cesium/';
+    // CESIUM_BASE_URL phải set TRƯỚC khi Cesium.js load
+    // Cần trỏ đến thư mục chứa cesium assets (Workers, Assets, Widgets)
+    // Relative từ origin: /3dmappingwebsite/cesium/ cho cả dev lẫn production
+    window.CESIUM_BASE_URL = '/3dmappingwebsite/cesium/';
   </script>
   <script type="module" crossorigin src="/3dmappingwebsite/assets/index-GsSx1uzp.js"></script>
   <link rel="stylesheet" crossorigin href="/3dmappingwebsite/assets/index-DAKnBbKh.css">

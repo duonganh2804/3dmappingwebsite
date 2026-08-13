@@ -92,9 +92,6 @@ export const BookDemoPage: React.FC = () => {
           {/* Brand Logo */}
           <Link to="/" className="flex items-center gap-2.5 group">
             <img src={logoImg} alt="SAOLATEK" className="h-8 w-auto object-contain" />
-            <span className="font-extrabold text-lg tracking-tight text-white font-sans">
-              SAOLA<span className="text-blue-500">TEK</span>
-            </span>
           </Link>
 
           {/* Navigation Links */}
@@ -103,7 +100,6 @@ export const BookDemoPage: React.FC = () => {
             <Link to="/" className="hover:text-white transition-colors">Solutions</Link>
             <Link to="/" className="hover:text-white transition-colors">Resources</Link>
             <Link to="/" className="hover:text-white transition-colors">Connect</Link>
-            <Link to="/pricing" className="hover:text-white transition-colors">Pricing</Link>
           </nav>
 
           {/* Right Action Buttons */}

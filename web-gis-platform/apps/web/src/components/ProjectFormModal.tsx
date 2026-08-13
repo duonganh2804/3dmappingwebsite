@@ -1,14 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, FolderOpen, Layers, Info } from 'lucide-react';
 import { Button } from './UI/Button';
+import { type Project } from '../store/useProjectStore';
 
 interface ProjectFormModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (data: any) => Promise<void>;
+  project?: Project | null;
 }
 
-export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({ isOpen, onClose, onSubmit }) => {
+export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({ isOpen, onClose, onSubmit, project = null }) => {
   const [isAutoProcess, setIsAutoProcess] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
@@ -24,6 +26,38 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({ isOpen, onCl
     outputDir: ''
   });
 
+  useEffect(() => {
+    if (project && isOpen) {
+      setFormData({
+        name: project.name || '',
+        description: project.description || '',
+        centerLon: project.centerLon !== undefined ? project.centerLon.toString() : '',
+        centerLat: project.centerLat !== undefined ? project.centerLat.toString() : '',
+        epsg: project.epsg !== undefined ? project.epsg.toString() : '32648',
+        domUrl: project.domUrl || '',
+        modelUrl: project.modelUrl || '',
+        pointCloudId: project.pointCloudId || '',
+        inputDir: '',
+        outputDir: ''
+      });
+      setIsAutoProcess(false);
+    } else if (isOpen) {
+      setFormData({
+        name: '',
+        description: '',
+        centerLon: '',
+        centerLat: '',
+        epsg: '32648',
+        domUrl: '',
+        modelUrl: '',
+        pointCloudId: '',
+        inputDir: '',
+        outputDir: ''
+      });
+      setIsAutoProcess(true);
+    }
+  }, [project, isOpen]);
+
   if (!isOpen) return null;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -38,27 +72,36 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({ isOpen, onCl
       name: formData.name.trim(),
       description: formData.description.trim(),
       epsg: parseInt(formData.epsg, 10) || 32648,
-      isAutoProcess,
     };
 
-    if (isAutoProcess) {
-      submitData.inputDir = formData.inputDir.trim();
-      submitData.outputDir = formData.outputDir.trim() || undefined;
-      submitData.centerLon = 0;
-      submitData.centerLat = 0;
+    if (!project) {
+      submitData.isAutoProcess = isAutoProcess;
+      if (isAutoProcess) {
+        submitData.inputDir = formData.inputDir.trim();
+        submitData.outputDir = formData.outputDir.trim() || undefined;
+        submitData.centerLon = 0;
+        submitData.centerLat = 0;
+      } else {
+        submitData.centerLon = parseFloat(formData.centerLon) || 0;
+        submitData.centerLat = parseFloat(formData.centerLat) || 0;
+        submitData.domUrl = formData.domUrl.trim();
+        submitData.modelUrl = formData.modelUrl.trim();
+        submitData.pointCloudId = formData.pointCloudId.trim();
+      }
     } else {
       submitData.centerLon = parseFloat(formData.centerLon) || 0;
       submitData.centerLat = parseFloat(formData.centerLat) || 0;
-      submitData.domUrl = formData.domUrl;
-      submitData.modelUrl = formData.modelUrl;
-      submitData.pointCloudId = formData.pointCloudId;
+      submitData.domUrl = formData.domUrl.trim();
+      submitData.modelUrl = formData.modelUrl.trim();
+      submitData.pointCloudId = formData.pointCloudId.trim();
     }
 
     try {
       await onSubmit(submitData);
-      // Reset form
-      setFormData({ name: '', description: '', centerLon: '', centerLat: '', epsg: '32648', domUrl: '', modelUrl: '', pointCloudId: '', inputDir: '', outputDir: '' });
       onClose();
+    } catch (err) {
+      console.error(err);
+      alert('Thao tác thất bại.');
     } finally {
       setIsSubmitting(false);
     }
@@ -71,43 +114,49 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({ isOpen, onCl
       <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 md:p-8 transform transition-all max-h-[90vh] overflow-y-auto">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-full transition-colors"
+          className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-full transition-colors cursor-pointer"
         >
           <X size={20} />
         </button>
 
-        <h2 className="text-2xl font-bold text-white mb-1">Thêm Dự Án Mới</h2>
-        <p className="text-slate-400 text-sm mb-6">Khởi tạo không gian bản đồ 3D của bạn</p>
+        <h2 className="text-2xl font-bold text-white mb-1">
+          {project ? 'Chỉnh Sửa Dự Án' : 'Thêm Dự Án Mới'}
+        </h2>
+        <p className="text-slate-400 text-sm mb-6">
+          {project ? 'Cập nhật thông tin mô tả, tọa độ và liên kết dữ liệu' : 'Khởi tạo không gian bản đồ 3D của bạn'}
+        </p>
 
-        {/* Mode Tabs */}
-        <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 mb-6">
-          <button
-            type="button"
-            onClick={() => setIsAutoProcess(true)}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all ${
-              isAutoProcess
-                ? 'bg-cyan-500 text-slate-950 font-bold shadow-lg shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <FolderOpen size={16} />
-            Xử lý thư mục gốc
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsAutoProcess(false)}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all ${
-              !isAutoProcess
-                ? 'bg-cyan-500 text-slate-950 font-bold shadow-lg shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Layers size={16} />
-            Nhập URL thủ công
-          </button>
-        </div>
+        {/* Mode Tabs - Only visible when creating */}
+        {!project && (
+          <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 mb-6">
+            <button
+              type="button"
+              onClick={() => setIsAutoProcess(true)}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+                isAutoProcess
+                  ? 'bg-cyan-500 text-slate-950 font-bold shadow-lg shadow-cyan-500/20'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <FolderOpen size={16} />
+              Xử lý thư mục gốc
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsAutoProcess(false)}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+                !isAutoProcess
+                  ? 'bg-cyan-500 text-slate-950 font-bold shadow-lg shadow-cyan-500/20'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Layers size={16} />
+              Nhập URL thủ công
+            </button>
+          </div>
+        )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4 text-left">
           {/* Tên & EPSG */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1">
@@ -151,9 +200,8 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({ isOpen, onCl
           </div>
 
           {/* AUTO PROCESS MODE */}
-          {isAutoProcess ? (
+          {isAutoProcess && !project ? (
             <div className="space-y-4 border-t border-slate-800 pt-4">
-
               {/* Info banner */}
               <div className="flex gap-2.5 bg-cyan-950/40 border border-cyan-500/30 rounded-lg p-3">
                 <Info size={16} className="text-cyan-400 flex-shrink-0 mt-0.5" />
@@ -197,9 +245,8 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({ isOpen, onCl
                 />
               </div>
             </div>
-
           ) : (
-            /* MANUAL MODE */
+            /* MANUAL MODE & EDIT MODE */
             <div className="space-y-4 border-t border-slate-800 pt-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
@@ -267,10 +314,8 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({ isOpen, onCl
               className={`min-w-32 ${isSubmitting ? 'opacity-70' : ''}`}
             >
               {isSubmitting
-                ? 'Đang khởi tạo...'
-                : isAutoProcess
-                  ? '🚀 Bắt đầu xử lý'
-                  : '💾 Lưu dự án'}
+                ? (project ? 'Đang cập nhật...' : 'Đang khởi tạo...')
+                : (project ? 'Cập nhật' : (isAutoProcess ? '🚀 Bắt đầu xử lý' : '💾 Lưu dự án'))}
             </Button>
           </div>
         </form>
@@ -278,3 +323,5 @@ export const ProjectFormModal: React.FC<ProjectFormModalProps> = ({ isOpen, onCl
     </div>
   );
 };
+
+export default ProjectFormModal;

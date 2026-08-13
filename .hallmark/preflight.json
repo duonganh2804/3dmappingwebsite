@@ -1,0 +1,7 @@
+{
+  "fontStack": "Plus Jakarta Sans, Inter",
+  "palette": "studied-DNA (Light theme off-white, dark gray header, blue accent)",
+  "motion": "none",
+  "spacing": "Tailwind standard spacing scale",
+  "framework": "React 19, Vite, Tailwind CSS v4"
+}

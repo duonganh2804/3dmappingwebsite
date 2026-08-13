@@ -1,9 +1,15 @@
+/* Hallmark · component: dashboard · genre: modern-minimal · theme: studied-DNA (source: image)
+ * states: default · hover · focus · active · disabled · loading · error · success
+ * contrast: pass (46–50)
+ */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import logoImg from '../assets/logo.webp';
 import {
   Plus, MapPin, HardDrive, ArrowRight, Trash2, Users, LogOut, LogIn,
   Image, Box, Cloud, Loader2, CheckCircle2, XCircle, Terminal, ChevronDown, ChevronUp, RefreshCw,
-  Globe, Shield, Search, Lock, Unlock, Sparkles, Eye, Layers, Building2
+  Globe, Shield, Search, Lock, Unlock, Sparkles, Eye, Layers, Building2, Map as MapIcon,
+  Menu, X, Bell, MoreVertical, LayoutGrid, List, Info, HelpCircle, User, Settings, FolderPlus, BookOpen, Plane, Crown
 } from 'lucide-react';
 import { useProjectStore, type Project } from '../store/useProjectStore';
 import { useAuthStore } from '../store/useAuthStore';
@@ -22,6 +28,211 @@ interface PipelineState {
   finishedAt: number | null;
   success: boolean | null;
 }
+
+// ─── Translations Dictionary ──────────────────────────────────────────────────
+const DASHBOARD_TRANSLATIONS = {
+  en: {
+    projectsTitle: "Projects",
+    gisConsole: "GIS CONSOLE",
+    searchPlaceholder: "Search folders or projects...",
+    licenseTrial: "14 DAYS TRIAL",
+    viewMap: "View Map",
+    allProjects: "All Projects",
+    assignedProjects: "Assigned",
+    publicShowcase: "Demo Showcase",
+    sortByLabel: "Sort:",
+    sortLatest: "Latest",
+    sortName: "Name (A-Z)",
+    newFolder: "New Folder",
+    newProject: "New Project",
+    noProjectsTitle: "No projects found",
+    noProjectsAssigned: "You have not been assigned any projects. Please contact an Admin for access.",
+    noProjectsPublic: "There are currently no public demo projects available.",
+    noProjectsSystem: "No projects in the system. Click 'New Project' above to create the first one.",
+    loadingProjects: "Loading projects list...",
+    projectOptions: "Project options",
+    view3DMap: "Open 3D Map",
+    setPrivate: "Set Private",
+    setPublic: "Set Public",
+    manageMembers: "Manage Members",
+    deleteProject: "Delete Project",
+    viewProgress: "View Progress",
+    openMap: "Open Map",
+    columnProject: "Project",
+    columnRole: "Role",
+    columnCoords: "Coordinate / Location",
+    columnLayers: "3D Layers",
+    columnMembers: "Members",
+    columnActions: "Actions",
+    btnOpen: "Open",
+    processing: "Processing...",
+    trialTitle: "Trial Expiring Soon",
+    trialDesc: "Your trial account has 14 days remaining.",
+    btnUpgrade: "Upgrade Now",
+    menuMain: "Main Menu",
+    menuManageProjects: "Manage Projects",
+    menuBookDemo: "Book Demo",
+    menuAdditional: "Additional Links",
+    menuAcademy: "3D GIS Academy",
+    menuDrone: "Drone Management",
+    menuFlightLogs: "Flight Logs",
+    menuEquipment: "Flight Equipment",
+    menuPilots: "Pilots",
+    menuApps: "Integrated Apps",
+    menuSettings: "System Settings",
+    menuHelp: "Help & Support",
+    logout: "Log out",
+    userProfile: "User Profile",
+    requestList: "Request List",
+    refreshList: "Refresh List",
+    owner: "Owner",
+    viewer: "Viewer",
+    private: "Private",
+    showcase: "Showcase",
+    notDefined: "Not defined",
+    processing3d: "Processing 3D data...",
+    noDesc: "No description",
+    trialBanner: "Gói Trial sắp hết hạn. Tài khoản dùng thử của bạn còn lại 14 ngày.",
+    folderTitle: "Folder Management",
+    folderDesc: "The system is preparing the grouped storage structure. Virtual folder management will be available in the next version.",
+    btnOk: "OK",
+    editProject: "Edit Project Info"
+  },
+  vi: {
+    projectsTitle: "Dự án",
+    gisConsole: "GIS CONSOLE",
+    searchPlaceholder: "Tìm kiếm thư mục hoặc dự án...",
+    licenseTrial: "14 NGÀY DÙNG THỬ",
+    viewMap: "Xem bản đồ",
+    allProjects: "Tất cả dự án",
+    assignedProjects: "Được cấp quyền",
+    publicShowcase: "Demo Showcase",
+    sortByLabel: "Sắp xếp:",
+    sortLatest: "Mới nhất",
+    sortName: "Tên dự án (A-Z)",
+    newFolder: "Thư mục mới",
+    newProject: "Dự án mới",
+    noProjectsTitle: "Không tìm thấy dự án",
+    noProjectsAssigned: "Bạn chưa có dự án nào được phân quyền. Vui lòng liên hệ Quản trị viên để được cấp quyền truy cập.",
+    noProjectsPublic: "Hiện chưa có dự án Demo công khai nào trên nền tảng.",
+    noProjectsSystem: "Chưa có dự án nào trong hệ thống. Nhấn nút 'Dự án mới' phía trên để khởi tạo dự án đầu tiên.",
+    loadingProjects: "Đang tải danh sách dự án...",
+    projectOptions: "Tùy chọn dự án",
+    view3DMap: "Xem Bản đồ 3D",
+    setPrivate: "Đặt riêng tư",
+    setPublic: "Đặt công khai",
+    manageMembers: "Phân quyền thành viên",
+    deleteProject: "Xóa dự án",
+    viewProgress: "Xem tiến trình",
+    openMap: "Mở Bản đồ",
+    columnProject: "Dự án",
+    columnRole: "Quyền hạn",
+    columnCoords: "Hệ tọa độ / Tọa độ",
+    columnLayers: "Lớp dữ liệu 3D",
+    columnMembers: "Thành viên",
+    columnActions: "Thao tác",
+    btnOpen: "Mở",
+    processing: "Đang xử lý...",
+    trialTitle: "Gói Trial sắp hết hạn",
+    trialDesc: "Tài khoản dùng thử của bạn còn lại 14 ngày.",
+    btnUpgrade: "Nâng cấp ngay",
+    menuMain: "Danh mục chính",
+    menuManageProjects: "Quản lý Dự án",
+    menuBookDemo: "Đăng ký Demo",
+    menuAdditional: "Liên kết bổ sung",
+    menuAcademy: "Học viện 3D GIS",
+    menuDrone: "Quản lý bay (Drone)",
+    menuFlightLogs: "Nhật ký bay",
+    menuEquipment: "Thiết bị bay",
+    menuPilots: "Phi công",
+    menuApps: "Ứng dụng tích hợp",
+    menuSettings: "Cài đặt hệ thống",
+    menuHelp: "Hỏi đáp & Trợ giúp",
+    logout: "Đăng xuất",
+    userProfile: "Thông tin tài khoản",
+    requestList: "Danh sách yêu cầu",
+    refreshList: "Làm mới danh sách",
+    owner: "Chủ sở hữu",
+    viewer: "Người xem",
+    private: "Riêng tư",
+    showcase: "Showcase",
+    notDefined: "Chưa xác định",
+    processing3d: "Đang xử lý dữ liệu 3D...",
+    noDesc: "Chưa có mô tả",
+    trialBanner: "Gói Trial sắp hết hạn. Tài khoản dùng thử của bạn còn lại 14 ngày.",
+    folderTitle: "Tính năng Quản lý thư mục",
+    folderDesc: "Hệ thống đang chuẩn bị cấu trúc lưu trữ phân nhóm. Tính năng quản lý thư mục ảo sẽ sớm ra mắt trong phiên bản tiếp theo.",
+    btnOk: "Đồng ý",
+    editProject: "Chỉnh sửa thông tin"
+  },
+  zh: {
+    projectsTitle: "项目",
+    gisConsole: "GIS 控制台",
+    searchPlaceholder: "搜索文件夹或项目...",
+    licenseTrial: "14 天试用",
+    viewMap: "查看地图",
+    allProjects: "所有项目",
+    assignedProjects: "已授权项目",
+    publicShowcase: "演示案例",
+    sortByLabel: "排序:",
+    sortLatest: "最新",
+    sortName: "项目名称 (A-Z)",
+    newFolder: "新建文件夹",
+    newProject: "新建项目",
+    noProjectsTitle: "未找到项目",
+    noProjectsAssigned: "您尚未获得任何项目的授权。请联系管理员以获取访问权限。",
+    noProjectsPublic: "平台目前没有公开的演示项目。",
+    noProjectsSystem: "系统中尚无项目。点击上方的“新建项目”以创建第一个项目。",
+    loadingProjects: "正在加载项目列表...",
+    projectOptions: "项目选项",
+    view3DMap: "打开3D地图",
+    setPrivate: "设为私有",
+    setPublic: "设为公开",
+    manageMembers: "成员授权管理",
+    deleteProject: "删除项目",
+    viewProgress: "查看进度",
+    openMap: "打开地图",
+    columnProject: "项目",
+    columnRole: "权限",
+    columnCoords: "坐标系/位置",
+    columnLayers: "3D数据层",
+    columnMembers: "成员",
+    columnActions: "操作",
+    btnOpen: "打开",
+    processing: "处理中...",
+    trialTitle: "试用套餐即将到期",
+    trialDesc: "您的试用账户还剩 14 天。",
+    btnUpgrade: "立即升级",
+    menuMain: "主菜单",
+    menuManageProjects: "项目管理",
+    menuBookDemo: "预约演示",
+    menuAdditional: "附加链接",
+    menuAcademy: "3D GIS 学院",
+    menuDrone: "无人机管理",
+    menuFlightLogs: "飞行日志",
+    menuEquipment: "飞行设备",
+    menuPilots: "飞行员",
+    menuApps: "集成应用",
+    menuSettings: "系统设置",
+    menuHelp: "问答与帮助",
+    logout: "退出登录",
+    userProfile: "用户资料",
+    requestList: "请求列表",
+    refreshList: "刷新列表",
+    owner: "所有者",
+    viewer: "查看者",
+    private: "私有",
+    showcase: "展示",
+    notDefined: "未定义",
+    processing3d: "正在处理3D数据...",
+    noDesc: "无描述",
+    trialBanner: "试用套餐即将到期。您的试用账户还剩 14 天。",
+    folderTitle: "文件夹管理功能",
+    folderDesc: "系统正在准备分组存储结构。虚拟文件夹管理功能将在下一版本中推出。",
+    btnOk: "确定",
+    editProject: "编辑项目信息"
+  }
+};
 
 // ─── Pipeline Status Panel ────────────────────────────────────────────────────
 const PipelinePanel: React.FC<{
@@ -126,11 +337,10 @@ const PipelinePanel: React.FC<{
 
 // ─── Data Badge Component ─────────────────────────────────────────────────────
 const DataBadge: React.FC<{ icon: React.ReactNode; label: string; active: boolean }> = ({ icon, label, active }) => (
-  <div className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono border transition-colors ${
-    active
-      ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-400'
-      : 'bg-slate-800/60 border-slate-700/40 text-slate-600'
-  }`}>
+  <div className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono border transition-colors ${active
+      ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+      : 'bg-slate-50 border-slate-200 text-slate-400'
+    }`}>
     {icon}
     <span>{label}</span>
   </div>
@@ -148,6 +358,32 @@ export const DashboardPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'all' | 'assigned' | 'public'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // UI layout and view state
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [sortBy, setSortBy] = useState<'lastCaptured' | 'name'>('lastCaptured');
+  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [showFolderAlert, setShowFolderAlert] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+
+  // Language state synchronized with landing page
+  const [currentLang, setCurrentLang] = useState<'en' | 'vi' | 'zh'>(() => {
+    const saved = localStorage.getItem('lp_lang');
+    return (saved === 'en' || saved === 'vi' || saved === 'zh') ? saved : 'vi';
+  });
+  const [langDropdownOpen, setLangDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('lp_lang', currentLang);
+  }, [currentLang]);
+
+  // Translate helper function
+  const t = (key: keyof typeof DASHBOARD_TRANSLATIONS.vi) => {
+    return DASHBOARD_TRANSLATIONS[currentLang][key] || DASHBOARD_TRANSLATIONS.vi[key] || '';
+  };
+
+  // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLeadsModalOpen, setIsLeadsModalOpen] = useState(false);
   const [selectedMemberProject, setSelectedMemberProject] = useState<{ id: string; name: string } | null>(null);
@@ -168,13 +404,12 @@ export const DashboardPage: React.FC = () => {
 
   useEffect(() => { loadProjects(); }, [loadProjects, isAuthenticated]);
 
-  // Set mặc định tab khi có thông tin người dùng
+  // Set default tab on load/login
   useEffect(() => {
     if (user) {
       if (isAdmin) {
         setActiveTab('all');
       } else {
-        // Kiểm tra xem user có dự án assigned nào không
         const assignedCount = projects.filter(p =>
           p.createdById === user.id || p.members?.some(m => m.userId === user.id)
         ).length;
@@ -186,6 +421,34 @@ export const DashboardPage: React.FC = () => {
       }
     }
   }, [user, isAdmin, projects.length]);
+
+  // Handle mobile responsive sidebar defaults
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 768) {
+        setIsSidebarOpen(false);
+      } else {
+        setIsSidebarOpen(true);
+      }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Dropdown closing listeners
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.dropdown-trigger') && !target.closest('.dropdown-menu')) {
+        setActiveDropdown(null);
+        setIsProfileOpen(false);
+        setLangDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // ── Polling logs khi pipeline đang chạy ──────────────────────────────────
   useEffect(() => {
@@ -202,7 +465,7 @@ export const DashboardPage: React.FC = () => {
           clearInterval(id);
           await loadProjects();
         }
-      } catch (_) {}
+      } catch (_) { }
     }, 1500);
     return () => clearInterval(id);
   }, [showPanel, loadProjects]);
@@ -210,9 +473,10 @@ export const DashboardPage: React.FC = () => {
   // ── Thao tác Admin: Đổi trạng thái Public Demo (1-click) ────────────────
   const handleTogglePublic = async (e: React.MouseEvent, project: Project) => {
     e.stopPropagation();
+    setActiveDropdown(null);
     const newIsPublic = !project.isPublic;
     const actionLabel = newIsPublic ? 'Công khai cho người dùng xem Demo' : 'Đặt làm Riêng tư (Chỉ thành viên xem)';
-    
+
     if (window.confirm(`Bạn có chắc chắn muốn ${actionLabel} dự án "${project.name}"?`)) {
       const updated = await updateProject(project.id, { isPublic: newIsPublic });
       if (updated) {
@@ -223,63 +487,83 @@ export const DashboardPage: React.FC = () => {
     }
   };
 
-  // ── Tạo dự án mới ──────────────────────────────────────────────────────────
-  const handleCreateProject = async (data: any) => {
-    if (data.isAutoProcess) {
-      const project = await createProject({
+  // ── Tạo hoặc Cập nhật dự án ──────────────────────────────────────────────────
+  const handleSaveProject = async (data: any) => {
+    if (editingProject) {
+      const updated = await updateProject(editingProject.id, {
         name: data.name,
         description: data.description,
+        centerLon: data.centerLon,
+        centerLat: data.centerLat,
         epsg: data.epsg,
-        centerLon: 0,
-        centerLat: 0,
+        domUrl: data.domUrl,
+        modelUrl: data.modelUrl,
+        pointCloudId: data.pointCloudId,
       });
-
-      if (!project?.id) {
-        alert('Không thể tạo dự án. Vui lòng thử lại.');
-        return;
+      if (updated) {
+        await loadProjects();
+        setEditingProject(null);
+      } else {
+        alert("Có lỗi xảy ra khi cập nhật dự án.");
       }
-
-      setPanelLogs([`[INFO] Dự án "${data.name}" được tạo thành công (ID: ${project.id})`]);
-      setPipeline({ isProcessing: true, projectId: project.id, startedAt: Date.now(), finishedAt: null, success: null });
-      setShowPanel(true);
-
-      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/logs/clear`, { method: 'POST' });
-
-      const token = localStorage.getItem('accessToken');
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/optimize/batch`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({
-          inputDir: data.inputDir,
-          outputDir: data.outputDir || undefined,
-          projectId: project.id,
-          epsg: data.epsg,
-        })
-      });
-
-      if (!res.ok) {
-        setPanelLogs(prev => [...prev, `[ERROR] Không thể kích hoạt pipeline xử lý.`]);
-      }
-
-      await loadProjects();
     } else {
-      await createProject(data);
-      await loadProjects();
+      if (data.isAutoProcess) {
+        const project = await createProject({
+          name: data.name,
+          description: data.description,
+          epsg: data.epsg,
+          centerLon: 0,
+          centerLat: 0,
+        });
+
+        if (!project?.id) {
+          alert('Không thể tạo dự án. Vui lòng thử lại.');
+          return;
+        }
+
+        setPanelLogs([`[INFO] Dự án "${data.name}" được tạo thành công (ID: ${project.id})`]);
+        setPipeline({ isProcessing: true, projectId: project.id, startedAt: Date.now(), finishedAt: null, success: null });
+        setShowPanel(true);
+
+        await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/logs/clear`, { method: 'POST' });
+
+        const token = localStorage.getItem('accessToken');
+        const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/optimize/batch`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({
+            inputDir: data.inputDir,
+            outputDir: data.outputDir || undefined,
+            projectId: project.id,
+            epsg: data.epsg,
+          })
+        });
+
+        if (!res.ok) {
+          setPanelLogs(prev => [...prev, `[ERROR] Không thể kích hoạt pipeline xử lý.`]);
+        }
+
+        await loadProjects();
+      } else {
+        await createProject(data);
+        await loadProjects();
+      }
     }
   };
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    setActiveDropdown(null);
     if (window.confirm('Bạn có chắc chắn muốn xóa dự án này?')) {
       await deleteProject(id);
       loadProjects();
     }
   };
 
-  // ── Lọc danh sách dự án theo Role & Search ──────────────────────────────
+  // ── Lọc danh sách dự án theo Role, Search & Sort ──────────────────────────────
   const assignedProjects = projects.filter(p =>
     p.createdById === user?.id || p.members?.some(m => m.userId === user?.id)
   );
@@ -288,11 +572,11 @@ export const DashboardPage: React.FC = () => {
   const getFilteredProjects = () => {
     let list: Project[] = [];
     if (activeTab === 'all') {
-      list = projects;
+      list = [...projects];
     } else if (activeTab === 'assigned') {
-      list = assignedProjects;
+      list = [...assignedProjects];
     } else if (activeTab === 'public') {
-      list = publicProjects;
+      list = [...publicProjects];
     }
 
     if (searchQuery.trim()) {
@@ -302,351 +586,838 @@ export const DashboardPage: React.FC = () => {
         (p.description && p.description.toLowerCase().includes(q))
       );
     }
+
+    // Sorting
+    if (sortBy === 'name') {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+    } else {
+      // default: latest created (ID descending)
+      list.sort((a, b) => b.id.localeCompare(a.id));
+    }
+
     return list;
   };
 
   const displayedProjects = getFilteredProjects();
 
   return (
-    <div className="min-h-screen bg-slate-950 p-4 sm:p-8 font-sans selection:bg-cyan-500 selection:text-slate-950">
-      <div className="max-w-7xl mx-auto space-y-8">
+    <div className="flex h-screen w-screen overflow-hidden bg-slate-50 text-slate-800 font-sans antialiased select-none">
 
-        {/* ── Enterprise Header & Role Badge ─────────────────────────────── */}
-        <div className="flex flex-wrap items-center justify-between gap-6 pb-6 border-b border-slate-800/80">
-          <div>
-            <div className="flex items-center gap-2.5 mb-1.5">
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-3">
-                <span>Dự Án 3D GIS Platform</span>
-              </h1>
-              {isAdmin ? (
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-500/10 border border-cyan-500/40 text-cyan-400 flex items-center gap-1 shadow-[0_0_12px_rgba(6,182,212,0.15)]">
-                  <Shield size={11} /> ADMIN CONTROL
-                </span>
-              ) : (
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/10 border border-emerald-500/40 text-emerald-400 flex items-center gap-1">
-                  <Building2 size={11} /> ENTERPRISE VIEWER
-                </span>
-              )}
+      {/* ── Collapsible Left Sidebar ─────────────────────────────── */}
+      <div
+        className={`bg-white border-r border-slate-200 flex flex-col justify-between shrink-0 transition-all duration-300 z-30 
+          md:static fixed inset-y-0 left-0 
+          ${isSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full md:w-0 md:translate-x-0 md:border-r-0 md:overflow-hidden'}`}
+      >
+        {/* Upper Sidebar */}
+        <div className="flex flex-col overflow-y-auto">
+          {/* Logo & Mobile Close Trigger */}
+          <div className="h-14 px-6 border-b border-slate-100 flex items-center justify-between">
+            <div className="flex items-center cursor-pointer" onClick={() => navigate('/')}>
+              <img src={logoImg} alt="Saolatek Logo" className="h-8 w-auto object-contain" />
             </div>
-            <p className="text-slate-400 text-xs sm:text-sm">
-              Hệ thống kết xuất và lưu trữ dữ liệu không gian 3D chất lượng cao (DOM, 3D Mesh, Point Cloud)
-            </p>
+            <button
+              onClick={() => setIsSidebarOpen(false)}
+              className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-700 md:hidden"
+            >
+              <X size={16} />
+            </button>
           </div>
 
-          <div className="flex items-center gap-3">
-            {isAuthenticated && user ? (
-              <div className="flex items-center gap-3 bg-slate-900/90 border border-slate-800 p-2 pr-4 rounded-xl font-mono text-xs backdrop-blur-md shadow-lg">
-                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center font-bold text-slate-950 text-sm shadow-md">
-                  {user.fullName.substring(0, 2).toUpperCase()}
-                </div>
-                <div>
-                  <div className="text-white font-bold flex items-center gap-1.5">
-                    {user.fullName}
-                    <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold uppercase ${
-                      isAdmin ? 'bg-cyan-950 text-cyan-400 border border-cyan-500/40' : 'bg-indigo-950 text-indigo-400 border border-indigo-500/40'
-                    }`}>
-                      {isAdmin ? 'SuperAdmin' : 'Member'}
-                    </span>
-                  </div>
-                  <div className="text-slate-400 text-[11px] font-mono">{user.email}</div>
-                </div>
+          {/* Navigation Links */}
+          <div className="px-3 py-4 space-y-6">
+            <div>
+              <span className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2 font-mono">{t('menuMain')}</span>
+              <div className="space-y-0.5">
                 <button
-                  onClick={() => logout()}
-                  className="ml-2 p-1.5 bg-red-950/40 hover:bg-red-900/80 border border-red-500/30 text-red-400 rounded-lg text-xs font-mono transition-all flex items-center gap-1"
-                  title="Đăng xuất"
+                  onClick={() => navigate('/dashboard')}
+                  className="w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg transition-colors cursor-pointer"
                 >
-                  <LogOut size={14} />
+                  <Layers size={15} />
+                  <span>{t('menuManageProjects')}</span>
                 </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Button variant="secondary" className="gap-2 text-xs font-mono" onClick={() => navigate('/login')}>
-                  <LogIn size={14} /> ĐĂNG NHẬP
-                </Button>
-                <Button className="gap-2 text-xs font-mono bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold" onClick={() => navigate('/register')}>
-                  ĐĂNG KÝ
-                </Button>
-              </div>
-            )}
-
-            {isAuthenticated && (
-              <div className="flex items-center gap-2">
                 <button
-                  onClick={loadProjects}
-                  className="p-2 text-slate-400 hover:text-white bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl transition-all"
-                  title="Làm mới danh sách"
-                >
-                  <RefreshCw size={16} />
-                </button>
-
-                <Button
-                  variant="secondary"
-                  className="gap-1.5 border-blue-500/40 text-blue-400 hover:bg-blue-950 font-mono text-xs"
                   onClick={() => navigate('/book-demo')}
+                  className="w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
                 >
-                  <Sparkles size={14} /> BOOK DEMO
-                </Button>
-
-                {isAdmin && (
-                  <>
-                    <Button
-                      variant="secondary"
-                      className="gap-1.5 border-purple-500/40 text-purple-300 hover:bg-purple-950 font-mono text-xs"
-                      onClick={() => setIsLeadsModalOpen(true)}
-                    >
-                      <Globe size={14} /> YÊU CẦU DEMO
-                    </Button>
-
-                    <Button
-                      className="gap-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs font-mono rounded-xl shadow-lg shadow-cyan-500/10"
-                      onClick={() => setIsModalOpen(true)}
-                    >
-                      <Plus size={16} /> DỰ ÁN MỚI
-                    </Button>
-                  </>
-                )}
+                  <Sparkles size={15} />
+                  <span>{t('menuBookDemo')}</span>
+                </button>
               </div>
-            )}
+            </div>
+
+            <div>
+              <span className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2 font-mono">{t('menuAdditional')}</span>
+              <div className="space-y-0.5">
+                <a
+                  href="https://dronedeploy.com"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-3 px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors"
+                >
+                  <BookOpen size={15} />
+                  <span>{t('menuAcademy')}</span>
+                </a>
+              </div>
+            </div>
+
+            <div>
+              <span className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2 font-mono">{t('menuDrone')}</span>
+              <div className="space-y-0.5">
+                <button
+                  onClick={() => alert(t('menuFlightLogs') + ' is under development')}
+                  className="w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors text-left cursor-pointer"
+                >
+                  <Plane size={15} />
+                  <span>{t('menuFlightLogs')}</span>
+                </button>
+                <button
+                  onClick={() => alert(t('menuEquipment') + ' is under development')}
+                  className="w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors text-left cursor-pointer"
+                >
+                  <Settings size={15} />
+                  <span>{t('menuEquipment')}</span>
+                </button>
+                <button
+                  onClick={() => alert(t('menuPilots') + ' is under development')}
+                  className="w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors text-left cursor-pointer"
+                >
+                  <User size={15} />
+                  <span>{t('menuPilots')}</span>
+                </button>
+                <button
+                  onClick={() => alert(t('menuApps') + ' is under development')}
+                  className="w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors text-left cursor-pointer"
+                >
+                  <Box size={15} />
+                  <span>{t('menuApps')}</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* ── Role-Based Navigation Tabs & Search Bar ────────────────────────── */}
-        <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/50 p-2 rounded-2xl border border-slate-800/80 backdrop-blur-md">
-          {/* Tabs */}
-          <div className="flex flex-wrap items-center gap-1 text-xs font-mono">
-            {isAdmin && (
-              <button
-                onClick={() => setActiveTab('all')}
-                className={`px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition-all cursor-pointer ${
-                  activeTab === 'all'
-                    ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                }`}
-              >
-                <Layers size={14} /> Tất cả dự án <span className="px-1.5 py-0.2 text-[10px] rounded bg-slate-950/40">{projects.length}</span>
-              </button>
-            )}
-
+        {/* Lower Sidebar */}
+        <div className="p-3 border-t border-slate-100 bg-slate-50/50 space-y-0.5">
+          <button
+            onClick={() => alert(t('menuSettings'))}
+            className="w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 rounded-lg transition-colors text-left cursor-pointer"
+          >
+            <Settings size={15} />
+            <span>{t('menuSettings')}</span>
+          </button>
+          <button
+            onClick={() => alert(t('menuHelp'))}
+            className="w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 rounded-lg transition-colors text-left cursor-pointer"
+          >
+            <HelpCircle size={15} />
+            <span>{t('menuHelp')}</span>
+          </button>
+          {isAuthenticated && user && (
             <button
-              onClick={() => setActiveTab('assigned')}
-              className={`px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition-all cursor-pointer ${
-                activeTab === 'assigned'
-                  ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
+              onClick={() => logout()}
+              className="w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 rounded-lg transition-colors text-left cursor-pointer"
             >
-              <Building2 size={14} /> Được cấp quyền <span className="px-1.5 py-0.2 text-[10px] rounded bg-slate-950/40">{assignedProjects.length}</span>
+              <LogOut size={15} />
+              <span>{t('logout')}</span>
             </button>
+          )}
+        </div>
+      </div>
 
+      {/* Backdrop for mobile sidebar */}
+      {isSidebarOpen && (
+        <div
+          onClick={() => setIsSidebarOpen(false)}
+          className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-20 md:hidden"
+        />
+      )}
+
+      {/* ── Main Layout Canvas ─────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden">
+
+        <header className="h-14 bg-white text-slate-800 flex items-center justify-between px-4 z-20 shrink-0 border-b border-slate-200 shadow-sm">
+          {/* Left Area: Hamburger and Brand */}
+          <div className="flex items-center gap-1.5 animate-fade-in">
             <button
-              onClick={() => setActiveTab('public')}
-              className={`px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition-all cursor-pointer ${
-                activeTab === 'public'
-                  ? 'bg-indigo-500 text-white shadow-md shadow-indigo-500/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
+              onClick={() => setIsSidebarOpen(v => !v)}
+              className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 hover:text-slate-800 cursor-pointer"
+              title="Menu"
             >
-              <Sparkles size={14} /> Demo Showcase <span className="px-1.5 py-0.2 text-[10px] rounded bg-slate-950/40">{publicProjects.length}</span>
+              <Menu size={18} />
             </button>
           </div>
 
-          {/* Search Box */}
-          <div className="relative min-w-[240px]">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          {/* Middle Area: Search bar matching template */}
+          <div className="relative w-full max-w-sm lg:max-w-md mx-4 select-none shrink">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-450" />
             <input
               type="text"
-              placeholder="Tìm kiếm dự án..."
+              placeholder={t('searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors font-sans"
+              className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors font-sans"
             />
+          </div>
+
+          {/* Right Area: Utility Actions */}
+          <div className="flex items-center gap-3">
+            {/* Language Switcher Dropdown (Globe Icon) */}
+            <div className="relative dropdown-trigger">
+              <button
+                onClick={() => setLangDropdownOpen(v => !v)}
+                className={`p-2 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer flex items-center justify-center relative
+                  ${langDropdownOpen ? 'text-slate-800 bg-slate-100' : 'text-slate-500 hover:text-slate-800'}`}
+                aria-label="Select language"
+                title={currentLang === 'vi' ? 'Chọn ngôn ngữ' : currentLang === 'en' ? 'Select language' : '选择语言'}
+              >
+                <Globe size={18} />
+              </button>
+
+              {langDropdownOpen && (
+                <div className="absolute right-0 mt-2 w-36 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-50 dropdown-menu text-slate-800 text-xs font-sans text-left">
+                  {[
+                    { code: 'vi', name: 'Tiếng Việt' },
+                    { code: 'en', name: 'English' },
+                    { code: 'zh', name: '中文' }
+                  ].map((item) => (
+                    <button
+                      key={item.code}
+                      onClick={() => {
+                        setCurrentLang(item.code as 'en' | 'vi' | 'zh');
+                        setLangDropdownOpen(false);
+                      }}
+                      className={`w-full px-4 py-2 hover:bg-slate-50 text-left font-semibold flex items-center justify-between cursor-pointer transition-colors ${currentLang === item.code ? 'text-blue-600 bg-blue-50/30' : 'text-slate-700 hover:text-slate-900'
+                        }`}
+                    >
+                      <span>{item.name}</span>
+                      {currentLang === item.code && <div className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Notification bell */}
+            <button
+              className="text-slate-500 hover:text-slate-800 p-2 hover:bg-slate-100 rounded-lg transition-colors relative cursor-pointer"
+              title="Thông báo"
+            >
+              <Bell size={16} />
+              <span className="absolute top-1 right-1.5 w-1.5 h-1.5 bg-blue-500 rounded-full" />
+            </button>
+
+            {/* Profile Dropdown trigger */}
+            {isAuthenticated && user ? (
+              <div className="relative dropdown-trigger">
+                <button
+                  onClick={() => setIsProfileOpen(v => !v)}
+                  className="w-8 h-8 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center text-xs shadow-md cursor-pointer transition-colors"
+                >
+                  {user.fullName.substring(0, 2).toUpperCase()}
+                </button>
+
+                {/* Profile menu dropdown overlay */}
+                {isProfileOpen && (
+                  <div className="absolute right-0 mt-2 w-56 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-50 dropdown-menu text-slate-800 text-xs font-sans text-left">
+                    <div className="px-4 py-2 border-b border-slate-100">
+                      <div className="font-bold text-slate-900 flex items-center gap-1">
+                        {user.fullName}
+                        {isAdmin && (
+                          <span className="text-[8px] bg-blue-100 text-blue-700 border border-blue-200 px-1 py-0.2 rounded font-mono uppercase font-bold">
+                            Admin
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate-400 font-mono mt-0.5 truncate">{user.email}</div>
+                    </div>
+
+                    <button
+                      onClick={() => { setIsProfileOpen(false); alert(t('userProfile')); }}
+                      className="w-full px-4 py-2 hover:bg-slate-50 text-left font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer"
+                    >
+                      <User size={14} className="text-slate-400" />
+                      <span>{t('userProfile')}</span>
+                    </button>
+
+                    {isAdmin && (
+                      <button
+                        onClick={() => { setIsProfileOpen(false); setIsLeadsModalOpen(true); }}
+                        className="w-full px-4 py-2 hover:bg-slate-50 text-left font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer"
+                      >
+                        <Globe size={14} className="text-slate-400" />
+                        <span>{t('requestList')}</span>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => { setIsProfileOpen(false); loadProjects(); }}
+                      className="w-full px-4 py-2 hover:bg-slate-50 text-left font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer"
+                    >
+                      <RefreshCw size={14} className="text-slate-400" />
+                      <span>{t('refreshList')}</span>
+                    </button>
+
+                    <div className="border-t border-slate-100 my-1" />
+
+                    <button
+                      onClick={() => logout()}
+                      className="w-full px-4 py-2 hover:bg-red-50 text-left font-semibold text-red-600 flex items-center gap-2 cursor-pointer"
+                    >
+                      <LogOut size={14} />
+                      <span>{t('logout')}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button
+                onClick={() => navigate('/login')}
+                className="p-1.5 hover:bg-neutral-800 rounded-lg text-slate-300 hover:text-white cursor-pointer"
+                title="Đăng nhập"
+              >
+                <LogIn size={18} />
+              </button>
+            )}
+          </div>
+        </header>
+
+        {/* ── Content Canvas Container ─────────────────────────────────── */}
+        <div className="flex-1 overflow-y-auto bg-slate-50/70 p-6 flex flex-col">
+          <div className="max-w-7xl w-full mx-auto flex-1 flex flex-col">
+
+            {/* ── Control Options & Action Buttons Bar ───────────────────── */}
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200 pb-3 mb-6 shrink-0">
+
+              {/* Left Side: Filter Tabs */}
+              <div className="flex border-b border-slate-200 -mb-px">
+                {isAdmin && (
+                  <button
+                    onClick={() => setActiveTab('all')}
+                    className={`pb-2.5 px-3.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'all'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
+                      }`}
+                  >
+                    <Layers size={14} />
+                    <span>{t('allProjects')}</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded font-semibold font-mono ${activeTab === 'all' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'
+                      }`}>{projects.length}</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={() => setActiveTab('assigned')}
+                  className={`pb-2.5 px-3.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'assigned'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
+                    }`}
+                >
+                  <Building2 size={14} />
+                  <span>{t('assignedProjects')}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded font-semibold font-mono ${activeTab === 'assigned' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'
+                    }`}>{assignedProjects.length}</span>
+                </button>
+
+                <button
+                  onClick={() => setActiveTab('public')}
+                  className={`pb-2.5 px-3.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'public'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
+                    }`}
+                >
+                  <Sparkles size={14} />
+                  <span>{t('publicShowcase')}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded font-semibold font-mono ${activeTab === 'public' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'
+                    }`}>{publicProjects.length}</span>
+                </button>
+              </div>
+
+              {/* Right Side: Layout and Actions Controls */}
+              <div className="flex items-center flex-wrap gap-3">
+                {/* Sort Option Dropdown */}
+                <div className="relative dropdown-trigger flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 font-semibold shadow-sm select-none">
+                  <span className="text-slate-400">{t('sortByLabel')}</span>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as 'lastCaptured' | 'name')}
+                    className="bg-transparent border-0 focus:outline-none focus:ring-0 pr-1 text-slate-800 cursor-pointer font-semibold"
+                  >
+                    <option value="lastCaptured">{t('sortLatest')}</option>
+                    <option value="name">{t('sortName')}</option>
+                  </select>
+                </div>
+
+                {/* Grid/List View switcher */}
+                <div className="flex bg-white border border-slate-200 rounded-lg p-0.5 shadow-sm">
+                  <button
+                    onClick={() => setViewMode('grid')}
+                    className={`p-1.5 rounded-md cursor-pointer transition-colors ${viewMode === 'grid' ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:text-slate-700'
+                      }`}
+                    title={currentLang === 'vi' ? 'Dạng lưới' : currentLang === 'en' ? 'Grid View' : '网格视图'}
+                  >
+                    <LayoutGrid size={15} />
+                  </button>
+                  <button
+                    onClick={() => setViewMode('list')}
+                    className={`p-1.5 rounded-md cursor-pointer transition-colors ${viewMode === 'list' ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:text-slate-700'
+                      }`}
+                    title={currentLang === 'vi' ? 'Dạng danh sách' : currentLang === 'en' ? 'List View' : '列表视图'}
+                  >
+                    <List size={15} />
+                  </button>
+                </div>
+
+                {/* Add new folder button */}
+                <button
+                  onClick={() => setShowFolderAlert(true)}
+                  className="bg-white hover:bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <FolderPlus size={14} className="text-slate-500" />
+                  <span>{t('newFolder')}</span>
+                </button>
+
+                {/* Add project button (Admin only) */}
+                {isAdmin && (
+                  <button
+                    onClick={() => setIsModalOpen(true)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3 py-1.5 text-xs font-semibold shadow-sm shadow-blue-500/10 transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Plus size={14} />
+                    <span>{t('newProject')}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* ── Project Showcase List/Grid ────────────────────────────────── */}
+            {isLoading ? (
+              <div className="flex-1 flex flex-col items-center justify-center py-24 text-slate-500 text-xs font-mono gap-3 animate-pulse">
+                <Loader2 size={24} className="animate-spin text-blue-500" />
+                <span>{t('loadingProjects')}</span>
+              </div>
+            ) : displayedProjects.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center py-20 bg-white border border-slate-200 rounded-2xl p-8 text-center shadow-sm">
+                <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 mb-4 shadow-inner">
+                  <Layers size={20} />
+                </div>
+                <h3 className="text-sm font-bold text-slate-900 mb-1.5">{t('noProjectsTitle')}</h3>
+                {activeTab === 'assigned' ? (
+                  <p className="text-xs text-slate-500 max-w-sm leading-relaxed">{t('noProjectsAssigned')}</p>
+                ) : activeTab === 'public' ? (
+                  <p className="text-xs text-slate-500 max-w-sm leading-relaxed">{t('noProjectsPublic')}</p>
+                ) : (
+                  <p className="text-xs text-slate-500 max-w-sm leading-relaxed">{t('noProjectsSystem')}</p>
+                )}
+              </div>
+            ) : viewMode === 'grid' ? (
+              /* GRID VIEW */
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
+                {displayedProjects.map((project) => {
+                  const isThisProcessing = pipeline.isProcessing && pipeline.projectId === project.id;
+                  const hasDOM = !!project.domUrl;
+                  const hasModel = !!project.modelUrl;
+                  const hasPC = !!project.pointCloudId;
+
+                  // Resolve user rights for project
+                  const isOwner = project.createdById === user?.id || project.members?.some(m => m.userId === user?.id && m.role === 'OWNER');
+                  const memberRole = project.members?.find(m => m.userId === user?.id)?.role;
+
+                  // Active layers count
+                  const layersCount = [hasDOM, hasModel, hasPC].filter(Boolean).length;
+
+                  return (
+                    <div
+                      key={project.id}
+                      className={`group bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 flex flex-col relative
+                        ${isThisProcessing ? 'ring-2 ring-blue-500/50 border-blue-500/30' : ''}`}
+                    >
+                      {/* Top processing bar if building */}
+                      {isThisProcessing && (
+                        <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 via-sky-400 to-blue-500 animate-pulse z-10" />
+                      )}
+
+                      {/* Map preview box */}
+                      <div className="h-40 bg-slate-100 relative overflow-hidden border-b border-slate-100 select-none text-slate-400">
+                        {isThisProcessing ? (
+                          <div className="w-full h-full flex flex-col items-center justify-center gap-1.5 text-slate-400 px-4 text-center bg-slate-50">
+                            <Loader2 size={24} className="text-blue-500 animate-spin" />
+                            <span className="text-[10px] font-mono text-blue-600 font-semibold animate-pulse">{t('processing3d')}</span>
+                          </div>
+                        ) : hasDOM ? (
+                          <img
+                            src={project.domUrl!}
+                            crossOrigin="anonymous"
+                            alt={project.name}
+                            className="w-full h-full object-cover group-hover:scale-103 transition-transform duration-500"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-slate-300 bg-slate-50">
+                            <MapPin size={32} className="text-slate-200" />
+                          </div>
+                        )}
+
+                        {/* Top Left: Role badge overlay */}
+                        <div className="absolute top-3 left-3 flex flex-col gap-1.5">
+                          {project.isPublic ? (
+                            <span className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-blue-500 text-white border border-blue-600/10 shadow-sm flex items-center gap-1">
+                              <Sparkles size={9} /> {t('publicShowcase').toUpperCase()}
+                            </span>
+                          ) : isOwner ? (
+                            <span className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-amber-500 text-white border border-amber-600/10 shadow-sm flex items-center gap-1">
+                              <Crown size={9} /> {t('owner').toUpperCase()}
+                            </span>
+                          ) : memberRole ? (
+                            <span className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-emerald-600 text-white border border-emerald-700/10 shadow-sm flex items-center gap-1">
+                              <Eye size={9} /> {memberRole === 'OWNER' ? t('owner').toUpperCase() : memberRole === 'EDITOR' ? 'EDITOR' : t('viewer').toUpperCase()}
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-slate-500 text-white border border-slate-600/10 shadow-sm flex items-center gap-1">
+                              <Lock size={9} /> {t('private').toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Top Right: Technical layers indicator icon overlay */}
+                        <div className="absolute top-3 right-3 select-none pointer-events-none">
+                          <div className="w-6 h-6 rounded-md bg-white/90 backdrop-blur-sm border border-slate-200 flex items-center justify-center text-slate-500 shadow-sm">
+                            <Globe size={13} />
+                          </div>
+                        </div>
+
+                        {/* EPSG coordinate tag bottom right */}
+                        <div className="absolute bottom-2.5 right-2.5 bg-neutral-900/80 text-white/95 text-[9px] font-mono px-2 py-0.5 rounded backdrop-blur-sm border border-neutral-800 shadow-sm select-text">
+                          EPSG: {project.epsg}
+                        </div>
+                      </div>
+
+                      {/* Card Content body */}
+                      <div className="p-4 flex flex-col flex-grow select-none">
+                        <div className="flex items-start justify-between gap-2">
+                          <h4
+                            onClick={() => !isThisProcessing && navigate(`/viewer/${project.id}`)}
+                            className="font-semibold text-slate-800 text-sm line-clamp-1 flex-1 transition-colors cursor-pointer hover:text-blue-600"
+                          >
+                            {project.name}
+                          </h4>
+
+                          {/* Card commands menu (triple dots) */}
+                          <div className="relative dropdown-trigger">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === project.id ? null : project.id); }}
+                              className="p-1 hover:bg-slate-100 rounded-md text-slate-400 hover:text-slate-700 transition-colors cursor-pointer flex items-center justify-center"
+                              title={t('projectOptions')}
+                            >
+                              <MoreVertical size={14} />
+                            </button>
+
+                            {/* Dropdown Options */}
+                            {activeDropdown === project.id && (
+                              <div className="absolute right-0 mt-1 w-44 bg-white border border-slate-200 rounded-lg shadow-xl py-1.5 z-30 dropdown-menu text-xs font-sans text-left">
+                                <button
+                                  onClick={() => { setActiveDropdown(null); navigate(`/viewer/${project.id}`); }}
+                                  className="w-full px-3 py-1.5 hover:bg-slate-50 text-left font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer"
+                                >
+                                  <Eye size={13} className="text-slate-400" />
+                                  <span>{t('view3DMap')}</span>
+                                </button>
+
+                                {isAdmin && (
+                                  <>
+                                    <button
+                                      onClick={(e) => handleTogglePublic(e, project)}
+                                      className="w-full px-3 py-1.5 hover:bg-slate-50 text-left font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer"
+                                    >
+                                      {project.isPublic ? <Lock size={13} className="text-slate-400" /> : <Globe size={13} className="text-slate-400" />}
+                                      <span>{project.isPublic ? t('setPrivate') : t('setPublic')}</span>
+                                    </button>
+
+                                    <button
+                                      onClick={() => { setActiveDropdown(null); setSelectedMemberProject({ id: project.id, name: project.name }); }}
+                                      className="w-full px-3 py-1.5 hover:bg-slate-50 text-left font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer"
+                                    >
+                                      <Users size={13} className="text-slate-400" />
+                                      <span>{t('manageMembers')}</span>
+                                    </button>
+
+                                    <button
+                                      onClick={() => { setActiveDropdown(null); setEditingProject(project); }}
+                                      className="w-full px-3 py-1.5 hover:bg-slate-50 text-left font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer"
+                                    >
+                                      <Settings size={13} className="text-slate-400" />
+                                      <span>{t('editProject')}</span>
+                                    </button>
+
+                                    <div className="border-t border-slate-100 my-1" />
+
+                                    <button
+                                      onClick={(e) => handleDelete(e, project.id)}
+                                      className="w-full px-3 py-1.5 hover:bg-red-50 text-left font-semibold text-red-600 flex items-center gap-2 cursor-pointer"
+                                    >
+                                      <Trash2 size={13} />
+                                      <span>{t('deleteProject')}</span>
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-slate-500 line-clamp-2 mt-1.5 min-h-[32px] leading-relaxed select-text">
+                          {project.description || t('noDesc')}
+                        </p>
+
+                        {/* Coordinates */}
+                        <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-500 mt-2 select-text">
+                          <MapPin size={11} className="text-slate-400 shrink-0" />
+                          <span className="truncate">
+                            {project.centerLon !== 0 || project.centerLat !== 0
+                              ? `Lon: ${project.centerLon.toFixed(4)}, Lat: ${project.centerLat.toFixed(4)}`
+                              : t('notDefined')}
+                          </span>
+                        </div>
+
+                        {/* Data badges indicators */}
+                        <div className="flex flex-wrap gap-1 mt-3.5 pt-3 border-t border-slate-100">
+                          <DataBadge icon={<Image size={10} />} label="DOM" active={hasDOM} />
+                          <DataBadge icon={<Box size={10} />} label="3D Mesh" active={hasModel} />
+                          <DataBadge icon={<HardDrive size={10} />} label="Point Cloud" active={hasPC} />
+                        </div>
+                      </div>
+
+                      {/* Card Footer / Stats */}
+                      <div className="px-4 py-3 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-semibold select-none font-mono">
+                        <div className="flex items-center gap-3">
+                          <span className="flex items-center gap-1" title={t('columnLayers')}>
+                            <Layers size={12} className="text-slate-400" />
+                            <span>{layersCount}</span>
+                          </span>
+                          <span className="flex items-center gap-1" title={t('columnMembers')}>
+                            <Users size={12} className="text-slate-400" />
+                            <span>{project.members?.length || 1}</span>
+                          </span>
+                        </div>
+
+                        {/* Progress status button if building */}
+                        {isThisProcessing ? (
+                          <button
+                            onClick={() => setShowPanel(true)}
+                            className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-md text-[10px] text-blue-600 hover:bg-blue-100 transition-colors cursor-pointer font-semibold"
+                          >
+                            <Terminal size={10} />
+                            <span>{t('viewProgress')}</span>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => navigate(`/viewer/${project.id}`)}
+                            className="text-blue-600 hover:text-blue-700 flex items-center gap-1 transition-colors cursor-pointer font-bold font-sans"
+                          >
+                            <span>{t('openMap')}</span>
+                            <ArrowRight size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* LIST VIEW */
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm mb-12 select-none">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider font-mono">
+                        <th className="py-3 px-4 w-1/3">{t('columnProject')}</th>
+                        <th className="py-3 px-4">{t('columnRole')}</th>
+                        <th className="py-3 px-4">{t('columnCoords')}</th>
+                        <th className="py-3 px-4">{t('columnLayers')}</th>
+                        <th className="py-3 px-4">{t('columnMembers')}</th>
+                        <th className="py-3 px-4 text-right">{t('columnActions')}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {displayedProjects.map((project) => {
+                        const isThisProcessing = pipeline.isProcessing && pipeline.projectId === project.id;
+                        const hasDOM = !!project.domUrl;
+                        const hasModel = !!project.modelUrl;
+                        const hasPC = !!project.pointCloudId;
+
+                        const isOwner = project.createdById === user?.id || project.members?.some(m => m.userId === user?.id && m.role === 'OWNER');
+                        const memberRole = project.members?.find(m => m.userId === user?.id)?.role;
+
+                        return (
+                          <tr key={project.id} className="hover:bg-slate-50/40 transition-colors">
+                            <td className="py-3.5 px-4">
+                              <div className="flex items-center gap-3">
+                                {/* Thumbnail */}
+                                <div className="w-16 h-10 rounded border border-slate-200 bg-slate-100 overflow-hidden shrink-0">
+                                  {isThisProcessing ? (
+                                    <div className="w-full h-full flex items-center justify-center">
+                                      <Loader2 size={12} className="animate-spin text-blue-500" />
+                                    </div>
+                                  ) : hasDOM ? (
+                                    <img src={project.domUrl!} crossOrigin="anonymous" alt="" className="w-full h-full object-cover" />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-slate-300">
+                                      <MapPin size={14} />
+                                    </div>
+                                  )}
+                                </div>
+                                {/* Meta info */}
+                                <div className="min-w-0">
+                                  <span
+                                    onClick={() => !isThisProcessing && navigate(`/viewer/${project.id}`)}
+                                    className="font-bold text-slate-800 hover:text-blue-600 cursor-pointer block truncate"
+                                  >
+                                    {project.name}
+                                  </span>
+                                  <span className="text-[11px] text-slate-400 block truncate max-w-xs">{project.description || t('noDesc')}</span>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4 whitespace-nowrap">
+                              {project.isPublic ? (
+                                <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-bold border border-blue-200">
+                                  {t('showcase')}
+                                </span>
+                              ) : isOwner ? (
+                                <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-200">
+                                  {t('owner')}
+                                </span>
+                              ) : memberRole ? (
+                                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-200">
+                                  {memberRole === 'OWNER' ? t('owner') : memberRole === 'EDITOR' ? 'EDITOR' : t('viewer')}
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-bold border border-slate-200">
+                                  {t('private')}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-4 font-mono text-[11px] text-slate-500 whitespace-nowrap select-text">
+                              <div>EPSG: {project.epsg}</div>
+                              <div className="text-[10px] text-slate-400">
+                                {project.centerLon !== 0 || project.centerLat !== 0
+                                  ? `${project.centerLon.toFixed(4)}, ${project.centerLat.toFixed(4)}`
+                                  : t('notDefined')}
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <div className="flex items-center gap-1">
+                                <span className={`w-2 h-2 rounded-full ${hasDOM ? 'bg-emerald-500' : 'bg-slate-300'}`} title="DOM" />
+                                <span className="text-[10px] text-slate-500 mr-2 font-mono">DOM</span>
+                                <span className={`w-2 h-2 rounded-full ${hasModel ? 'bg-emerald-500' : 'bg-slate-300'}`} title="Mesh" />
+                                <span className="text-[10px] text-slate-500 mr-2 font-mono">Mesh</span>
+                                <span className={`w-2 h-2 rounded-full ${hasPC ? 'bg-emerald-500' : 'bg-slate-300'}`} title="PointCloud" />
+                                <span className="text-[10px] text-slate-500 font-mono">Point</span>
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4 font-mono text-slate-500">
+                              {project.members?.length || 1}
+                            </td>
+                            <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-1.5">
+                                {isThisProcessing ? (
+                                  <button
+                                    onClick={() => setShowPanel(true)}
+                                    className="p-1.5 hover:bg-slate-100 rounded text-blue-600 flex items-center gap-1 cursor-pointer font-mono text-[10px]"
+                                  >
+                                    <Loader2 size={12} className="animate-spin" />
+                                    <span>{t('processing')}</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => navigate(`/viewer/${project.id}`)}
+                                    className="px-2.5 py-1 text-[11px] font-bold border border-slate-200 hover:border-blue-600 text-slate-700 hover:text-blue-600 rounded bg-white transition-all cursor-pointer flex items-center gap-1"
+                                  >
+                                    <span>{t('btnOpen')}</span>
+                                    <ArrowRight size={11} />
+                                  </button>
+                                )}
+
+                                {/* Row dropdown menu trigger */}
+                                <div className="relative dropdown-trigger">
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === project.id ? null : project.id); }}
+                                    className="p-1.5 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600 cursor-pointer flex items-center justify-center"
+                                  >
+                                    <MoreVertical size={14} />
+                                  </button>
+
+                                  {activeDropdown === project.id && (
+                                    <div className="absolute right-0 mt-1 w-44 bg-white border border-slate-200 rounded-lg shadow-xl py-1.5 z-30 dropdown-menu text-left text-xs font-sans">
+                                      <button
+                                        onClick={() => { setActiveDropdown(null); navigate(`/viewer/${project.id}`); }}
+                                        className="w-full px-3 py-1.5 hover:bg-slate-50 text-left font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer"
+                                      >
+                                        <Eye size={13} className="text-slate-400" />
+                                        <span>{t('view3DMap')}</span>
+                                      </button>
+
+                                      {isAdmin && (
+                                        <>
+                                          <button
+                                            onClick={(e) => handleTogglePublic(e, project)}
+                                            className="w-full px-3 py-1.5 hover:bg-slate-50 text-left font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer"
+                                          >
+                                            {project.isPublic ? <Lock size={13} className="text-slate-400" /> : <Globe size={13} className="text-slate-400" />}
+                                            <span>{project.isPublic ? t('setPrivate') : t('setPublic')}</span>
+                                          </button>
+
+                                          <button
+                                            onClick={() => { setActiveDropdown(null); setSelectedMemberProject({ id: project.id, name: project.name }); }}
+                                            className="w-full px-3 py-1.5 hover:bg-slate-50 text-left font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer"
+                                          >
+                                            <Users size={13} className="text-slate-400" />
+                                            <span>{t('manageMembers')}</span>
+                                          </button>
+
+                                          <button
+                                            onClick={() => { setActiveDropdown(null); setEditingProject(project); }}
+                                            className="w-full px-3 py-1.5 hover:bg-slate-50 text-left font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer"
+                                          >
+                                            <Settings size={13} className="text-slate-400" />
+                                            <span>{t('editProject')}</span>
+                                          </button>
+
+                                          <div className="border-t border-slate-100 my-1" />
+
+                                          <button
+                                            onClick={(e) => handleDelete(e, project.id)}
+                                            className="w-full px-3 py-1.5 hover:bg-red-50 text-left font-semibold text-red-600 flex items-center gap-2 cursor-pointer"
+                                          >
+                                            <Trash2 size={13} />
+                                            <span>{t('deleteProject')}</span>
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* ── Project Grid ──────────────────────────────────────────────── */}
-        {isLoading ? (
-          <div className="text-center py-24 font-mono text-xs text-slate-400 flex items-center justify-center gap-2">
-            <Loader2 size={16} className="animate-spin text-cyan-400" /> Đang tải danh sách dự án...
-          </div>
-        ) : displayedProjects.length === 0 ? (
-          <div className="text-center py-20 bg-slate-900/30 border border-slate-800/80 rounded-3xl p-8 font-mono text-sm text-slate-400 space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-slate-600">
-              <Layers size={24} />
-            </div>
-            {activeTab === 'assigned' ? (
-              <p>Bạn chưa có dự án nào được phân quyền. Vui lòng liên hệ <strong className="text-cyan-400">Admin</strong> để được cấp quyền truy cập.</p>
-            ) : activeTab === 'public' ? (
-              <p>Hiện chưa có dự án Demo công khai nào.</p>
-            ) : (
-              <p>Chưa có dự án nào trong hệ thống. Nhấn <strong className="text-cyan-400">"DỰ ÁN MỚI"</strong> để tạo dự án đầu tiên.</p>
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {displayedProjects.map((project) => {
-              const isThisProcessing = pipeline.isProcessing && pipeline.projectId === project.id;
-              const hasDOM = !!project.domUrl;
-              const hasModel = !!project.modelUrl;
-              const hasPC = !!project.pointCloudId;
-
-              // Tìm role của user đối với project này
-              const isOwner = project.createdById === user?.id || project.members?.some(m => m.userId === user?.id && m.role === 'OWNER');
-              const memberRole = project.members?.find(m => m.userId === user?.id)?.role;
-
-              return (
-                <Card
-                  key={project.id}
-                  className={`transition-all group relative bg-slate-900/90 border-slate-800/90 flex flex-col rounded-2xl overflow-hidden backdrop-blur-sm shadow-xl hover:shadow-2xl hover:border-slate-700
-                    ${isThisProcessing ? 'border-cyan-500/50 shadow-lg shadow-cyan-500/10' : ''}`}
-                >
-                  {/* Processing indicator */}
-                  {isThisProcessing && (
-                    <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-cyan-500 via-blue-400 to-cyan-500 animate-pulse z-20" />
-                  )}
-
-                  {/* Top Bar Badges & Admin Actions */}
-                  <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between pointer-events-none">
-                    {/* Role / Type Badge */}
-                    <div className="flex items-center gap-1.5 pointer-events-auto">
-                      {project.isPublic ? (
-                        <span className="px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold bg-indigo-950/90 text-indigo-300 border border-indigo-500/40 backdrop-blur-md flex items-center gap-1 shadow-md">
-                          <Sparkles size={10} /> DEMO SHOWCASE
-                        </span>
-                      ) : isOwner ? (
-                        <span className="px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold bg-amber-950/90 text-amber-300 border border-amber-500/40 backdrop-blur-md flex items-center gap-1 shadow-md">
-                          <CrownIcon size={10} /> CHỦ SỞ HỮU
-                        </span>
-                      ) : memberRole ? (
-                        <span className="px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold bg-emerald-950/90 text-emerald-300 border border-emerald-500/40 backdrop-blur-md flex items-center gap-1 shadow-md">
-                          <Eye size={10} /> {memberRole}
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold bg-slate-950/90 text-slate-400 border border-slate-800 backdrop-blur-md flex items-center gap-1">
-                          <Lock size={10} /> PRIVATE
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Admin Actions Dropdown / Buttons */}
-                    {isAdmin && (
-                      <div className="flex items-center gap-1.5 pointer-events-auto opacity-0 group-hover:opacity-100 transition-opacity">
-                        {/* Toggle Public Demo Switch */}
-                        <button
-                          onClick={(e) => handleTogglePublic(e, project)}
-                          className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold border transition-all flex items-center gap-1 cursor-pointer ${
-                            project.isPublic
-                              ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-400 hover:bg-emerald-900'
-                              : 'bg-slate-950/90 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'
-                          }`}
-                          title={project.isPublic ? 'Click để tắt công khai Demo' : 'Click để bật công khai Demo cho mọi người dùng'}
-                        >
-                          {project.isPublic ? <Globe size={11} /> : <Lock size={11} />}
-                          <span>{project.isPublic ? 'Công khai' : 'Riêng tư'}</span>
-                        </button>
-
-                        {/* Phân quyền */}
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setSelectedMemberProject({ id: project.id, name: project.name }); }}
-                          className="bg-slate-950/90 hover:bg-cyan-950 text-cyan-400 border border-cyan-500/40 p-1.5 rounded-lg transition-colors flex items-center justify-center cursor-pointer"
-                          title="Phân quyền thành viên"
-                        >
-                          <Users size={13} />
-                        </button>
-
-                        {/* Xóa */}
-                        <button
-                          onClick={(e) => handleDelete(e, project.id)}
-                          className="bg-red-950/90 hover:bg-red-900 text-red-400 border border-red-500/40 p-1.5 rounded-lg transition-colors flex items-center justify-center cursor-pointer"
-                          title="Xóa dự án"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* DOM Thumbnail */}
-                  <div className="h-44 bg-slate-950 overflow-hidden relative border-b border-slate-800/80">
-                    {isThisProcessing ? (
-                      <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-slate-600">
-                        <Loader2 size={32} className="text-cyan-400 animate-spin" />
-                        <span className="text-xs font-mono text-cyan-400 animate-pulse">Đang xử lý dữ liệu 3D...</span>
-                      </div>
-                    ) : hasDOM ? (
-                      <img src={project.domUrl!} crossOrigin="anonymous" alt={project.name} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-300" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-slate-700 bg-slate-950/50">
-                        <MapPin size={40} className="text-slate-800" />
-                      </div>
-                    )}
-                    <div className="absolute bottom-3 right-3 bg-slate-950/90 border border-slate-800 px-2 py-0.5 rounded text-[10px] font-mono text-slate-400 backdrop-blur-md">
-                      EPSG: {project.epsg}
-                    </div>
-                  </div>
-
-                  <CardHeader className="pb-2 pt-4">
-                    <CardTitle className="text-base font-bold text-white tracking-tight group-hover:text-cyan-400 transition-colors">{project.name}</CardTitle>
-                    <CardDescription className="text-slate-400 text-xs line-clamp-2">{project.description || 'Chưa có mô tả chi tiết'}</CardDescription>
-                  </CardHeader>
-
-                  <CardContent className="pb-3 flex-grow space-y-3">
-                    {/* Tọa độ */}
-                    <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-                      <MapPin size={12} className="text-cyan-400 flex-shrink-0" />
-                      <span>
-                        {project.centerLon !== 0 || project.centerLat !== 0
-                          ? `Lon: ${project.centerLon.toFixed(4)}, Lat: ${project.centerLat.toFixed(4)}`
-                          : 'Tọa độ chưa xác định'}
-                      </span>
-                    </div>
-
-                    {/* Data Layer Badges */}
-                    <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-800/60">
-                      <DataBadge icon={<Image size={10} />} label="DOM" active={hasDOM} />
-                      <DataBadge icon={<Box size={10} />} label="3D Mesh" active={hasModel} />
-                      <DataBadge icon={<HardDrive size={10} />} label="Point Cloud" active={hasPC} />
-                    </div>
-
-                    {/* Process progress button if running */}
-                    {isThisProcessing && (
-                      <button
-                        onClick={() => setShowPanel(true)}
-                        className="mt-2 w-full flex items-center justify-center gap-1.5 text-[10px] font-mono text-cyan-400 hover:text-cyan-300 bg-cyan-950/30 hover:bg-cyan-950/60 border border-cyan-500/20 rounded-xl py-1.5 transition-colors"
-                      >
-                        <Terminal size={10} /> Xem tiến trình xử lý
-                      </button>
-                    )}
-                  </CardContent>
-
-                  <CardFooter className="pt-2">
-                    <Button
-                      fullWidth
-                      variant="secondary"
-                      className={`gap-2 font-mono text-xs font-bold transition-all rounded-xl cursor-pointer
-                        ${isThisProcessing
-                          ? 'opacity-50 cursor-not-allowed'
-                          : 'group-hover:bg-cyan-500 group-hover:text-slate-950 group-hover:border-cyan-400'}`}
-                      onClick={() => !isThisProcessing && navigate(`/viewer/${project.id}`)}
-                      disabled={isThisProcessing}
-                    >
-                      {isThisProcessing ? (
-                        <><Loader2 size={14} className="animate-spin" /> Đang xử lý...</>
-                      ) : (
-                        <>MỞ BẢN ĐỒ 3D <ArrowRight size={14} /></>
-                      )}
-                    </Button>
-                  </CardFooter>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-
-        {/* ── Modals & Panels ────────────────────────────────────────────── */}
+        {/* ── Modals & Overlay Dialogs ─────────────────────────────────── */}
         <ProjectFormModal
-          isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
-          onSubmit={handleCreateProject}
+          isOpen={isModalOpen || !!editingProject}
+          onClose={() => {
+            setIsModalOpen(false);
+            setEditingProject(null);
+          }}
+          onSubmit={handleSaveProject}
+          project={editingProject}
         />
 
         {selectedMemberProject && (
@@ -662,7 +1433,7 @@ export const DashboardPage: React.FC = () => {
           onClose={() => setIsLeadsModalOpen(false)}
         />
 
-        {/* Pipeline panel */}
+        {/* Pipeline log status panel */}
         {showPanel && (
           <PipelinePanel
             logs={panelLogs}
@@ -670,16 +1441,33 @@ export const DashboardPage: React.FC = () => {
             onClose={() => setShowPanel(false)}
           />
         )}
+
+        {/* Dummy new folder dialog */}
+        {showFolderAlert && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 select-none">
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-xl w-full max-w-sm overflow-hidden text-center p-6 space-y-4">
+              <div className="w-12 h-12 bg-blue-50 border border-blue-200 rounded-full flex items-center justify-center text-blue-500 mx-auto">
+                <FolderPlus size={20} />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 text-sm">{t('folderTitle')}</h3>
+                <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                  {t('folderDesc')}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowFolderAlert(false)}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2 font-semibold text-xs transition-colors cursor-pointer shadow-sm shadow-blue-600/10"
+              >
+                {t('btnOk')}
+              </button>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );
 };
 
-// Crown icon helper component
-const CrownIcon: React.FC<{ size?: number }> = ({ size = 12 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M2 4l3 12h14l3-12-6 7-4-7-4 7-6-7z" />
-    <path d="M3 20h18" />
-  </svg>
-);
 export default DashboardPage;

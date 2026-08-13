@@ -80,12 +80,14 @@ export const Globe3DHero: React.FC<Globe3DHeroProps> = ({ isLightMode = false })
     scene.add(starfield);
 
     // 3. Texture Loader — Authentic NASA/Google Satellite Imagery
+    // Dùng import.meta.env.BASE_URL để đảm bảo đường dẫn đúng cả trên localhost lẫn GitHub Pages
     const textureLoader = new THREE.TextureLoader();
+    const base = import.meta.env.BASE_URL; // '/' on localhost, '/3dmappingwebsite/' on GitHub Pages
     
-    const earthDayMap = textureLoader.load('/textures/earth-day.jpg');
-    const earthSpecularMap = textureLoader.load('/textures/earth-specular.jpg');
-    const earthBumpMap = textureLoader.load('/textures/earth-topology.png');
-    const earthCloudMap = textureLoader.load('/textures/earth-clouds.png');
+    const earthDayMap = textureLoader.load(`${base}textures/earth-day.jpg`);
+    const earthSpecularMap = textureLoader.load(`${base}textures/earth-specular.jpg`);
+    const earthBumpMap = textureLoader.load(`${base}textures/earth-topology.png`);
+    const earthCloudMap = textureLoader.load(`${base}textures/earth-clouds.png`);
 
     earthDayMap.colorSpace = THREE.SRGBColorSpace;
 

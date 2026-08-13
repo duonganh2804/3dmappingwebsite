@@ -2715,7 +2715,6 @@ export const LandingPage: React.FC = () => {
                 </div>
               )}
             </li>
-            <li><button onClick={() => navigate('/pricing')} className="lp-nav__link" style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>{t('pricing')}</button></li>
           </ul>
 
           <div className="lp-nav__cta">
@@ -3045,15 +3044,6 @@ export const LandingPage: React.FC = () => {
                     </div>
                   </div>
                 )}
-              </li>
-              <li>
-                <button 
-                  className="lp-mobile-drawer__link-btn" 
-                  onClick={() => { setMobileMenuOpen(false); navigate('/pricing'); }}
-                  style={{ background: 'none', border: 'none', width: '100%', textAlign: 'left', font: 'inherit', padding: '12px 24px', cursor: 'pointer' }}
-                >
-                  {t('pricing')}
-                </button>
               </li>
             </ul>
 

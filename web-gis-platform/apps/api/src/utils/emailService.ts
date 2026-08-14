@@ -136,36 +136,65 @@ export async function sendPasswordResetEmail(email: string, token: string) {
     }
 
     const htmlContent = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f172a; color: #f8fafc; padding: 30px; border-radius: 16px; border: 1px solid #1e293b;">
-        <h2 style="color: #38bdf8; margin-top: 0; border-bottom: 1px solid #334155; padding-bottom: 15px; text-align: center;">
-          🔒 Khôi Phục Mật Khẩu Tài Khoản
-        </h2>
-        <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">Xin chào,</p>
-        <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản liên kết với địa chỉ email này của bạn trên hệ thống 3D GIS Platform.</p>
-        <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">Vui lòng nhấp vào nút bên dưới để tiến hành thiết lập mật khẩu mới (liên kết này có hiệu lực trong vòng 1 giờ):</p>
-        
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="${resetLink}" style="background: #38bdf8; color: #0f172a; padding: 12px 30px; font-weight: bold; text-decoration: none; border-radius: 8px; font-size: 14px; display: inline-block;">
-            Đặt Lại Mật Khẩu
-          </a>
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 40px 20px; background-color: #f8fafc;">
+        <div style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 40px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.02);">
+          <!-- Brand Logo / Header -->
+          <div style="margin-bottom: 32px; text-align: center;">
+            <span style="font-size: 14px; font-weight: 700; letter-spacing: 0.15em; color: #0f172a; text-transform: uppercase;">SAOLATEK</span>
+            <span style="font-size: 14px; font-weight: 400; letter-spacing: 0.15em; color: #64748b; text-transform: uppercase;"> | GIS</span>
+          </div>
+          
+          <!-- Title -->
+          <h2 style="font-size: 20px; font-weight: 700; color: #0f172a; margin-top: 0; margin-bottom: 16px; text-align: center; letter-spacing: -0.01em;">
+            Reset your password
+          </h2>
+          
+          <!-- Description -->
+          <p style="font-size: 14px; line-height: 1.6; color: #334155; margin-bottom: 24px;">
+            Hello,
+          </p>
+          <p style="font-size: 14px; line-height: 1.6; color: #334155; margin-bottom: 24px;">
+            We received a request to reset the password for your account associated with <span style="font-weight: 600; color: #0f172a;">${email}</span> on the SaolaGIS platform.
+          </p>
+          <p style="font-size: 14px; line-height: 1.6; color: #334155; margin-bottom: 32px;">
+            Please click the button below to set up a new password. This link is secure and will expire in <strong>60 minutes</strong>.
+          </p>
+          
+          <!-- Action Button -->
+          <div style="text-align: center; margin-bottom: 32px;">
+            <a href="${resetLink}" style="background-color: #434bed; color: #ffffff; padding: 12px 32px; font-weight: 600; font-size: 14px; text-decoration: none; border-radius: 8px; display: inline-block;">
+              Reset Password
+            </a>
+          </div>
+          
+          <!-- Fallback Link -->
+          <div style="background-color: #f1f5f9; border-radius: 8px; padding: 16px; margin-bottom: 32px; word-break: break-all; text-align: left;">
+            <p style="font-size: 11px; color: #64748b; margin: 0 0 8px 0;">If the button above doesn't work, copy and paste this URL into your browser:</p>
+            <a href="${resetLink}" style="font-size: 11px; color: #434bed; text-decoration: none; font-family: monospace;">${resetLink}</a>
+          </div>
+          
+          <!-- Notice -->
+          <p style="font-size: 13px; line-height: 1.6; color: #64748b; margin-bottom: 0;">
+            If you did not make this request, you can safely ignore this email. Your account remains secure and no changes have been made.
+          </p>
         </div>
-
-        <p style="color: #94a3b8; font-size: 13px; line-height: 1.6;">
-          Nếu bạn không thực hiện yêu cầu này, bạn có thể bỏ qua email này một cách an sau. Mật khẩu của bạn vẫn sẽ được giữ nguyên mà không có bất kỳ thay đổi nào.
-        </p>
-
-        <hr style="border: 0; border-top: 1px solid #1e293b; margin: 25px 0;" />
         
-        <p style="font-size: 12px; color: #64748b; margin-top: 25px; text-align: center;">
-          Đây là email tự động từ hệ thống 3D GIS Platform. Vui lòng không phản hồi lại email này.
-        </p>
+        <!-- Footer -->
+        <div style="text-align: center; margin-top: 24px;">
+          <p style="font-size: 11px; color: #94a3b8; margin: 0;">
+            © 2026 SAOLATEK. All rights reserved.
+          </p>
+          <p style="font-size: 11px; color: #94a3b8; margin: 4px 0 0 0;">
+            This is an automated security notification. Please do not reply directly to this email.
+          </p>
+        </div>
       </div>
     `;
 
     await transporter.sendMail({
-      from: `"3D GIS Platform" <${smtpUser || COMPANY_EMAIL}>`,
+      from: `"SaolaGIS" <${smtpUser || COMPANY_EMAIL}>`,
       to: email,
-      subject: `[3D GIS Platform] Yêu cầu đặt lại mật khẩu của bạn`,
+      subject: `Reset your SaolaGIS password`,
       html: htmlContent,
     });
 

@@ -41,20 +41,21 @@ export const googleLogin = async (req: Request, res: Response) => {
     }
 
     const { sub: googleId, email, name: fullName, picture: avatarUrl } = payload;
+    const sanitizedEmail = email.trim().toLowerCase();
 
     // Tìm hoặc khởi tạo tài khoản người dùng trong CSDL
     let user = await prisma.user.findFirst({
       where: {
-        OR: [{ googleId }, { email }]
+        OR: [{ googleId }, { email: sanitizedEmail }]
       }
     });
 
     if (!user) {
       user = await prisma.user.create({
         data: {
-          email,
+          email: sanitizedEmail,
           googleId,
-          fullName: fullName || email.split('@')[0],
+          fullName: fullName || sanitizedEmail.split('@')[0],
           avatarUrl,
           role: 'USER'
         }
@@ -108,11 +109,13 @@ export const register = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'Vui lòng nhập đầy đủ Email, Mật khẩu và Họ tên.' });
     }
 
+    const sanitizedEmail = email.trim().toLowerCase();
+
     if (password.length < 6) {
       return res.status(400).json({ success: false, message: 'Mật khẩu phải có tối thiểu 6 ký tự.' });
     }
 
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    const existingUser = await prisma.user.findUnique({ where: { email: sanitizedEmail } });
     if (existingUser) {
       return res.status(400).json({ success: false, message: 'Email này đã được đăng ký trên hệ thống.' });
     }
@@ -122,7 +125,7 @@ export const register = async (req: Request, res: Response) => {
 
     const newUser = await prisma.user.create({
       data: {
-        email,
+        email: sanitizedEmail,
         password: hashedPassword,
         fullName,
         role: 'USER'
@@ -178,7 +181,8 @@ export const login = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'Vui lòng nhập Email và Mật khẩu.' });
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const sanitizedEmail = email.trim().toLowerCase();
+    const user = await prisma.user.findUnique({ where: { email: sanitizedEmail } });
     if (!user) {
       return res.status(401).json({ success: false, message: 'Email hoặc mật khẩu không chính xác.' });
     }
@@ -303,7 +307,8 @@ export const forgotPassword = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'Vui lòng nhập địa chỉ email.' });
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const sanitizedEmail = email.trim().toLowerCase();
+    const user = await prisma.user.findUnique({ where: { email: sanitizedEmail } });
     if (!user) {
       return res.status(404).json({ success: false, message: 'Email này không tồn tại trên hệ thống.' });
     }

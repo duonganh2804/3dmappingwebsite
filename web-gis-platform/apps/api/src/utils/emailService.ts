@@ -12,18 +12,82 @@ interface SendLeadNotificationParams {
   source?: string;
 }
 
-export async function sendLeadNotificationEmail(lead: SendLeadNotificationParams) {
-  try {
-    // Config SMTP từ environment variables hoặc xài Ethereal / direct fallback
-    const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
-    const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
-    const smtpUser = process.env.SMTP_USER || '';
-    const smtpPass = process.env.SMTP_PASS || '';
+// Helper to send emails via HTTP API (Resend, Brevo) or SMTP fallback
+async function sendMailViaService(to: string, subject: string, htmlContent: string, fromName = '3D GIS Platform'): Promise<boolean> {
+  const resendKey = process.env.RESEND_API_KEY;
+  const brevoKey = process.env.BREVO_API_KEY;
+  const emailFrom = process.env.EMAIL_FROM || COMPANY_EMAIL;
 
-    let transporter;
+  // 1. Prioritize HTTP Email APIs to avoid SMTP port blocking on Render Free
+  if (resendKey) {
+    try {
+      const fromEmail = process.env.EMAIL_FROM || 'onboarding@resend.dev';
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${resendKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: `${fromName} <${fromEmail}>`,
+          to,
+          subject,
+          html: htmlContent,
+        }),
+      });
 
-    if (smtpUser && smtpPass) {
-      transporter = nodemailer.createTransport({
+      const data = await response.json() as any;
+      if (response.ok && data.id) {
+        console.log(`✅ [Resend] Email sent successfully to ${to}`);
+        return true;
+      }
+      console.error(`❌ [Resend Error] API returned error:`, data);
+      return false;
+    } catch (err: any) {
+      console.error(`❌ [Resend Error] Failed to send via Resend:`, err.message);
+      return false;
+    }
+  }
+
+  if (brevoKey) {
+    try {
+      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': brevoKey,
+          'Content-Type': 'application/json',
+          'accept': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: fromName, email: emailFrom },
+          to: [{ email: to }],
+          subject,
+          htmlContent,
+        }),
+      });
+
+      const data = await response.json() as any;
+      if (response.ok && data.messageId) {
+        console.log(`✅ [Brevo] Email sent successfully to ${to}`);
+        return true;
+      }
+      console.error(`❌ [Brevo Error] API returned error:`, data);
+      return false;
+    } catch (err: any) {
+      console.error(`❌ [Brevo Error] Failed to send via Brevo:`, err.message);
+      return false;
+    }
+  }
+
+  // 2. SMTP Fallback (Will run locally or if ports are unblocked)
+  const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
+  const smtpUser = process.env.SMTP_USER || '';
+  const smtpPass = process.env.SMTP_PASS || '';
+
+  if (smtpUser && smtpPass) {
+    try {
+      const transporter = nodemailer.createTransport({
         host: smtpHost,
         port: smtpPort,
         secure: smtpPort === 465,
@@ -33,25 +97,36 @@ export async function sendLeadNotificationEmail(lead: SendLeadNotificationParams
         },
         family: 4,
       } as any);
-    } else {
-      // Fallback khi chưa gắn pass app Gmail: log định dạng chi tiết
-      console.log(`\n======================================================`);
-      console.log(`📧 [EMAIL SERVICE NOTIFICATION] Send to: ${COMPANY_EMAIL}`);
-      console.log(`Subject: 🚀 Yêu cầu Demo Mới từ ${lead.email}`);
-      console.log(`Details:`);
-      console.log(`- Email doanh nghiệp: ${lead.email}`);
-      console.log(`- Họ tên: ${lead.fullName || 'Chưa cung cấp'}`);
-      console.log(`- Chức vụ / Công ty: ${lead.jobTitle || 'N/A'} - ${lead.company || 'N/A'}`);
-      console.log(`- Số điện thoại: ${lead.phone || 'N/A'}`);
-      console.log(`- Kênh biết đến: ${lead.source || 'N/A'}`);
-      console.log(`- Nội dung ghi chú: ${lead.message}`);
-      console.log(`======================================================\n`);
-      return true;
-    }
 
+      await transporter.sendMail({
+        from: `"${fromName}" <${smtpUser}>`,
+        to,
+        subject,
+        html: htmlContent,
+      });
+
+      console.log(`✅ [Nodemailer] Email sent successfully to ${to}`);
+      return true;
+    } catch (err: any) {
+      console.error(`❌ [Nodemailer Error] Failed to send email: ${err.message}`);
+      return false;
+    }
+  }
+
+  // 3. Dev Fallback (Prints reset link to console for local testing)
+  console.log(`\n======================================================`);
+  console.log(`📧 [EMAIL SERVICE NOTIFICATION] Fallback console output.`);
+  console.log(`Send to: ${to}`);
+  console.log(`Subject: ${subject}`);
+  console.log(`======================================================\n`);
+  return true;
+}
+
+export async function sendLeadNotificationEmail(lead: SendLeadNotificationParams) {
+  try {
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f172a; color: #f8fafc; padding: 30px; border-radius: 16px; border: 1px solid #1e293b;">
-        <h2 style="color: #38bdf8; margin-top: 0; border-b: 1px solid #334155; padding-bottom: 15px;">
+        <h2 style="color: #38bdf8; margin-top: 0; border-bottom: 1px solid #334155; padding-bottom: 15px;">
           🚀 Yêu cầu Book a Demo Mới!
         </h2>
         <p style="color: #94a3b8; font-size: 14px;">Hệ thống vừa ghi nhận một khách hàng mới đăng ký yêu cầu trải nghiệm Demo 3D GIS Platform:</p>
@@ -90,52 +165,18 @@ export async function sendLeadNotificationEmail(lead: SendLeadNotificationParams
       </div>
     `;
 
-    await transporter.sendMail({
-      from: `"3D GIS Platform" <${smtpUser || COMPANY_EMAIL}>`,
-      to: COMPANY_EMAIL,
-      subject: `[Demo Request] Yêu cầu Demo từ ${lead.email}`,
-      html: htmlContent,
-    });
-
-    console.log(`✅ [Nodemailer] Đã gửi email thông báo thành công tới ${COMPANY_EMAIL}`);
-    return true;
+    const success = await sendMailViaService(COMPANY_EMAIL, `[Demo Request] Yêu cầu Demo từ ${lead.email}`, htmlContent);
+    return success;
   } catch (err: any) {
-    console.error(`❌ [Nodemailer Error] Không thể gửi email: ${err.message}`);
+    console.error(`❌ [Lead Notification Error] Failed to send email: ${err.message}`);
     return false;
   }
 }
 
 export async function sendPasswordResetEmail(email: string, token: string) {
   try {
-    const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
-    const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
-    const smtpUser = process.env.SMTP_USER || '';
-    const smtpPass = process.env.SMTP_PASS || '';
-
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const resetLink = `${frontendUrl}/#/reset-password?token=${token}`;
-
-    let transporter;
-
-    if (smtpUser && smtpPass) {
-      transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpPort === 465,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-        family: 4,
-      } as any);
-    } else {
-      console.log(`\n======================================================`);
-      console.log(`📧 [EMAIL SERVICE NOTIFICATION] Password Reset Requested`);
-      console.log(`Send to: ${email}`);
-      console.log(`Reset Link: ${resetLink}`);
-      console.log(`======================================================\n`);
-      return true;
-    }
 
     const htmlContent = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 40px 20px; background-color: #f8fafc;">
@@ -193,17 +234,10 @@ export async function sendPasswordResetEmail(email: string, token: string) {
       </div>
     `;
 
-    await transporter.sendMail({
-      from: `"SaolaGIS" <${smtpUser || COMPANY_EMAIL}>`,
-      to: email,
-      subject: `Reset your SaolaGIS password`,
-      html: htmlContent,
-    });
-
-    console.log(`✅ [Nodemailer] Đã gửi email khôi phục mật khẩu thành công tới ${email}`);
-    return true;
+    const success = await sendMailViaService(email, `Reset your SaolaGIS password`, htmlContent, 'SaolaGIS');
+    return success;
   } catch (err: any) {
-    console.error(`❌ [Nodemailer Error] Không thể gửi email khôi phục mật khẩu: ${err.message}`);
+    console.error(`❌ [Password Reset Error] Failed to send email: ${err.message}`);
     return false;
   }
 }

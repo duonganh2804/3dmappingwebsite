@@ -32,7 +32,7 @@ export async function sendLeadNotificationEmail(lead: SendLeadNotificationParams
           pass: smtpPass,
         },
         family: 4,
-      });
+      } as any);
     } else {
       // Fallback khi chưa gắn pass app Gmail: log định dạng chi tiết
       console.log(`\n======================================================`);
@@ -127,7 +127,7 @@ export async function sendPasswordResetEmail(email: string, token: string) {
           pass: smtpPass,
         },
         family: 4,
-      });
+      } as any);
     } else {
       console.log(`\n======================================================`);
       console.log(`📧 [EMAIL SERVICE NOTIFICATION] Password Reset Requested`);

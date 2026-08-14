@@ -14,40 +14,10 @@ interface SendLeadNotificationParams {
 
 // Helper to send emails via HTTP API (Resend, Brevo) or SMTP fallback
 async function sendMailViaService(to: string, subject: string, htmlContent: string, fromName = '3D GIS Platform'): Promise<boolean> {
-  const resendKey = process.env.RESEND_API_KEY;
   const brevoKey = process.env.BREVO_API_KEY;
   const emailFrom = process.env.EMAIL_FROM || COMPANY_EMAIL;
 
-  // 1. Prioritize HTTP Email APIs to avoid SMTP port blocking on Render Free
-  if (resendKey) {
-    try {
-      const fromEmail = process.env.EMAIL_FROM || 'onboarding@resend.dev';
-      const response = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${resendKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: `${fromName} <${fromEmail}>`,
-          to,
-          subject,
-          html: htmlContent,
-        }),
-      });
-
-      const data = await response.json() as any;
-      if (response.ok && data.id) {
-        console.log(`✅ [Resend] Email sent successfully to ${to}`);
-        return true;
-      }
-      console.error(`❌ [Resend Error] API returned error:`, data);
-      return false;
-    } catch (err: any) {
-      console.error(`❌ [Resend Error] Failed to send via Resend:`, err.message);
-      return false;
-    }
-  }
+  // 1. Prioritize HTTP Email API (Brevo) to avoid SMTP port blocking on Render Free
 
   if (brevoKey) {
     try {

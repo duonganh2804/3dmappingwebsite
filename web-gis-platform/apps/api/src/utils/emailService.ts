@@ -103,3 +103,76 @@ export async function sendLeadNotificationEmail(lead: SendLeadNotificationParams
     return false;
   }
 }
+
+export async function sendPasswordResetEmail(email: string, token: string) {
+  try {
+    const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+    const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
+    const smtpUser = process.env.SMTP_USER || '';
+    const smtpPass = process.env.SMTP_PASS || '';
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const resetLink = `${frontendUrl}/#/reset-password?token=${token}`;
+
+    let transporter;
+
+    if (smtpUser && smtpPass) {
+      transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
+    } else {
+      console.log(`\n======================================================`);
+      console.log(`📧 [EMAIL SERVICE NOTIFICATION] Password Reset Requested`);
+      console.log(`Send to: ${email}`);
+      console.log(`Reset Link: ${resetLink}`);
+      console.log(`======================================================\n`);
+      return true;
+    }
+
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f172a; color: #f8fafc; padding: 30px; border-radius: 16px; border: 1px solid #1e293b;">
+        <h2 style="color: #38bdf8; margin-top: 0; border-bottom: 1px solid #334155; padding-bottom: 15px; text-align: center;">
+          🔒 Khôi Phục Mật Khẩu Tài Khoản
+        </h2>
+        <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">Xin chào,</p>
+        <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản liên kết với địa chỉ email này của bạn trên hệ thống 3D GIS Platform.</p>
+        <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">Vui lòng nhấp vào nút bên dưới để tiến hành thiết lập mật khẩu mới (liên kết này có hiệu lực trong vòng 1 giờ):</p>
+        
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${resetLink}" style="background: #38bdf8; color: #0f172a; padding: 12px 30px; font-weight: bold; text-decoration: none; border-radius: 8px; font-size: 14px; display: inline-block;">
+            Đặt Lại Mật Khẩu
+          </a>
+        </div>
+
+        <p style="color: #94a3b8; font-size: 13px; line-height: 1.6;">
+          Nếu bạn không thực hiện yêu cầu này, bạn có thể bỏ qua email này một cách an sau. Mật khẩu của bạn vẫn sẽ được giữ nguyên mà không có bất kỳ thay đổi nào.
+        </p>
+
+        <hr style="border: 0; border-top: 1px solid #1e293b; margin: 25px 0;" />
+        
+        <p style="font-size: 12px; color: #64748b; margin-top: 25px; text-align: center;">
+          Đây là email tự động từ hệ thống 3D GIS Platform. Vui lòng không phản hồi lại email này.
+        </p>
+      </div>
+    `;
+
+    await transporter.sendMail({
+      from: `"3D GIS Platform" <${smtpUser || COMPANY_EMAIL}>`,
+      to: email,
+      subject: `[3D GIS Platform] Yêu cầu đặt lại mật khẩu của bạn`,
+      html: htmlContent,
+    });
+
+    console.log(`✅ [Nodemailer] Đã gửi email khôi phục mật khẩu thành công tới ${email}`);
+    return true;
+  } catch (err: any) {
+    console.error(`❌ [Nodemailer Error] Không thể gửi email khôi phục mật khẩu: ${err.message}`);
+    return false;
+  }
+}

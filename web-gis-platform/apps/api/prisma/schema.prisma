@@ -22,15 +22,17 @@ enum ProjectRole {
 }
 
 model User {
-  id              String          @id @default(uuid())
-  email           String          @unique
-  password        String?         // Hashed bcrypt (salt = 12, optional for Google users)
-  googleId        String?         @unique
-  fullName        String
-  role            SystemRole      @default(USER)
-  avatarUrl       String?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  id                   String          @id @default(uuid())
+  email                String          @unique
+  password             String?         // Hashed bcrypt (salt = 12, optional for Google users)
+  googleId             String?         @unique
+  fullName             String
+  role                 SystemRole      @default(USER)
+  avatarUrl            String?
+  resetPasswordToken   String?         @unique
+  resetPasswordExpires DateTime?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
   
   createdProjects Project[]       @relation("CreatedProjects")
   memberships     ProjectMember[]

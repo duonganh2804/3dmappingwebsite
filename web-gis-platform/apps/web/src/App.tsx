@@ -6,6 +6,8 @@ import { ViewerPage } from './pages/ViewerPage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { BookDemoPage } from './pages/BookDemoPage';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { useAuthStore } from './store/useAuthStore';
 
 function App() {
@@ -21,6 +23,8 @@ function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/book-demo" element={<BookDemoPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/viewer/:projectId" element={<ViewerPage />} />

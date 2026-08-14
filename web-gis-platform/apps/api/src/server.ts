@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs-extra';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
-import { register, login, googleLogin, refresh, logout, me } from './controllers/authController';
+import { register, login, googleLogin, refresh, logout, me, forgotPassword, resetPassword } from './controllers/authController';
 import { getProjectMembers, addProjectMember, updateProjectMemberRole, removeProjectMember } from './controllers/memberController';
 import { authenticateToken, optionalAuth, requireProjectRole, AuthRequest } from './middlewares/authMiddleware';
 import { translateTileset } from './utils/translator';
@@ -44,6 +44,8 @@ app.post('/api/auth/login', authRateLimiter, login);
 app.post('/api/auth/google', authRateLimiter, googleLogin);
 app.post('/api/auth/refresh', refresh);
 app.post('/api/auth/logout', logout);
+app.post('/api/auth/forgot-password', authRateLimiter, forgotPassword);
+app.post('/api/auth/reset-password', authRateLimiter, resetPassword);
 app.get('/api/auth/me', authenticateToken, me);
 
 // ── 2. PROJECT MEMBER & PERMISSION ROUTES ──

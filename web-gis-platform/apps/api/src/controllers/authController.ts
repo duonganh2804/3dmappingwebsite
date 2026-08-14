@@ -2,10 +2,12 @@ import 'dotenv/config';
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { PrismaClient } from '../generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 import { OAuth2Client } from 'google-auth-library';
+import { sendPasswordResetEmail } from '../utils/emailService';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'webgis-super-secret-key-2026';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'webgis-refresh-secret-key-2026';
@@ -289,5 +291,99 @@ export const me = async (req: any, res: Response) => {
     res.json({ success: true, user });
   } catch (err: any) {
     res.status(500).json({ success: false, message: 'Lỗi đọc thông tin tài khoản.' });
+  }
+};
+
+// 6. Yêu Cầu Khôi Phục Mật Khẩu (Forgot Password)
+export const forgotPassword = async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Vui lòng nhập địa chỉ email.' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Email này không tồn tại trên hệ thống.' });
+    }
+
+    if (!user.password && user.googleId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tài khoản này được đăng ký thông qua Google. Vui lòng sử dụng tính năng Đăng nhập bằng Google.'
+      });
+    }
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetExpires = new Date(Date.now() + 3600000); // 1 giờ
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetPasswordToken: resetToken,
+        resetPasswordExpires: resetExpires
+      }
+    });
+
+    const mailSent = await sendPasswordResetEmail(user.email, resetToken);
+    if (!mailSent) {
+      return res.status(500).json({ success: false, message: 'Không thể gửi email khôi phục mật khẩu. Vui lòng thử lại sau.' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Một email hướng dẫn khôi phục mật khẩu đã được gửi tới địa chỉ của bạn.'
+    });
+  } catch (err: any) {
+    console.error('Lỗi yêu cầu khôi phục mật khẩu:', err);
+    res.status(500).json({ success: false, message: 'Lỗi máy chủ khi yêu cầu khôi phục mật khẩu.' });
+  }
+};
+
+// 7. Thiết Lập Mật Khẩu Mới (Reset Password)
+export const resetPassword = async (req: Request, res: Response) => {
+  try {
+    const { token, password } = req.body;
+
+    if (!token || !password) {
+      return res.status(400).json({ success: false, message: 'Thiếu token xác thực hoặc mật khẩu mới.' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ success: false, message: 'Mật khẩu mới phải có tối thiểu 6 ký tự.' });
+    }
+
+    const user = await prisma.user.findFirst({
+      where: {
+        resetPasswordToken: token,
+        resetPasswordExpires: {
+          gt: new Date()
+        }
+      }
+    });
+
+    if (!user) {
+      return res.status(400).json({ success: false, message: 'Mã xác thực không hợp lệ hoặc đã hết hạn.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword,
+        resetPasswordToken: null,
+        resetPasswordExpires: null
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Mật khẩu của bạn đã được cập nhật thành công! Vui lòng đăng nhập lại.'
+    });
+  } catch (err: any) {
+    console.error('Lỗi đặt lại mật khẩu:', err);
+    res.status(500).json({ success: false, message: 'Lỗi máy chủ khi đặt lại mật khẩu.' });
   }
 };

@@ -10,11 +10,11 @@ import {
   BarChart3,
   Cpu,
   ChevronDown,
-  ExternalLink,
   Menu,
   X,
 } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
+import { useLanguage } from '../hooks/useLanguage';
 import Globe3DHero from '../components/Globe3DHero';
 import logoImg from '../assets/logo.webp';
 
@@ -79,14 +79,21 @@ function FeatureRow({ index, icon, label, heading, body, visual, flip = false }:
 }
 
 /* ── LAYER CARD VISUAL ── */
-function LayerStackVisual() {
+interface LayerStackVisualProps {
+  orthophotoLabel: string;
+  meshLabel: string;
+  pointCloudLabel: string;
+  elevationLabel: string;
+}
+
+function LayerStackVisual({ orthophotoLabel, meshLabel, pointCloudLabel, elevationLabel }: LayerStackVisualProps) {
   return (
     <div className="lp-visual-layers" aria-hidden="true">
       {[
-        { label: 'AI Feature Labels', color: 'var(--lp-accent-amber)', delay: '0ms' },
-        { label: '3D Textured Mesh', color: 'var(--lp-accent)', delay: '60ms' },
-        { label: 'Point Cloud COPC', color: 'var(--lp-accent-green)', delay: '120ms' },
-        { label: 'Elevation Model DEM', color: 'var(--lp-accent-muted)', delay: '180ms' },
+        { label: orthophotoLabel, color: 'var(--lp-accent-amber)', delay: '0ms' },
+        { label: meshLabel, color: 'var(--lp-accent)', delay: '60ms' },
+        { label: pointCloudLabel, color: 'var(--lp-accent-green)', delay: '120ms' },
+        { label: elevationLabel, color: 'var(--lp-accent-muted)', delay: '180ms' },
       ].map((layer, i) => (
         <div key={i} className="lp-visual-layer" style={{ '--layer-color': layer.color, '--layer-delay': layer.delay } as React.CSSProperties}>
           <div className="lp-visual-layer__bar" />
@@ -98,7 +105,7 @@ function LayerStackVisual() {
 }
 
 /* ── TERRAIN VISUAL ── */
-function TerrainVisual() {
+function TerrainVisual({ expandLabel }: { expandLabel: string }) {
   const videoUrl = 'https://pub-1d5704adea5c46b3920fd8f19e3c3480.r2.dev/videos/Video%203D%20Mapping%20nh%C3%A0%20m%C3%A1y%20nhi%E1%BB%87t%20%C4%91i%E1%BB%87n%20Long%20Ph%C3%BA%20v1.mp4';
   const [showLightbox, setShowLightbox] = React.useState(false);
 
@@ -169,7 +176,7 @@ function TerrainVisual() {
             letterSpacing: '0.05em',
             textShadow: '0 2px 4px rgba(0,0,0,0.5)'
           }}>
-            XEM TOÀN MÀN HÌNH
+            {expandLabel}
           </span>
         </div>
         
@@ -258,16 +265,55 @@ function TerrainVisual() {
 }
 
 /* ── ANALYTICS VISUAL ── */
-function AnalyticsVisual() {
-  const bars = [62, 80, 45, 95, 70, 55, 88];
+function MeasurementVisual() {
   return (
-    <div className="lp-visual-analytics" aria-hidden="true">
-      <div className="lp-analytics-chart">
-        {bars.map((h, i) => (
-          <div key={i} className="lp-analytics-bar" style={{ '--bar-h': `${h}%`, '--bar-delay': `${i * 80}ms` } as React.CSSProperties} />
-        ))}
+    <div className="lp-measure-visual" aria-hidden="true">
+      <div className="lp-measure-visual__canvas">
+        <svg className="lp-measure-visual__svg" viewBox="0 0 420 230" role="presentation">
+          <defs>
+            <linearGradient id="measureTerrain" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="rgba(30, 64, 175, 0.16)" />
+              <stop offset="100%" stopColor="rgba(8, 145, 178, 0.05)" />
+            </linearGradient>
+          </defs>
+          <path
+            d="M24 182 C78 145, 126 166, 171 126 C218 85, 272 116, 316 80 C349 53, 379 62, 399 46 L399 205 L24 205 Z"
+            fill="url(#measureTerrain)"
+            stroke="rgba(56, 189, 248, 0.32)"
+            strokeWidth="1.2"
+          />
+          <path d="M72 162 L195 106 L326 150" fill="none" stroke="rgba(56, 189, 248, 0.9)" strokeWidth="2" strokeDasharray="5 5" />
+          <path d="M195 106 L195 180" fill="none" stroke="rgba(251, 146, 60, 0.9)" strokeWidth="2" strokeDasharray="4 4" />
+          <circle cx="72" cy="162" r="5" fill="#38bdf8" />
+          <circle cx="195" cy="106" r="5" fill="#fb923c" />
+          <circle cx="326" cy="150" r="5" fill="#22c55e" />
+          <circle cx="195" cy="180" r="4" fill="rgba(251,146,60,0.95)" />
+          <text x="112" y="126" className="lp-measure-visual__svg-label">128.42 m</text>
+          <text x="205" y="151" className="lp-measure-visual__svg-label lp-measure-visual__svg-label--amber">Δ 16.80 m</text>
+        </svg>
+
+        <div className="lp-measure-visual__grid" />
+        <div className="lp-measure-visual__badge">3D MEASUREMENT</div>
       </div>
-      <div className="lp-analytics-label">Spatial Analytics — Live</div>
+
+      <div className="lp-measure-visual__metrics">
+        <div className="lp-measure-metric">
+          <span>DISTANCE</span>
+          <strong>128.42 m</strong>
+        </div>
+        <div className="lp-measure-metric">
+          <span>Δ HEIGHT</span>
+          <strong>16.80 m</strong>
+        </div>
+        <div className="lp-measure-metric">
+          <span>AREA</span>
+          <strong>2,458 m²</strong>
+        </div>
+        <div className="lp-measure-metric">
+          <span>CUT / FILL</span>
+          <strong>324 m³</strong>
+        </div>
+      </div>
     </div>
   );
 }
@@ -283,6 +329,22 @@ const TRANSLATIONS = {
     login: "Log in",
     bookDemo: "Book a demo",
     dashboard: "Dashboard",
+    platformPointCloud: "Point Cloud & LiDAR",
+    platformAnalysis: "3D Measurement & Analysis",
+    platformLayers: "Data Layer Management",
+    platformCoordinates: "VN-2000 & Coordinate Systems",
+    platformProjects: "Project Sharing & Management",
+    solSurveying: "Surveying & Measurement",
+    solConstructionInfra: "Construction & Infrastructure",
+    solUavMapping: "UAV Mapping & LiDAR",
+    resMappingWorkflow: "3D Mapping Workflow",
+    resEquipmentSpecs: "Equipment & Technical Specifications",
+    res3DOutputs: "3D Data Outputs",
+    resDemoMaps: "Demo Maps",
+    resGuides: "User Guides",
+    demoRegistration: "Book a demo",
+    connectConsultation: "Contact an Advisor",
+    connectLoginTrial: "Log In / Start a Trial",
 
     // Platform Dropdown
     coreViewer: "Core Viewer",
@@ -410,34 +472,39 @@ const TRANSLATIONS = {
     ogcLabel: "Vietnam Drone Solutions",
 
     // Features Section
-    feature1Label: "DATA LAYERS",
-    feature1Heading: "Overlay Geographic Data Layers",
-    feature1Body: "Flexibly combine Point Cloud COPC, 3D Mesh, BIM/IFC models, DEM terrain, and Vector data under VN-2000 / WGS84 coordinate systems. Toggle visibility and opacity of each layer in real time.",
-    feature2Label: "FIELD SURVEY",
-    feature2Heading: "CHCNAV LiDAR & SAOLATEK Drone Integration",
-    feature2Body: "Process raw LiDAR scans and drone imagery processed through CoPre & CoProcess software. Seamlessly integrate with SAOLATEK professional drone systems to reconstruct high-accuracy 3D Tiles, Draco 3D Meshes, and classified COPC point clouds.",
-    feature3Label: "SPATIAL ANALYTICS",
-    feature3Heading: "Instant Precision Measurement & Analysis",
-    feature3Body: "Measure 3D distance, height, area, and cut-and-fill volume directly on the map. Export reports in GeoJSON, CSV, or PDF formats with a single click.",
+    feature1Label: "DATA LAYER MANAGEMENT",
+    feature1Heading: "Bring Survey Data Together in One 3D Map",
+    feature1Body: "Display and overlay COPC point clouds, 3D meshes, orthophotos (DOM), DEM/DSM elevation models, and vector data in one workspace. Work with VN-2000 / WGS84 coordinates, toggle each layer, and adjust opacity while reviewing site conditions.",
+    layerOrthophoto: "Orthophoto / DOM",
+    layerMesh: "3D Textured Mesh",
+    layerPointCloud: "Point Cloud / COPC",
+    layerElevation: "Elevation Model / DEM-DSM",
+    feature2Label: "SURVEY & DATA PROCESSING",
+    feature2Heading: "SAOLATEK UAV & CHCNAV LiDAR Integration",
+    feature2Body: "Bring UAV imagery and LiDAR survey data into a unified processing workflow. Use CoPre, CoProcess, and specialized mapping tools to prepare Point Clouds, orthophotos, DEM/DSM elevation models, and 3D Mesh data for site review and analysis on the Web GIS platform.",
+    viewFullscreen: "VIEW FULL SCREEN",
+    feature3Label: "3D MEASUREMENT & ANALYSIS",
+    feature3Heading: "Measure and Analyze Directly in 3D",
+    feature3Body: "Measure 3D distance, elevation differences, area, and cut-and-fill volume directly on the displayed model. These tools support site-condition checks and comparison of survey data within the same Web GIS workspace.",
 
     // Use Cases Section
-    useCasesEyebrow: "REAL-WORLD APPLICATIONS",
-    useCasesHeading: "Solutions for Every Industry",
-    case1Title: "Smart Urban Planning",
-    case1Body: "Manage city-wide Digital Twins. Simulate construction heights, solar shading, and underground engineering networks precisely down to individual land parcels.",
-    case2Title: "Construction Site Management",
-    case2Body: "Compare actual construction progress with BIM/IFC designs. Calculate weekly stockpile and earthwork volumes accurately — eliminating manual errors.",
-    case3Title: "Agriculture & Forestry",
-    case3Body: "Monitor vegetation health using NDVI indexes from multispectral imagery. Map growth zones, forecast landslide risks, and manage forests in real time.",
+    useCasesEyebrow: "3D MAPPING SOLUTIONS",
+    useCasesHeading: "Built for Surveying, Construction and Agriculture",
+    case1Title: "Surveying & Measurement",
+    case1Body: "Organize UAV and LiDAR survey data, review Point Clouds, orthophotos and DEM/DSM models, and perform 3D measurements directly in the browser.",
+    case2Title: "Construction & Infrastructure",
+    case2Body: "Centralize site survey data by layer and location. Review current conditions, check elevation differences and compare information collected across survey periods.",
+    case3Title: "Agriculture",
+    case3Body: "Build maps of cultivation areas from UAV survey data, manage imagery and terrain layers, and support field-condition review for agricultural production areas.",
 
     // CTA Band
-    ctaHeading: "Ready to take your maps to the next level?",
-    ctaSub: "Start for free today. No installations, no credit card required.",
+    ctaHeading: "Explore your survey data in 3D",
+    ctaSub: "Open the demo map or book a session to review the 3D Mapping workflow with the SAOLATEK team.",
     ctaDemo: "Explore 3D Demo Maps",
-    ctaApi: "Read API Documentation",
+    ctaApi: "Book a Demo",
 
     // Footer
-    footerDesc: "Web GIS platform supporting OGC, WebGL2, CesiumJS, Mapbox GL JS, and 3D Tiles 1.1. Developed in Vietnam.",
+    footerDesc: "3D Web GIS platform for visualizing, organizing and measuring UAV and LiDAR survey data directly in the browser.",
     allSystems: "ALL SYSTEMS OPERATIONAL",
     prodCol: "PRODUCT",
     techCol: "TECHNOLOGY",
@@ -446,7 +513,7 @@ const TRANSLATIONS = {
     apps: "Applications",
     demoMap: "Demo Maps",
     register: "Register",
-    rights: "© 2026 GEO-SPATIAL 3D. All rights reserved."
+    rights: "© 2026 SAOLATEK. All rights reserved."
   },
   vi: {
     // Navigation Links
@@ -458,6 +525,22 @@ const TRANSLATIONS = {
     login: "Đăng nhập",
     bookDemo: "Đăng ký demo",
     dashboard: "Bảng điều khiển",
+    platformPointCloud: "Point Cloud & LiDAR",
+    platformAnalysis: "Đo đạc & Phân tích 3D",
+    platformLayers: "Quản lý lớp dữ liệu",
+    platformCoordinates: "VN-2000 & Hệ tọa độ",
+    platformProjects: "Chia sẻ & Quản lý dự án",
+    solSurveying: "Khảo sát & Đo đạc",
+    solConstructionInfra: "Xây dựng & Hạ tầng",
+    solUavMapping: "UAV Mapping & LiDAR",
+    resMappingWorkflow: "Quy trình 3D Mapping",
+    resEquipmentSpecs: "Thiết bị & Thông số kỹ thuật",
+    res3DOutputs: "Dữ liệu đầu ra 3D",
+    resDemoMaps: "Bản đồ Demo",
+    resGuides: "Tài liệu hướng dẫn",
+    demoRegistration: "Đăng ký Demo",
+    connectConsultation: "Liên hệ tư vấn",
+    connectLoginTrial: "Đăng nhập / Dùng thử",
 
     // Platform Dropdown
     coreViewer: "Trình xem chính",
@@ -585,34 +668,39 @@ const TRANSLATIONS = {
     ogcLabel: "Drone & Giải pháp Việt Nam",
 
     // Features Section
-    feature1Label: "ĐA TẦNG DỮ LIỆU",
-    feature1Heading: "Chồng xếp dữ liệu địa lý theo từng lớp",
-    feature1Body: "Kết hợp linh hoạt Point Cloud COPC, Mesh 3D, mô hình BIM/IFC, terrain DEM và Vector trong cùng một hệ tọa độ VN-2000 / WGS84. Mỗi lớp có thể bật / tắt và điều chỉnh độ trong suốt theo thời gian thực.",
-    feature2Label: "KHẢO SÁT THỰC ĐỊA",
-    feature2Heading: "Tích hợp thiết bị CHCNAV & Drone SAOLATEK",
-    feature2Body: "Đồng bộ hóa dữ liệu quét LiDAR và ảnh UAV từ thiết bị CHCNAV qua phần mềm xử lý CoPre & CoProcess. Kết hợp cùng các dòng Drone chuyên dụng từ SAOLATEK Việt Nam để tạo lập mô hình 3D Tiles, mây điểm COPC và bản đồ trực giao độ phân giải cao.",
-    feature3Label: "PHÂN TÍCH KHÔNG GIAN",
-    feature3Heading: "Đo đạc và phân tích chính xác tức thời",
-    feature3Body: "Đo khoảng cách 3D, chiều cao, diện tích và thể tích đào đắp (Cut & Fill) trực tiếp trên bản đồ. Xuất báo cáo định dạng GeoJSON, CSV hoặc PDF chỉ với một thao tác.",
+    feature1Label: "QUẢN LÝ LỚP DỮ LIỆU",
+    feature1Heading: "Tập trung dữ liệu khảo sát trên một bản đồ 3D",
+    feature1Body: "Hiển thị và chồng xếp Point Cloud COPC, Mesh 3D, ảnh trực giao (DOM), mô hình cao độ DEM/DSM và dữ liệu Vector trong cùng một không gian làm việc. Hỗ trợ VN-2000 / WGS84, bật/tắt từng lớp và điều chỉnh độ trong suốt khi kiểm tra hiện trạng.",
+    layerOrthophoto: "Ảnh trực giao / DOM",
+    layerMesh: "Mô hình Mesh 3D",
+    layerPointCloud: "Point Cloud / COPC",
+    layerElevation: "Mô hình cao độ / DEM-DSM",
+    feature2Label: "KHẢO SÁT & XỬ LÝ DỮ LIỆU",
+    feature2Heading: "Tích hợp UAV SAOLATEK & LiDAR CHCNAV",
+    feature2Body: "Tiếp nhận ảnh UAV và dữ liệu quét LiDAR từ quá trình khảo sát thực địa trong một quy trình xử lý thống nhất. Kết hợp CoPre, CoProcess và các công cụ bản đồ chuyên dụng để chuẩn bị Point Cloud, ảnh trực giao, mô hình cao độ DEM/DSM và Mesh 3D phục vụ kiểm tra hiện trạng và phân tích trên nền tảng Web GIS.",
+    viewFullscreen: "XEM TOÀN MÀN HÌNH",
+    feature3Label: "ĐO ĐẠC & PHÂN TÍCH 3D",
+    feature3Heading: "Đo đạc và phân tích trực tiếp trên mô hình 3D",
+    feature3Body: "Đo khoảng cách 3D, chênh cao, diện tích và thể tích đào đắp (Cut & Fill) trực tiếp trên mô hình đang hiển thị. Các công cụ này hỗ trợ kiểm tra hiện trạng và đối chiếu dữ liệu khảo sát ngay trong cùng không gian Web GIS.",
 
     // Use Cases Section
-    useCasesEyebrow: "ỨNG DỤNG THỰC TIỄN",
-    useCasesHeading: "Giải pháp cho mọi ngành công nghiệp",
-    case1Title: "Quy hoạch đô thị thông minh",
-    case1Body: "Quản lý Digital Twin toàn đô thị. Mô phỏng chiều cao quy hoạch, vùng phủ bóng mặt trời và hạ tầng kỹ thuật ngầm chính xác theo từng lô đất.",
-    case2Title: "Quản lý công trình xây dựng",
-    case2Body: "So sánh tiến độ thi công thực tế với thiết kế BIM/IFC. Tính toán chính xác khối lượng đào đắp đất đá theo tuần — loại bỏ sai sót thủ công hoàn toàn.",
-    case3Title: "Nông lâm nghiệp & tài nguyên",
-    case3Body: "Theo dõi sức khỏe cây trồng qua chỉ số NDVI từ ảnh đa phổ. Phân vùng sinh trưởng, dự báo nguy cơ sạt lở đất và quản lý rừng theo thời gian thực.",
+    useCasesEyebrow: "GIẢI PHÁP 3D MAPPING",
+    useCasesHeading: "Ứng dụng cho khảo sát, xây dựng và nông nghiệp",
+    case1Title: "Khảo sát & Đo đạc",
+    case1Body: "Tổ chức dữ liệu khảo sát từ UAV và LiDAR, hiển thị Point Cloud, ảnh trực giao, DEM/DSM và thực hiện các phép đo 3D trực tiếp trên trình duyệt.",
+    case2Title: "Xây dựng & Hạ tầng",
+    case2Body: "Tập trung dữ liệu khảo sát công trường theo khu vực và lớp dữ liệu, hỗ trợ kiểm tra hiện trạng, chênh cao và đối chiếu thông tin giữa các đợt khảo sát.",
+    case3Title: "Nông nghiệp",
+    case3Body: "Lập bản đồ khu vực canh tác từ dữ liệu UAV, quản lý lớp ảnh và mô hình địa hình, hỗ trợ khảo sát hiện trạng và theo dõi khu vực sản xuất.",
 
     // CTA Band
-    ctaHeading: "Sẵn sàng đưa bản đồ của bạn lên tầm cao mới?",
-    ctaSub: "Bắt đầu miễn phí ngay hôm nay. Không cần cài đặt, không cần thẻ tín dụng.",
+    ctaHeading: "Khám phá dữ liệu khảo sát trực tiếp trên bản đồ 3D",
+    ctaSub: "Mở bản đồ demo hoặc đăng ký buổi demo để xem quy trình 3D Mapping cùng đội ngũ SAOLATEK.",
     ctaDemo: "Trải Nghiệm Bản Đồ 3D Demo",
-    ctaApi: "Đọc Tài Liệu API",
+    ctaApi: "Đăng ký Demo",
 
     // Footer
-    footerDesc: "Nền tảng Web GIS chuẩn OGC hỗ trợ WebGL2, CesiumJS, Mapbox GL JS và 3D Tiles 1.1. Xây dựng tại Việt Nam.",
+    footerDesc: "Nền tảng Web GIS 3D phục vụ hiển thị, tổ chức lớp dữ liệu và đo đạc dữ liệu khảo sát UAV/LiDAR trực tiếp trên trình duyệt.",
     allSystems: "HỆ THỐNG HOẠT ĐỘNG BÌNH THƯỜNG",
     prodCol: "SẢN PHẨM",
     techCol: "CÔNG NGHỆ",
@@ -621,7 +709,7 @@ const TRANSLATIONS = {
     apps: "Ứng dụng",
     demoMap: "Bản đồ Demo",
     register: "Đăng ký",
-    rights: "© 2026 GEO-SPATIAL 3D. Bảo lưu mọi quyền."
+    rights: "© 2026 SAOLATEK. Bảo lưu mọi quyền."
   },
   zh: {
     // Navigation Links
@@ -633,6 +721,22 @@ const TRANSLATIONS = {
     login: "登录",
     bookDemo: "预约演示",
     dashboard: "控制台",
+    platformPointCloud: "点云与激光雷达",
+    platformAnalysis: "三维测量与分析",
+    platformLayers: "数据图层管理",
+    platformCoordinates: "VN-2000 与坐标系统",
+    platformProjects: "项目共享与管理",
+    solSurveying: "测绘与测量",
+    solConstructionInfra: "建筑与基础设施",
+    solUavMapping: "无人机测绘与激光雷达",
+    resMappingWorkflow: "三维建图流程",
+    resEquipmentSpecs: "设备与技术规格",
+    res3DOutputs: "三维数据成果",
+    resDemoMaps: "演示地图",
+    resGuides: "使用指南",
+    demoRegistration: "预约演示",
+    connectConsultation: "联系咨询",
+    connectLoginTrial: "登录 / 试用",
 
     // Platform Dropdown
     coreViewer: "核心渲染器",
@@ -760,34 +864,39 @@ const TRANSLATIONS = {
     ogcLabel: "3D Tiles · WMS · WFS",
 
     // Features Section
-    feature1Label: "多源数据图层",
-    feature1Heading: "叠加热生地理数据图层",
-    feature1Body: "灵活组合点云 COPC、3D 网格、BIM/IFC 模型、DEM 地形和矢量数据，支持 VN-2000 / WGS84 坐标系。实时开关图层并调节不透明度。",
-    feature2Label: "实地测量与重建",
-    feature2Heading: "从无人机和 LiDAR 重建 3D 模型",
-    feature2Body: "上传无人机图像或 LiDAR 扫描数据。系统自动运行摄影测量，生成正射影像图、Draco 3D 网格和具有厘米级精度的分类点云。",
-    feature3Label: "空间三维 analysis",
-    feature3Heading: "瞬时精准测量与分析",
-    feature3Body: "直接在地图上测量 3D 距离、高度、面积以及填挖方体积。一键导出 GeoJSON、CSV 或 PDF 格式的报告。",
+    feature1Label: "数据图层管理",
+    feature1Heading: "在一张三维地图中集中管理测绘数据",
+    feature1Body: "在同一工作空间中叠加显示 COPC 点云、三维网格、正射影像（DOM）、DEM/DSM 高程模型和矢量数据。支持 VN-2000 / WGS84 坐标系，可独立开关图层并调节透明度以核查现场数据。",
+    layerOrthophoto: "正射影像 / DOM",
+    layerMesh: "三维纹理网格",
+    layerPointCloud: "点云 / COPC",
+    layerElevation: "高程模型 / DEM-DSM",
+    feature2Label: "测绘与数据处理",
+    feature2Heading: "SAOLATEK 无人机与 CHCNAV LiDAR 集成",
+    feature2Body: "将无人机影像与 LiDAR 测绘数据纳入统一的数据处理流程。结合 CoPre、CoProcess 及专业测绘工具，准备点云、正射影像、DEM/DSM 高程模型和三维网格数据，用于 Web GIS 平台上的现场核查与空间分析。",
+    viewFullscreen: "全屏查看",
+    feature3Label: "三维测量与分析",
+    feature3Heading: "直接在三维模型上进行测量与分析",
+    feature3Body: "直接在当前三维模型上测量三维距离、高差、面积和填挖方体积。这些工具可用于现场现状核查，并在同一 Web GIS 工作空间中对比测绘数据。",
 
     // Use Cases Section
-    useCasesEyebrow: "行业应用案例",
-    useCasesHeading: "赋能各行业空间智能化",
-    case1Title: "智慧城市规划",
-    case1Body: "管理全市数字孪生。精确模拟规划建筑高度、太阳阴影分析和地下管网工程。",
-    case2Title: "建筑施工管理",
-    case2Body: "将实际施工进度与 BIM/IFC 设计进行对比。每周精确计算土石方填挖量，彻底避免人工失误。",
-    case3Title: "农业与林业监测",
-    case3Body: "通过多光谱图像的 NDVI 指数监测植被健康状况。划分作物生长区域，预测滑坡风险并实时管理森林资源。",
+    useCasesEyebrow: "三维建图解决方案",
+    useCasesHeading: "面向测绘、建筑与农业的三维应用",
+    case1Title: "测绘与测量",
+    case1Body: "集中管理无人机与 LiDAR 测绘数据，查看点云、正射影像和 DEM/DSM，并直接在浏览器中进行三维测量。",
+    case2Title: "建筑与基础设施",
+    case2Body: "按区域和图层集中管理现场测绘数据，用于核查现状、高差并对比不同测绘阶段采集的信息。",
+    case3Title: "农业",
+    case3Body: "利用无人机测绘数据建立种植区域地图，管理影像与地形图层，并支持农业生产区域的现场现状核查。",
 
     // CTA Band
-    ctaHeading: "准备好将您的地图提升到新高度了吗？",
-    ctaSub: "今天即可免费开始。无需安装，无需信用卡。",
+    ctaHeading: "在三维地图中查看测绘数据",
+    ctaSub: "打开演示地图，或预约演示以了解 SAOLATEK 的三维建图工作流程。",
     ctaDemo: "体验 3D 演示地图",
-    ctaApi: "阅读 API 文档",
+    ctaApi: "预约演示",
 
     // Footer
-    footerDesc: "支持 OGC、WebGL2、CesiumJS、Mapbox GL JS 和 3D Tiles 1.1 的 Web GIS 平台。在越南开发。",
+    footerDesc: "用于在浏览器中可视化、组织图层并测量无人机与 LiDAR 测绘数据的三维 Web GIS 平台。",
     allSystems: "所有系统运行正常",
     prodCol: "产品",
     techCol: "技术",
@@ -796,7 +905,7 @@ const TRANSLATIONS = {
     apps: "行业应用",
     demoMap: "演示地图",
     register: "注册",
-    rights: "© 2026 GEO-SPATIAL 3D. 保留所有权利。"
+    rights: "© 2026 SAOLATEK. 保留所有权利。"
   }
 };
 
@@ -807,12 +916,10 @@ export const LandingPage: React.FC = () => {
   const [scrolled, setScrolled] = useState(false);
   const [heroVisible, setHeroVisible] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  const dropdownCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
-  const [currentLang, setCurrentLang] = useState<'en' | 'vi' | 'zh'>(() => {
-    const saved = localStorage.getItem('lp_lang');
-    return (saved === 'en' || saved === 'vi' || saved === 'zh') ? saved : 'en';
-  });
+  const { currentLang, setCurrentLang } = useLanguage('en');
   const [langDropdownOpen, setLangDropdownOpen] = useState(false);
 
   const t = (key: keyof typeof TRANSLATIONS.en) => {
@@ -820,15 +927,30 @@ export const LandingPage: React.FC = () => {
   };
 
   useEffect(() => {
-    localStorage.setItem('lp_lang', currentLang);
-  }, [currentLang]);
-
-  useEffect(() => {
     const timer = setTimeout(() => setHeroVisible(true), 100);
     const handleScroll = () => setScrolled(window.scrollY > 60);
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => { clearTimeout(timer); window.removeEventListener('scroll', handleScroll); };
   }, []);
+
+  const openDropdown = (menuKey: string) => {
+    if (dropdownCloseTimer.current) {
+      clearTimeout(dropdownCloseTimer.current);
+      dropdownCloseTimer.current = null;
+    }
+    setActiveDropdown(menuKey);
+  };
+
+  const closeDropdownWithDelay = () => {
+    if (dropdownCloseTimer.current) {
+      clearTimeout(dropdownCloseTimer.current);
+    }
+
+    dropdownCloseTimer.current = setTimeout(() => {
+      setActiveDropdown(null);
+      dropdownCloseTimer.current = null;
+    }, 180);
+  };
 
   return (
     <>
@@ -1030,7 +1152,7 @@ export const LandingPage: React.FC = () => {
         
         .lp-nav__dropdown {
           position: absolute;
-          top: calc(100% + 8px);
+          top: calc(100% - 1px);
           left: 50%;
           transform: translateX(-50%);
           width: 320px;
@@ -1437,6 +1559,12 @@ export const LandingPage: React.FC = () => {
           display: flex;
           flex-direction: column;
           padding: 24px;
+          height: 100dvh;
+          padding-top: max(24px, env(safe-area-inset-top));
+          padding-right: max(16px, env(safe-area-inset-right));
+          padding-bottom: max(24px, env(safe-area-inset-bottom));
+          padding-left: max(16px, env(safe-area-inset-left));
+          overflow: hidden;
           animation: drawerFadeIn 0.3s var(--lp-ease-out);
         }
         @keyframes drawerFadeIn {
@@ -1514,7 +1642,10 @@ export const LandingPage: React.FC = () => {
           border-left: 2px solid var(--lp-accent);
         }
         .lp-mobile-drawer__dropdown-item {
-          padding: 6px 0;
+          display: flex;
+          min-height: 44px;
+          align-items: center;
+          padding: 8px 0;
           text-align: left;
         }
         .lp-mobile-drawer__dropdown-title {
@@ -1945,7 +2076,7 @@ export const LandingPage: React.FC = () => {
           margin: 0 0 16px;
         }
         .lp-feature-row__body {
-          font-size: 16px;
+          font-size: 17px;
           color: var(--lp-ink-muted);
           line-height: 1.7;
           margin: 0;
@@ -2060,38 +2191,100 @@ export const LandingPage: React.FC = () => {
         }
         .lp-terrain-hud__row span:last-child { color: var(--lp-accent); }
 
-        /* ── ANALYTICS VISUAL ── */
-        .lp-visual-analytics {
+        /* ── 3D MEASUREMENT VISUAL ── */
+        .lp-measure-visual {
           width: 100%;
+          display: grid;
+          grid-template-columns: minmax(0, 1.35fr) minmax(150px, 0.65fr);
+          gap: 14px;
+          align-items: stretch;
+        }
+        .lp-measure-visual__canvas {
+          min-height: 238px;
+          border-radius: 12px;
+          overflow: hidden;
+          position: relative;
+          border: 1px solid var(--lp-border);
+          background:
+            radial-gradient(circle at 60% 30%, oklch(60% 0.22 240 / 0.12), transparent 50%),
+            oklch(7% 0.014 240);
+        }
+        .lp-root.light-mode .lp-measure-visual__canvas {
+          background:
+            radial-gradient(circle at 60% 30%, oklch(55% 0.20 240 / 0.10), transparent 55%),
+            #eef4fb;
+        }
+        .lp-measure-visual__grid {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          background-image:
+            linear-gradient(to right, oklch(60% 0.22 240 / 0.08) 1px, transparent 1px),
+            linear-gradient(to bottom, oklch(60% 0.22 240 / 0.08) 1px, transparent 1px);
+          background-size: 28px 28px;
+          mask-image: linear-gradient(to bottom, black, transparent);
+        }
+        .lp-measure-visual__svg {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          z-index: 2;
+        }
+        .lp-measure-visual__svg-label {
+          fill: rgba(255, 255, 255, 0.82);
+          font: 600 11px var(--lp-font-mono);
+        }
+        .lp-root.light-mode .lp-measure-visual__svg-label {
+          fill: #0f172a;
+        }
+        .lp-measure-visual__svg-label--amber {
+          fill: #fb923c;
+        }
+        .lp-measure-visual__badge {
+          position: absolute;
+          left: 14px;
+          top: 14px;
+          z-index: 3;
+          padding: 6px 9px;
+          border-radius: 7px;
+          border: 1px solid oklch(60% 0.22 240 / 0.26);
+          background: oklch(8% 0.016 240 / 0.78);
+          color: var(--lp-accent-glow);
+          font: 600 9px var(--lp-font-mono);
+          letter-spacing: 0.08em;
+        }
+        .lp-root.light-mode .lp-measure-visual__badge {
+          background: rgba(255, 255, 255, 0.84);
+        }
+        .lp-measure-visual__metrics {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 8px;
+        }
+        .lp-measure-metric {
+          min-width: 0;
+          border: 1px solid var(--lp-border);
+          border-radius: 10px;
+          background: oklch(100% 0 0 / 0.025);
+          padding: 12px 14px;
           display: flex;
           flex-direction: column;
-          align-items: center;
-          gap: 20px;
+          justify-content: center;
+          gap: 5px;
         }
-        .lp-analytics-chart {
-          display: flex;
-          align-items: flex-end;
-          gap: 8px;
-          height: 160px;
-          width: 100%;
-          padding: 0 8px;
+        .lp-measure-metric span {
+          color: var(--lp-ink-muted);
+          font: 600 9px var(--lp-font-mono);
+          letter-spacing: 0.08em;
         }
-        .lp-analytics-bar {
-          flex: 1;
-          height: var(--bar-h);
-          background: linear-gradient(to top, var(--lp-accent), oklch(70% 0.22 240 / 0.4));
-          border-radius: 4px 4px 0 0;
-          animation: lp-bar-in 0.6s var(--lp-ease-out) var(--bar-delay) both;
-        }
-        @keyframes lp-bar-in {
-          from { transform: scaleY(0); transform-origin: bottom; }
-          to   { transform: scaleY(1); transform-origin: bottom; }
-        }
-        .lp-analytics-label {
-          font-family: var(--lp-font-mono);
-          font-size: 11px;
-          color: var(--lp-accent);
-          letter-spacing: 0.06em;
+        .lp-measure-metric strong {
+          color: var(--lp-ink);
+          font-size: 16px;
+          font-weight: 750;
+          line-height: 1.15;
+          letter-spacing: -0.01em;
+          white-space: nowrap;
         }
 
         /* ── USE CASES GRID ── */
@@ -2166,14 +2359,14 @@ export const LandingPage: React.FC = () => {
           color: var(--lp-accent-green);
         }
         .lp-usecase-card__h3 {
-          font-size: 18px;
+          font-size: 20px;
           font-weight: 700;
           color: var(--lp-ink);
           margin: 0;
           letter-spacing: -0.01em;
         }
         .lp-usecase-card__p {
-          font-size: 14px;
+          font-size: 15px;
           color: var(--lp-ink-muted);
           line-height: 1.65;
           margin: 0;
@@ -2321,7 +2514,8 @@ export const LandingPage: React.FC = () => {
           letter-spacing: 0.06em;
           font-family: var(--lp-font-mono);
         }
-        .lp-footer__col a {
+        .lp-footer__col a,
+        .lp-footer__col span {
           font-size: 13px;
           color: var(--lp-ink-muted);
           text-decoration: none;
@@ -2350,13 +2544,30 @@ export const LandingPage: React.FC = () => {
         }
 
         /* ── RESPONSIVE ── */
-        @media (max-width: 768px) {
+        @media (max-width: 1024px) {
           .lp-nav { padding: 14px 24px; }
           .lp-nav--scrolled { padding: 10px 24px; }
           .lp-nav__links { display: none; }
           .lp-nav__cta { display: none; }
           .lp-nav__hamburger-btn { display: flex; }
+        }
 
+        @media (max-width: 768px) {
+          .lp-hero {
+            min-height: 100dvh;
+            padding-inline: 24px;
+          }
+          .lp-hero__content { max-width: min(580px, 88%); }
+          .lp-hero__bg {
+            background:
+              linear-gradient(90deg, rgba(3, 7, 18, 0.94) 0%, rgba(3, 7, 18, 0.72) 58%, rgba(3, 7, 18, 0.18) 100%),
+              radial-gradient(circle at 75% 50%, rgba(26, 115, 232, 0.15) 0%, transparent 55%);
+          }
+          .lp-hero.lp-hero--light .lp-hero__bg {
+            background:
+              linear-gradient(90deg, rgba(248, 250, 252, 0.96) 0%, rgba(248, 250, 252, 0.78) 58%, rgba(248, 250, 252, 0.2) 100%),
+              radial-gradient(circle at 75% 50%, rgba(26, 115, 232, 0.18) 0%, transparent 60%);
+          }
           .lp-stats__inner { grid-template-columns: 1fr 1fr; }
           .lp-stat { border-right: none; border-bottom: 1px solid var(--lp-border); }
           .lp-stat:nth-child(odd) { border-right: 1px solid var(--lp-border); }
@@ -2364,6 +2575,8 @@ export const LandingPage: React.FC = () => {
           .lp-features { gap: 72px; padding: 72px 16px; }
           .lp-feature-row { grid-template-columns: 1fr; gap: 40px; direction: ltr; }
           .lp-feature-row--flip { direction: ltr; }
+          .lp-measure-visual { grid-template-columns: 1fr; }
+          .lp-measure-visual__metrics { grid-template-columns: 1fr 1fr; }
 
           .lp-usecases__grid { grid-template-columns: 1fr; }
 
@@ -2373,8 +2586,16 @@ export const LandingPage: React.FC = () => {
         }
         @media (max-width: 414px) {
           .lp-hero { padding: 100px 16px 72px; }
+          .lp-hero__content { max-width: 100%; }
+          .lp-hero__badge { max-width: 100%; }
+          .lp-nav { padding-inline: 16px; }
+          .lp-nav--scrolled { padding-inline: 16px; }
+          .lp-mobile-drawer__links { gap: 8px; margin-bottom: 20px; }
+          .lp-footer__links { width: 100%; gap: 28px 20px; }
+          .lp-footer__col { min-width: calc(50% - 10px); }
           .lp-stats__inner { grid-template-columns: 1fr; }
           .lp-stat { border-right: none; }
+          .lp-measure-visual__metrics { grid-template-columns: 1fr; }
           .lp-hero__actions { flex-direction: column; width: 100%; }
           .lp-hero__actions .lp-btn { width: 100%; justify-content: center; }
           .lp-cta-band__actions { flex-direction: column; width: 100%; }
@@ -2403,318 +2624,65 @@ export const LandingPage: React.FC = () => {
           </button>
 
           <ul className="lp-nav__links" role="list">
-            <li 
-              onMouseEnter={() => setActiveDropdown('platform')}
-              onMouseLeave={() => setActiveDropdown(null)}
-            >
-              <button className={`lp-nav__link-btn ${activeDropdown === 'platform' ? 'is-active' : ''}`} aria-expanded={activeDropdown === 'platform'}>
-                {t('platform')} <ChevronDown size={14} className="lp-nav__chevron" />
-              </button>
-              {activeDropdown === 'platform' && (
-                <div className="lp-nav__dropdown lp-nav__dropdown--mega tactile-glass">
-                  <div className="lp-nav__mega-grid">
-                    
-                    {/* Column 1: Core Viewer */}
-                    <div className="lp-nav__mega-col">
-                      <div className="lp-nav__mega-col-header">{t('coreViewer')}</div>
-                      <ul className="lp-nav__mega-col-links">
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('viewer3DTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('viewer3DDesc')}</div>
+            {([
+              ['platform', [
+                ['viewer3DTitle', '/platform/3d-gis'],
+                ['platformPointCloud', '/platform/point-cloud-lidar'],
+                ['platformAnalysis', '/platform/measurement-analysis'],
+                ['platformLayers', '/platform/data-layer-management'],
+                ['platformCoordinates', '/platform/vn2000-coordinate-systems'],
+                ['platformProjects', '/platform/project-sharing-management'],
+              ]],
+              ['solutions', [
+                ['solSurveying', '/solutions/surveying'],
+                ['solConstructionInfra', '/solutions/construction-infrastructure'],
+                ['solAgriculture', '/solutions/agriculture'],
+                ['solUavMapping', '/solutions/uav-mapping-lidar'],
+              ]],
+              ['resources', [
+                ['resMappingWorkflow', '/dashboard'],
+                ['resEquipmentSpecs', '/dashboard'],
+                ['res3DOutputs', '/dashboard'],
+                ['resDemoMaps', '/dashboard'],
+                ['resGuides', '/dashboard'],
+              ]],
+              ['connect', [
+                ['demoRegistration', '/book-demo'],
+                ['connectConsultation', '/book-demo'],
+                ['connectLoginTrial', isAuthenticated ? '/dashboard' : '/login'],
+              ]],
+            ] as const).map(([menuKey, items]) => (
+              <li
+                key={menuKey}
+                className="lp-nav__item-with-dropdown"
+                onMouseEnter={() => openDropdown(menuKey)}
+                onMouseLeave={closeDropdownWithDelay}
+              >
+                <button
+                  className={`lp-nav__link-btn ${activeDropdown === menuKey ? 'is-active' : ''}`}
+                  onClick={() => setActiveDropdown(activeDropdown === menuKey ? null : menuKey)}
+                  aria-expanded={activeDropdown === menuKey}
+                >
+                  {t(menuKey)} <ChevronDown size={14} className="lp-nav__chevron" />
+                </button>
+                {activeDropdown === menuKey && (
+                  <div
+                    className="lp-nav__dropdown tactile-glass"
+                    style={{ width: '280px', padding: '12px' }}
+                    onMouseEnter={() => openDropdown(menuKey)}
+                    onMouseLeave={closeDropdownWithDelay}
+                  >
+                    <ul className="lp-nav__mega-col-links">
+                      {items.map(([itemKey, route]) => (
+                        <li key={itemKey} className="lp-nav__dropdown-item" onClick={() => navigate(route)}>
+                          <div className="lp-nav__dropdown-title">{t(itemKey)}</div>
                         </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('pointCloudTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('pointCloudDesc')}</div>
-                        </li>
-                      </ul>
-                    </div>
-
-                    {/* Column 2: Measurement */}
-                    <div className="lp-nav__mega-col">
-                      <div className="lp-nav__mega-col-header">{t('measurement')}</div>
-                      <ul className="lp-nav__mega-col-links">
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('distHeightTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('distHeightDesc')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('areaTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('areaDesc')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('clipTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('clipDesc')}</div>
-                        </li>
-                      </ul>
-                    </div>
-
-                    {/* Column 3: Visual Settings */}
-                    <div className="lp-nav__mega-col">
-                      <div className="lp-nav__mega-col-header">{t('visualSettings')}</div>
-                      <ul className="lp-nav__mega-col-links">
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('edlTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('edlDesc')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('projectionTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('projectionDesc')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('appearanceTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('appearanceDesc')}</div>
-                        </li>
-                      </ul>
-                    </div>
-
-                    {/* Column 4: Map Management */}
-                    <div className="lp-nav__mega-col">
-                      <div className="lp-nav__mega-col-header">{t('mapManagement')}</div>
-                      <ul className="lp-nav__mega-col-links">
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('layersTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('layersDesc')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('vn2000Title')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('vn2000Desc')}</div>
-                        </li>
-                      </ul>
-                    </div>
-
-                    {/* Column 5: Team Workspace */}
-                    <div className="lp-nav__mega-col">
-                      <div className="lp-nav__mega-col-header">{t('teamWorkspace')}</div>
-                      <ul className="lp-nav__mega-col-links">
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('inviteTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('inviteDesc')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('shareTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('shareDesc')}</div>
-                        </li>
-                      </ul>
-                    </div>
-
+                      ))}
+                    </ul>
                   </div>
-
-                </div>
-              )}
-            </li>
-            <li 
-              className="lp-nav__item-with-dropdown"
-              onMouseEnter={() => setActiveDropdown('solutions')}
-              onMouseLeave={() => setActiveDropdown(null)}
-            >
-              <button className={`lp-nav__link-btn ${activeDropdown === 'solutions' ? 'is-active' : ''}`} aria-expanded={activeDropdown === 'solutions'}>
-                {t('solutions')} <ChevronDown size={14} className="lp-nav__chevron" />
-              </button>
-              {activeDropdown === 'solutions' && (
-                <div className="lp-nav__dropdown lp-nav__dropdown--mega tactile-glass" style={{ width: '640px', left: '50%', transform: 'translateX(-35%)' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left', padding: '4px' }}>
-                    <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--lp-accent-amber)', marginBottom: '16px', paddingBottom: '6px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                      {t('industriesTitle')}
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px 24px' }}>
-                      {/* Column 1 */}
-                      <div className="lp-nav__mega-col">
-                        <ul className="lp-nav__mega-col-links">
-                          <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                            <div className="lp-nav__dropdown-title" style={{ fontSize: '14px', fontWeight: '700' }}>{t('solConstruction')}</div>
-                          </li>
-                          <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                            <div className="lp-nav__dropdown-title" style={{ fontSize: '14px', fontWeight: '700' }}>{t('solHeavyCivil')}</div>
-                          </li>
-                          <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                            <div className="lp-nav__dropdown-title" style={{ fontSize: '14px', fontWeight: '700' }}>{t('solOwners')}</div>
-                          </li>
-                          <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                            <div className="lp-nav__dropdown-title" style={{ fontSize: '14px', fontWeight: '700' }}>{t('solDataCenters')}</div>
-                          </li>
-                        </ul>
-                      </div>
-
-                      {/* Column 2 */}
-                      <div className="lp-nav__mega-col">
-                        <ul className="lp-nav__mega-col-links">
-                          <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                            <div className="lp-nav__dropdown-title" style={{ fontSize: '14px', fontWeight: '700' }}>{t('solRenewableEnergy')}</div>
-                          </li>
-                          <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                            <div className="lp-nav__dropdown-title" style={{ fontSize: '14px', fontWeight: '700' }}>{t('solAgriculture')}</div>
-                          </li>
-                          <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                            <div className="lp-nav__dropdown-title" style={{ fontSize: '14px', fontWeight: '700' }}>{t('solMining')}</div>
-                          </li>
-                          <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                            <div className="lp-nav__dropdown-title" style={{ fontSize: '14px', fontWeight: '700' }}>{t('solUtilities')}</div>
-                          </li>
-                        </ul>
-                      </div>
-
-                      {/* Column 3 */}
-                      <div className="lp-nav__mega-col">
-                        <ul className="lp-nav__mega-col-links">
-                          <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                            <div className="lp-nav__dropdown-title" style={{ fontSize: '14px', fontWeight: '700' }}>{t('solRoofing')}</div>
-                          </li>
-                          <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                            <div className="lp-nav__dropdown-title" style={{ fontSize: '14px', fontWeight: '700' }}>{t('solOilGas')}</div>
-                          </li>
-                          <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                            <div className="lp-nav__dropdown-title" style={{ fontSize: '14px', fontWeight: '700' }}>{t('solPropertyManagement')}</div>
-                          </li>
-                        </ul>
-                      </div>
-                    </div>
-
-                  </div>
-                </div>
-              )}
-            </li>
-            <li 
-              className="lp-nav__item-with-dropdown"
-              onMouseEnter={() => setActiveDropdown('resources')}
-              onMouseLeave={() => setActiveDropdown(null)}
-            >
-              <button className={`lp-nav__link-btn ${activeDropdown === 'resources' ? 'is-active' : ''}`} aria-expanded={activeDropdown === 'resources'}>
-                {t('resources')} <ChevronDown size={14} className="lp-nav__chevron" />
-              </button>
-              {activeDropdown === 'resources' && (
-                <div className="lp-nav__dropdown lp-nav__dropdown--mega tactile-glass" style={{ width: '620px', left: '50%', transform: 'translateX(-40%)' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', padding: '4px' }}>
-                    
-                    {/* Category 1: Learn about Web GIS */}
-                    <div className="lp-nav__mega-col">
-                      <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--lp-accent-amber)', marginBottom: '14px', paddingBottom: '6px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                        {t('resCategoryLearn')}
-                      </div>
-                      <ul className="lp-nav__mega-col-links">
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('resInsiderTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('resInsiderDesc')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('resPlaybooksTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('resPlaybooksDesc')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('resWebinarsTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('resWebinarsDesc')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('resPodcastTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('resPodcastDesc')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('resNewsletterTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('resNewsletterDesc')}</div>
-                        </li>
-                      </ul>
-                    </div>
-
-                    {/* Category 2: Education & News */}
-                    <div className="lp-nav__mega-col">
-                      <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--lp-accent-amber)', marginBottom: '14px', paddingBottom: '6px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                        {t('resCategoryEdu')}
-                      </div>
-                      <ul className="lp-nav__mega-col-links">
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('resBlogTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('resBlogDesc')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('resStoriesTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('resStoriesDesc')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('resPressTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('resPressDesc')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('resMediaTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('resMediaDesc')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title">{t('resAcademyTitle')}</div>
-                          <div className="lp-nav__dropdown-desc">{t('resAcademyDesc')}</div>
-                        </li>
-                      </ul>
-                    </div>
-
-                  </div>
-
-                </div>
-              )}
-            </li>
-            <li 
-              className="lp-nav__item-with-dropdown"
-              onMouseEnter={() => setActiveDropdown('connect')}
-              onMouseLeave={() => setActiveDropdown(null)}
-            >
-              <button className={`lp-nav__link-btn ${activeDropdown === 'connect' ? 'is-active' : ''}`} aria-expanded={activeDropdown === 'connect'}>
-                {t('connect')} <ChevronDown size={14} className="lp-nav__chevron" />
-              </button>
-              {activeDropdown === 'connect' && (
-                <div className="lp-nav__dropdown lp-nav__dropdown--mega tactile-glass" style={{ width: '640px', left: '50%', transform: 'translateX(-45%)' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px 24px', padding: '4px' }}>
-                    {/* Column Headers */}
-                    <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--lp-accent-amber)', paddingBottom: '6px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                      {t('getStarted')}
-                    </div>
-                    <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--lp-accent-amber)', paddingBottom: '6px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                      {t('getSupport')}
-                    </div>
-                    <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--lp-accent-amber)', paddingBottom: '6px', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                      {t('connectWithUs')}
-                    </div>
-
-                    {/* Column 1: Get started */}
-                    <div className="lp-nav__mega-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <ul className="lp-nav__mega-col-links">
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/register')}>
-                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('startATrial')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/book-demo')}>
-                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('contactSales')}</div>
-                        </li>
-                      </ul>
-                    </div>
-
-                    {/* Column 2: Get Support */}
-                    <div className="lp-nav__mega-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <ul className="lp-nav__mega-col-links">
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('helpCenter')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('contactSupport')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/book-demo')}>
-                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('liveOfficeHours')}</div>
-                        </li>
-                      </ul>
-                    </div>
-
-                    {/* Column 3: Connect with us */}
-                    <div className="lp-nav__mega-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <ul className="lp-nav__mega-col-links">
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('industryEvents')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('joinOurCommunity')}</div>
-                        </li>
-                        <li className="lp-nav__dropdown-item" onClick={() => navigate('/dashboard')}>
-                          <div className="lp-nav__dropdown-title" style={{ fontSize: '13px', fontWeight: '600', color: '#FFFFFF' }}>{t('newsletterSignUp')}</div>
-                        </li>
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </li>
+                )}
+              </li>
+            ))}
           </ul>
 
           <div className="lp-nav__cta">
@@ -2832,239 +2800,72 @@ export const LandingPage: React.FC = () => {
             </div>
 
             <ul className="lp-mobile-drawer__links">
-              <li>
-                <button 
-                  className="lp-mobile-drawer__link-btn" 
-                  onClick={() => setActiveDropdown(activeDropdown === 'platform' ? null : 'platform')}
-                >
-                  {t('platform')} <ChevronDown size={16} style={{ transform: activeDropdown === 'platform' ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-                </button>
-                {activeDropdown === 'platform' && (
-                  <div className="lp-mobile-drawer__dropdown" style={{ maxHeight: '320px', overflowY: 'auto' }}>
-                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('coreViewer')}</div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('viewer3DTitle')}</div>
+              {([
+                ['platform', [
+                  ['viewer3DTitle', '/platform/3d-gis'],
+                  ['platformPointCloud', '/platform/point-cloud-lidar'],
+                  ['platformAnalysis', '/platform/measurement-analysis'],
+                  ['platformLayers', '/platform/data-layer-management'],
+                  ['platformCoordinates', '/platform/vn2000-coordinate-systems'],
+                  ['platformProjects', '/platform/project-sharing-management'],
+                ]],
+                ['solutions', [
+                  ['solSurveying', '/solutions/surveying'],
+                  ['solConstructionInfra', '/solutions/construction-infrastructure'],
+                  ['solAgriculture', '/solutions/agriculture'],
+                  ['solUavMapping', '/solutions/uav-mapping-lidar'],
+                ]],
+                ['resources', [
+                  ['resMappingWorkflow', '/dashboard'],
+                  ['resEquipmentSpecs', '/dashboard'],
+                  ['res3DOutputs', '/dashboard'],
+                  ['resDemoMaps', '/dashboard'],
+                  ['resGuides', '/dashboard'],
+                ]],
+                ['connect', [
+                  ['demoRegistration', '/book-demo'],
+                  ['connectConsultation', '/book-demo'],
+                  ['connectLoginTrial', isAuthenticated ? '/dashboard' : '/login'],
+                ]],
+              ] as const).map(([menuKey, items]) => (
+                <li key={menuKey}>
+                  <button
+                    className="lp-mobile-drawer__link-btn"
+                    onClick={() => setActiveDropdown(activeDropdown === menuKey ? null : menuKey)}
+                  >
+                    {t(menuKey)} <ChevronDown size={16} style={{ transform: activeDropdown === menuKey ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                  </button>
+                  {activeDropdown === menuKey && (
+                    <div className="lp-mobile-drawer__dropdown">
+                      {items.map(([itemKey, route]) => (
+                        <div key={itemKey} className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate(route); }}>
+                          <div className="lp-mobile-drawer__dropdown-title">{t(itemKey)}</div>
+                        </div>
+                      ))}
                     </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('pointCloudTitle')}</div>
-                    </div>
-
-                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('measurement')}</div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('distHeightTitle')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('areaTitle')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('clipTitle')}</div>
-                    </div>
-
-                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('visualSettings')}</div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('edlTitle')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('projectionTitle')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('appearanceTitle')}</div>
-                    </div>
-
-                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('mapManagement')}</div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('layersTitle')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('vn2000Title')}</div>
-                    </div>
-
-                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('teamWorkspace')}</div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('inviteTitle')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('shareTitle')}</div>
-                    </div>
-                  </div>
-                )}
-              </li>
-              <li>
-                <button 
-                  className="lp-mobile-drawer__link-btn" 
-                  onClick={() => setActiveDropdown(activeDropdown === 'solutions' ? null : 'solutions')}
-                >
-                  {t('solutions')} <ChevronDown size={16} style={{ transform: activeDropdown === 'solutions' ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-                </button>
-                {activeDropdown === 'solutions' && (
-                  <div className="lp-mobile-drawer__dropdown" style={{ maxHeight: '320px', overflowY: 'auto' }}>
-                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('industriesTitle')}</div>
-                    
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('solConstruction')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('solHeavyCivil')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('solOwners')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('solDataCenters')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('solRenewableEnergy')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('solAgriculture')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('solMining')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('solUtilities')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('solRoofing')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('solOilGas')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('solPropertyManagement')}</div>
-                    </div>
-                  </div>
-                )}
-              </li>
-              <li>
-                <button 
-                  className="lp-mobile-drawer__link-btn" 
-                  onClick={() => setActiveDropdown(activeDropdown === 'resources' ? null : 'resources')}
-                >
-                  {t('resources')} <ChevronDown size={16} style={{ transform: activeDropdown === 'resources' ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-                </button>
-                {activeDropdown === 'resources' && (
-                  <div className="lp-mobile-drawer__dropdown" style={{ maxHeight: '320px', overflowY: 'auto' }}>
-                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      {t('resCategoryLearn')}
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('resInsiderTitle')}</div>
-                      <div className="lp-mobile-drawer__dropdown-desc">{t('resInsiderDesc')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('resPlaybooksTitle')}</div>
-                      <div className="lp-mobile-drawer__dropdown-desc">{t('resPlaybooksDesc')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('resWebinarsTitle')}</div>
-                      <div className="lp-mobile-drawer__dropdown-desc">{t('resWebinarsDesc')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('resPodcastTitle')}</div>
-                      <div className="lp-mobile-drawer__dropdown-desc">{t('resPodcastDesc')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('resNewsletterTitle')}</div>
-                      <div className="lp-mobile-drawer__dropdown-desc">{t('resNewsletterDesc')}</div>
-                    </div>
-
-                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '14px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      {t('resCategoryEdu')}
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('resBlogTitle')}</div>
-                      <div className="lp-mobile-drawer__dropdown-desc">{t('resBlogDesc')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('resStoriesTitle')}</div>
-                      <div className="lp-mobile-drawer__dropdown-desc">{t('resStoriesDesc')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('resPressTitle')}</div>
-                      <div className="lp-mobile-drawer__dropdown-desc">{t('resPressDesc')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('resMediaTitle')}</div>
-                      <div className="lp-mobile-drawer__dropdown-desc">{t('resMediaDesc')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('resAcademyTitle')}</div>
-                      <div className="lp-mobile-drawer__dropdown-desc">{t('resAcademyDesc')}</div>
-                    </div>
-                  </div>
-                )}
-              </li>
-              <li>
-                <button 
-                  className="lp-mobile-drawer__link-btn" 
-                  onClick={() => setActiveDropdown(activeDropdown === 'connect' ? null : 'connect')}
-                >
-                  {t('connect')} <ChevronDown size={16} style={{ transform: activeDropdown === 'connect' ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-                </button>
-                {activeDropdown === 'connect' && (
-                  <div className="lp-mobile-drawer__dropdown" style={{ maxHeight: '320px', overflowY: 'auto' }}>
-                    {/* Get started */}
-                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      {t('getStarted')}
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/register'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('startATrial')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/book-demo'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('contactSales')}</div>
-                    </div>
-
-                    {/* Get Support */}
-                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '14px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      {t('getSupport')}
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('helpCenter')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('contactSupport')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/book-demo'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('liveOfficeHours')}</div>
-                    </div>
-
-                    {/* Connect with us */}
-                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--lp-accent-amber)', marginTop: '14px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      {t('connectWithUs')}
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('industryEvents')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('joinOurCommunity')}</div>
-                    </div>
-                    <div className="lp-mobile-drawer__dropdown-item" onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
-                      <div className="lp-mobile-drawer__dropdown-title">{t('newsletterSignUp')}</div>
-                    </div>
-                  </div>
-                )}
-              </li>
+                  )}
+                </li>
+              ))}
             </ul>
 
             <div style={{ display: 'flex', gap: '8px', padding: '0 24px', marginBottom: '8px' }}>
               <button 
                 className={`lp-btn lp-btn--sm ${currentLang === 'en' ? 'lp-btn--pill-solid' : 'lp-btn--pill-ghost'}`} 
-                style={{ flex: 1, justifyContent: 'center', height: '32px' }}
+                style={{ flex: 1, justifyContent: 'center', minHeight: '44px' }}
                 onClick={() => setCurrentLang('en')}
               >
                 EN
               </button>
               <button 
                 className={`lp-btn lp-btn--sm ${currentLang === 'vi' ? 'lp-btn--pill-solid' : 'lp-btn--pill-ghost'}`} 
-                style={{ flex: 1, justifyContent: 'center', height: '32px' }}
+                style={{ flex: 1, justifyContent: 'center', minHeight: '44px' }}
                 onClick={() => setCurrentLang('vi')}
               >
                 VI
               </button>
               <button 
                 className={`lp-btn lp-btn--sm ${currentLang === 'zh' ? 'lp-btn--pill-solid' : 'lp-btn--pill-ghost'}`} 
-                style={{ flex: 1, justifyContent: 'center', height: '32px' }}
+                style={{ flex: 1, justifyContent: 'center', minHeight: '44px' }}
                 onClick={() => setCurrentLang('zh')}
               >
                 ZH
@@ -3079,7 +2880,7 @@ export const LandingPage: React.FC = () => {
               ) : (
                 <>
                   <button className="lp-btn lp-btn--pill-ghost" style={{ width: '100%', justifyContent: 'center' }} onClick={() => { setMobileMenuOpen(false); navigate('/login'); }}>{t('login')}</button>
-                  <button className="lp-btn lp-btn--pill-solid" style={{ width: '100%', justifyContent: 'center' }} onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }}>
+                  <button className="lp-btn lp-btn--pill-solid" style={{ width: '100%', justifyContent: 'center' }} onClick={() => { setMobileMenuOpen(false); navigate('/book-demo'); }}>
                     {t('bookDemo')}
                   </button>
                 </>
@@ -3154,7 +2955,14 @@ export const LandingPage: React.FC = () => {
             label={t('feature1Label')}
             heading={t('feature1Heading')}
             body={t('feature1Body')}
-            visual={<LayerStackVisual />}
+            visual={(
+              <LayerStackVisual
+                orthophotoLabel={t('layerOrthophoto')}
+                meshLabel={t('layerMesh')}
+                pointCloudLabel={t('layerPointCloud')}
+                elevationLabel={t('layerElevation')}
+              />
+            )}
           />
           <FeatureRow
             index={2}
@@ -3162,7 +2970,7 @@ export const LandingPage: React.FC = () => {
             label={t('feature2Label')}
             heading={t('feature2Heading')}
             body={t('feature2Body')}
-            visual={<TerrainVisual />}
+            visual={<TerrainVisual expandLabel={t('viewFullscreen')} />}
             flip
           />
           <FeatureRow
@@ -3171,7 +2979,7 @@ export const LandingPage: React.FC = () => {
             label={t('feature3Label')}
             heading={t('feature3Heading')}
             body={t('feature3Body')}
-            visual={<AnalyticsVisual />}
+            visual={<MeasurementVisual />}
           />
         </section>
 
@@ -3183,43 +2991,36 @@ export const LandingPage: React.FC = () => {
               <h2 className="lp-usecases__h2">{t('useCasesHeading')}</h2>
             </div>
             <div className="lp-usecases__grid">
-              <div className="lp-usecase-card">
+              <article className="lp-usecase-card">
                 <div className="lp-usecase-card__icon"><Map size={20} /></div>
                 <h3 className="lp-usecase-card__h3">{t('case1Title')}</h3>
                 <p className="lp-usecase-card__p">{t('case1Body')}</p>
-                <a href="#" id="usecase-city-link" className="lp-usecase-card__link" aria-label="Urban planning solutions">
-                  {t('learnMore')} <ExternalLink size={12} />
-                </a>
-              </div>
-              <div className="lp-usecase-card">
+              </article>
+              <article className="lp-usecase-card">
                 <div className="lp-usecase-card__icon lp-usecase-card__icon--amber"><Cpu size={20} /></div>
                 <h3 className="lp-usecase-card__h3">{t('case2Title')}</h3>
                 <p className="lp-usecase-card__p">{t('case2Body')}</p>
-                <a href="#" id="usecase-construction-link" className="lp-usecase-card__link" style={{ color: 'var(--lp-accent-amber)' }} aria-label="Construction management solutions">
-                  {t('learnMore')} <ExternalLink size={12} />
-                </a>
-              </div>
-              <div className="lp-usecase-card">
+              </article>
+              <article className="lp-usecase-card">
                 <div className="lp-usecase-card__icon lp-usecase-card__icon--green"><Activity size={20} /></div>
                 <h3 className="lp-usecase-card__h3">{t('case3Title')}</h3>
                 <p className="lp-usecase-card__p">{t('case3Body')}</p>
-                <a href="#" id="usecase-agriculture-link" className="lp-usecase-card__link" style={{ color: 'var(--lp-accent-green)' }} aria-label="Agriculture and forestry solutions">
-                  {t('learnMore')} <ExternalLink size={12} />
-                </a>
-              </div>
+              </article>
             </div>
           </div>
         </section>
 
         {/* ── CTA BAND ── */}
-        <section className="lp-cta-band" id="api" aria-label="Get Started">
+        <section className="lp-cta-band" id="demo" aria-label="Get Started">
           <h2 className="lp-cta-band__h2">{t('ctaHeading')}</h2>
           <p className="lp-cta-band__sub">{t('ctaSub')}</p>
           <div className="lp-cta-band__actions">
             <button id="cta-start-btn" className="lp-btn lp-btn--primary" onClick={() => navigate('/dashboard')}>
               {t('ctaDemo')} <ArrowRight size={16} />
             </button>
-            <a id="cta-docs-btn" href="#" className="lp-btn lp-btn--ghost">{t('ctaApi')}</a>
+            <button id="cta-book-demo-btn" className="lp-btn lp-btn--ghost" onClick={() => navigate('/book-demo')}>
+              {t('ctaApi')}
+            </button>
           </div>
         </section>
 
@@ -3228,15 +3029,12 @@ export const LandingPage: React.FC = () => {
           <div className="lp-footer__inner">
             <div className="lp-footer__brand">
               <div className="lp-footer__logo">
-                <div className="lp-footer__logo-mark"><Globe size={16} /></div>
-                GEO-SPATIAL 3D
+                <img src={logoImg} alt="SAOLATEK" style={{ height: '34px', width: 'auto', objectFit: 'contain' }} />
               </div>
-              <p className="lp-footer__desc">
-                {t('footerDesc')}
-              </p>
+              <p className="lp-footer__desc">{t('footerDesc')}</p>
               <div className="lp-footer__status">
                 <span className="lp-footer__status-dot" />
-                {t('allSystems')}
+                UAV · LiDAR · 3D Mapping
               </div>
             </div>
 
@@ -3245,27 +3043,26 @@ export const LandingPage: React.FC = () => {
                 <div className="lp-footer__col-head">{t('prodCol')}</div>
                 <a href="#features">{t('features')}</a>
                 <a href="#usecases">{t('apps')}</a>
-                <a href="#api">{t('ctaApi')}</a>
-                <a href="/dashboard">{t('demoMap')}</a>
+                <a href="#/dashboard">{t('demoMap')}</a>
               </div>
               <div className="lp-footer__col">
                 <div className="lp-footer__col-head">{t('techCol')}</div>
-                <a href="#">CesiumJS</a>
-                <a href="#">Mapbox GL</a>
-                <a href="#">3D Tiles 1.1</a>
-                <a href="#">WebGL2</a>
+                <span>Point Cloud / COPC</span>
+                <span>3D Tiles</span>
+                <span>VN-2000 / WGS84</span>
+                <span>UAV / LiDAR</span>
               </div>
               <div className="lp-footer__col">
                 <div className="lp-footer__col-head">{t('accCol')}</div>
-                <a href="/login">{t('login')}</a>
-                <a href="/register">{t('register')}</a>
-                <a href="/dashboard">{t('dashboard')}</a>
+                <a href="#/login">{t('login')}</a>
+                <a href="#/register">{t('register')}</a>
+                <a href="#/book-demo">{t('bookDemo')}</a>
               </div>
             </div>
           </div>
           <div className="lp-footer__bottom">
             <span>{t('rights')}</span>
-            <span>WebGL2 · CesiumJS · Three.js · Mapbox GL · OGC 3D Tiles 1.1</span>
+            <span>Web GIS · Point Cloud · 3D Mapping</span>
           </div>
         </footer>
 

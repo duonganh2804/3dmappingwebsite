@@ -8,7 +8,6 @@ import { fetchProjectById, updateProject } from '../../services/api';
 import { useAuthStore } from '../../store/useAuthStore';
 
 export type ToolMode = 'none' | 'distance' | 'height' | 'area';
-export type MeasureTarget = 'all' | 'pointcloud' | 'mesh' | 'dom';
 
 // Hàm tính diện tích đa giác trên mặt phẳng tiếp tuyến địa phương (ENU)
 function calculatePolygonArea(positions: Cesium.Cartesian3[]): number {
@@ -77,10 +76,12 @@ function calculateCentroid(positions: Cesium.Cartesian3[]): Cesium.Cartesian3 {
 
 export const CesiumViewer: React.FC<{
   projectId?: string;
+  projectName?: string;
   isSidebarOpen?: boolean;
   onToggleSidebar?: (open: boolean) => void;
 }> = ({
   projectId,
+  projectName = 'Dự án 3D',
   isSidebarOpen = true,
   onToggleSidebar
 }) => {
@@ -102,7 +103,6 @@ export const CesiumViewer: React.FC<{
     const [project, setProject] = useState<any>(null);
     const [toolMode, setToolMode] = useState<ToolMode>('none');
     const [measurementPoints, setMeasurementPoints] = useState<Cesium.Cartesian3[]>([]);
-    const [measureTarget, setMeasureTarget] = useState<MeasureTarget>('all');
     const [isOptimizerOpen, setIsOptimizerOpen] = useState(false);
     const [displayMode, setDisplayMode] = useState<DisplayMode>('full');
     const [viewAngle, setViewAngle] = useState<ViewAngle>('default');
@@ -2074,11 +2074,13 @@ export const CesiumViewer: React.FC<{
         <PotreeSidebar
           isOpen={isSidebarOpen}
           onToggleOpen={onToggleSidebar ? () => onToggleSidebar(!isSidebarOpen) : undefined}
+          projectName={projectName}
           currentMode={toolMode}
           onModeChange={setToolMode}
           onClear={handleClear}
           isOptimizerOpen={isOptimizerOpen}
           onToggleOptimizer={() => setIsOptimizerOpen(!isOptimizerOpen)}
+          showOptimizerControl={isAdmin}
           showModel={showModel}
           setShowModel={setShowModel}
           showDom={showDom}
@@ -2096,14 +2098,12 @@ export const CesiumViewer: React.FC<{
           onFocusProject={handleFocusProject}
           onFocusPointCloud={handleFocusPointCloud}
           onFocusDom={handleFocusDom}
-          measureTarget={measureTarget}
-          onMeasureTargetChange={setMeasureTarget}
         />
 
 
 
         {/* Component Optimizer Panel */}
-        {isOptimizerOpen && (
+        {isAdmin && isOptimizerOpen && (
           <OptimizerPanel projectId={projectId} onClose={() => setIsOptimizerOpen(false)} />
         )}
 

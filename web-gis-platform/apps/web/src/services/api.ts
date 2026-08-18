@@ -101,19 +101,50 @@ export interface DemoLeadData {
   createdAt?: string;
 }
 
-export const submitDemoLead = async (data: DemoLeadData): Promise<{ success: boolean; message?: string }> => {
+export interface DemoAccessResult {
+  success: boolean;
+  hasAccess: boolean;
+  demoProjectId?: string;
+  message?: string;
+}
+
+export const fetchDemoAccess = async (): Promise<DemoAccessResult> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/demo-access`, {
+      headers: getAuthHeaders(),
+      credentials: 'include'
+    });
+    const data = await response.json();
+    return {
+      success: response.ok && data.success === true,
+      hasAccess: response.ok && data.hasAccess === true,
+      demoProjectId: typeof data.demoProjectId === 'string' ? data.demoProjectId : undefined,
+      message: data.message
+    };
+  } catch (error: any) {
+    return { success: false, hasAccess: false, message: error.message };
+  }
+};
+
+export const submitDemoLead = async (data: DemoLeadData): Promise<DemoAccessResult> => {
   try {
     const response = await fetch(`${API_BASE_URL}/demo-leads`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      credentials: 'include',
       body: JSON.stringify(data)
     });
     const resData = await response.json();
     if (!response.ok) throw new Error(resData.error || 'Lỗi gửi yêu cầu demo');
-    return { success: true, message: resData.message };
+    return {
+      success: resData.success === true,
+      hasAccess: resData.hasAccess === true,
+      demoProjectId: typeof resData.demoProjectId === 'string' ? resData.demoProjectId : undefined,
+      message: resData.message
+    };
   } catch (error: any) {
     console.error('Lỗi submitDemoLead:', error);
-    return { success: false, message: error.message };
+    return { success: false, hasAccess: false, message: error.message };
   }
 };
 

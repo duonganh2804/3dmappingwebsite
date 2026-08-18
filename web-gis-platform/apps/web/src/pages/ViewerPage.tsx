@@ -26,9 +26,9 @@ export const ViewerPage: React.FC = () => {
       }
       setLoading(false);
     };
-    
+
     loadProject();
-    
+
     return () => {
       setCurrentProject(null);
     };
@@ -51,9 +51,9 @@ export const ViewerPage: React.FC = () => {
     <div className="relative w-full h-screen overflow-hidden bg-black">
       {/* Nút quay lại Dashboard đặt trên bản đồ */}
       <div className={`absolute top-4 z-50 transition-all duration-300 ease-in-out ${isSidebarOpen ? 'left-[340px]' : 'left-4'}`}>
-        <Button 
-          variant="secondary" 
-          size="sm" 
+        <Button
+          variant="secondary"
+          size="sm"
           className="glass-button gap-2 bg-slate-900/80 backdrop-blur-md"
           onClick={() => navigate('/dashboard')}
         >
@@ -61,10 +61,10 @@ export const ViewerPage: React.FC = () => {
           Trở về
         </Button>
       </div>
-      
+
       {/* Component chứa Cesium Map Core */}
-      <CesiumViewer 
-        projectId={project.id} 
+      <CesiumViewer
+        projectId={project.id}
         isSidebarOpen={isSidebarOpen}
         onToggleSidebar={setIsSidebarOpen}
       />

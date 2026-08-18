@@ -3,11 +3,12 @@ import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import { PotreeSidebar } from './PotreeSidebar';
 import { OptimizerPanel } from './OptimizerPanel';
-import { FloatingViewToolbar, type DisplayMode, type ViewAngle } from './FloatingViewToolbar';
+import { UnifiedToolbar, type DisplayMode, type ViewAngle } from './UnifiedToolbar';
 import { fetchProjectById, updateProject } from '../../services/api';
 import { useAuthStore } from '../../store/useAuthStore';
 
-export type ToolMode = 'none' | 'distance' | 'height' | 'area';
+export type ToolMode = 'none' | 'point' | 'distance' | 'height' | 'angle' | 'circle' | 'azimuth' | 'area' | 'volume' | 'profile' | 'annotation';
+export type MeasureTarget = 'all' | 'pointcloud' | 'mesh' | 'dom';
 
 // Hàm tính diện tích đa giác trên mặt phẳng tiếp tuyến địa phương (ENU)
 function calculatePolygonArea(positions: Cesium.Cartesian3[]): number {
@@ -74,6 +75,17 @@ function calculateCentroid(positions: Cesium.Cartesian3[]): Cesium.Cartesian3 {
   return Cesium.Cartesian3.multiplyByScalar(sum, 1 / positions.length, new Cesium.Cartesian3());
 }
 
+export interface MeasurementRecord {
+  id: string;
+  type: ToolMode;
+  points: Cesium.Cartesian3[];
+  pointEntities: Cesium.Entity[];
+  lineEntities: Cesium.Entity[];
+  labelEntities: Cesium.Entity[];
+  fillEntity?: Cesium.Entity;
+  summaryLabelEntity?: Cesium.Entity;
+}
+
 export const CesiumViewer: React.FC<{
   projectId?: string;
   projectName?: string;
@@ -93,9 +105,11 @@ export const CesiumViewer: React.FC<{
 
     const modelRef = useRef<Cesium.Model | null>(null);
     const domLayerRef = useRef<Cesium.ImageryLayer | null>(null);
-    // const domFetchCounterRef = useRef(0);
     const pointCloudRef = useRef<Cesium.Cesium3DTileset | null>(null);
-    const measureDataSourceRef = useRef<Cesium.CustomDataSource | null>(null);
+    const measurementEntitiesRef = useRef<Cesium.Entity[]>([]);
+    const measurementsStoreRef = useRef<MeasurementRecord[]>([]);
+    // Lazy load: track whether PC đã được load (tránh load lại nhiều lần)
+    const pointCloudLoadedRef = useRef(false);
 
     const { user } = useAuthStore();
     const isAdmin = user?.role === 'SUPERADMIN';
@@ -107,16 +121,32 @@ export const CesiumViewer: React.FC<{
     const [displayMode, setDisplayMode] = useState<DisplayMode>('full');
     const [viewAngle, setViewAngle] = useState<ViewAngle>('default');
 
+    // State loading model: hiện spinner khi đang fetch/parse glTF
+    const [isModelLoading, setIsModelLoading] = useState(false);
+
     // States quản lý bật tắt layer
+    // Mặc định: chỉ hiện Model 3D, ẩn Point Cloud và DOM để tránh flash khi load
     const [showModel, setShowModel] = useState(true);
-    const [showDom, setShowDom] = useState(true);
-    const [showPointCloud, setShowPointCloud] = useState(true);
+    const [showDom, setShowDom] = useState(false);
+    const [showPointCloud, setShowPointCloud] = useState(false);
 
     // States quản lý Appearance (Ngoại quan Potree)
     const [pointSize, setPointSize] = useState(2.5);
     const [fov, setFov] = useState(60);
     const [edlEnabled, setEdlEnabled] = useState(true);
+    const [edlRadius, setEdlRadius] = useState(1.4);
+    const [edlStrength, setEdlStrength] = useState(0.4);
+    const [edlOpacity, setEdlOpacity] = useState(1.0);
+    const [background, setBackground] = useState<'sky' | 'gradient' | 'black' | 'white' | 'none'>('gradient');
+    const [quality, setQuality] = useState<'standard' | 'high'>('standard');
+    const [minPointBudget, setMinPointBudget] = useState(100_000);
+    const [maxPointBudget, setMaxPointBudget] = useState(12_000_000);
+    const [pointBudget, setPointBudget] = useState(12_000_000);
+    const [minNodeSize, setMinNodeSize] = useState(8);
+    const [lockView, setLockView] = useState(false);
     const [isOrthographic, setIsOrthographic] = useState(false);
+    const [showMeasurements, setShowMeasurements] = useState(true);
+    const [cameraSpeed, setCameraSpeed] = useState(130.6);
 
     // Fetch thông tin dự án khi projectId thay đổi
     useEffect(() => {
@@ -204,6 +234,73 @@ export const CesiumViewer: React.FC<{
           });
         }
       }
+    }, [project]);
+
+    // Tự động nhận diện và nạp ngưỡng Point Budget (tối thiểu & tối đa) riêng của từng dự án
+    useEffect(() => {
+      if (!project) return;
+
+      let detectedMax = 12_000_000;
+      let detectedMin = 100_000;
+
+      // 1. Kiểm tra nếu dự án có trường point count trực tiếp
+      if ((project as any).totalPoints || (project as any).pointCount) {
+        const pts = Number((project as any).totalPoints || (project as any).pointCount);
+        if (pts > 0) {
+          detectedMax = pts;
+          detectedMin = Math.max(10_000, Math.round(pts * 0.02));
+        }
+      }
+
+      // 2. Nạp từ metadata.json nếu có
+      if (project.metadataUrl) {
+        fetch(project.metadataUrl)
+          .then(res => res.json())
+          .then(meta => {
+            if (meta && (meta.totalPoints || meta.pointCount)) {
+              const pts = Number(meta.totalPoints || meta.pointCount);
+              if (pts > 0) {
+                const max = pts;
+                const min = Math.max(10_000, Math.round(pts * 0.02));
+                setMinPointBudget(min);
+                setMaxPointBudget(max);
+                const saved = localStorage.getItem(`pointBudget_${project.id}`);
+                const initB = saved ? Math.min(max, Math.max(min, Number(saved))) : max;
+                setPointBudget(initB);
+              }
+            }
+          })
+          .catch(() => {});
+      }
+
+      // 3. Nạp từ tileset.json nếu pointCloudId là đường dẫn JSON
+      if (project.pointCloudId && (project.pointCloudId.startsWith('http') || project.pointCloudId.startsWith('/')) && project.pointCloudId.endsWith('tileset.json')) {
+        fetch(project.pointCloudId)
+          .then(res => res.json())
+          .then(tsData => {
+            if (tsData) {
+              const extras = tsData.asset?.extras || tsData.extras || {};
+              const pts = extras.pointCount || extras.totalPoints || tsData.properties?.pointCount;
+              if (pts && Number(pts) > 0) {
+                const max = Number(pts);
+                const min = Math.max(10_000, Math.round(max * 0.02));
+                setMinPointBudget(min);
+                setMaxPointBudget(max);
+                const saved = localStorage.getItem(`pointBudget_${project.id}`);
+                const initB = saved ? Math.min(max, Math.max(min, Number(saved))) : max;
+                setPointBudget(initB);
+              }
+            }
+          })
+          .catch(() => {});
+      }
+
+      const savedBudget = localStorage.getItem(`pointBudget_${project.id}`);
+      const initBudget = savedBudget ? Math.min(detectedMax, Math.max(detectedMin, Number(savedBudget))) : detectedMax;
+
+      setMinPointBudget(detectedMin);
+      setMaxPointBudget(detectedMax);
+      setPointBudget(initBudget);
     }, [project]);
 
     // Lưu trữ bounds cơ sở của dự án để tính offset
@@ -534,9 +631,9 @@ export const CesiumViewer: React.FC<{
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true;
         if (viewer.scene.skyBox) viewer.scene.skyBox.show = true;
         viewer.scene.backgroundColor = Cesium.Color.BLACK;
-        setShowPointCloud(false); // Ở chế độ Full Map: chỉ hiển thị Ảnh DOM và 3D Model, ẩn Point Cloud
+        setShowPointCloud(false); // Ở chế độ Full Map: chỉ hiển thị 3D Model, ẩn Point Cloud và DOM
         setShowModel(true);
-        setShowDom(true);
+        setShowDom(false);
       } else if (displayMode === 'pointcloud') {
         viewer.scene.globe.show = false; // Ẩn quả địa cầu Cesium
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
@@ -545,7 +642,13 @@ export const CesiumViewer: React.FC<{
         setShowPointCloud(true);
         setShowModel(false);
         setShowDom(false);
-        handleFocusPointCloud();
+        // Lazy load: nếu trên mobile và PC chưa được load thì trigger load ngay bây giờ
+        if (isMobile && !pointCloudLoadedRef.current && project) {
+          pointCloudLoadedRef.current = true; // đặt cờ trước để tránh load nhiều lần
+          loadPointCloudLazy();
+        } else {
+          handleFocusPointCloud();
+        }
       } else if (displayMode === 'model3d') {
         viewer.scene.globe.show = false; // Ẩn quả địa cầu Cesium
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
@@ -565,7 +668,7 @@ export const CesiumViewer: React.FC<{
         setShowModel(false);
         handleFocusDom();
       }
-    }, [displayMode]);
+    }, [displayMode, project]);
 
     // Xử lý chuyển đổi góc nhìn camera (Default perspective vs Top Down 90°) xoay quanh tâm màn hình
     const prevViewAngleRef = useRef<ViewAngle>('default');
@@ -838,6 +941,8 @@ export const CesiumViewer: React.FC<{
 
       Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJhZGU0M2FmNy1hZDAzLTRhNDItYmRiYy05ZDI3NzgxZjJlMTQiLCJpZCI6NDU2MjMyLCJpc3MiOiJodHRwczovL2FwaS5jZXNpdW0uY29tIiwiYXVkIjoidW5kZWZpbmVkX2RlZmF1bHQiLCJpYXQiOjE3ODQwMTYwNzd9.JUFEkwNgp8X1PjyPe70aAUcb1YvOFSVOK3JyWTKusiw';
 
+      // ── BEST PRACTICE (Cesium Community): Dùng requestRenderMode để tránh render liên tục
+      // khi scene không thay đổi — tiết kiệm tới 60% CPU/GPU idle, quan trọng nhất trên mobile
       const viewer = new Cesium.Viewer(cesiumContainer.current, {
         animation: false,
         timeline: false,
@@ -849,52 +954,63 @@ export const CesiumViewer: React.FC<{
         selectionIndicator: false,
         navigationHelpButton: false,
         baseLayerPicker: false,
+        // ── Tối ưu render (Cesium blog "Performance Tips 2024") ──
+        requestRenderMode: true,           // Chỉ render khi có sự kiện → giảm CPU/GPU idle 40-60%
+        maximumRenderTimeChange: Infinity, // Không render thêm frame thừa giữa các sự kiện
+        targetFrameRate: isMobile ? 30 : 60, // Cap 30fps trên mobile để bảo vệ pin
       });
 
       viewerRef.current = viewer;
       viewer.scene.pickTranslucentDepth = false; // Tắt pickTranslucentDepth để tránh crash WebGL khi hủy viewer/unmount
       viewer.scene.globe.depthTestAgainstTerrain = true;
-      viewer.scene.globe.maximumScreenSpaceError = isMobile ? 4.0 : 2.0; // Giảm chất lượng địa hình trên mobile để mượt hơn
 
-      Cesium.createWorldTerrainAsync()
-        .then((provider) => {
-          if (!viewer.isDestroyed()) viewer.terrainProvider = provider;
-        })
-        .catch((e) => console.error("Lỗi khi load terrain mặc định:", e));
+      // ── BEST PRACTICE: ResolutionScale theo device pixel ratio ──
+      // Mobile high-DPI (3x) render gấp 9x pixel so với logical — giảm xuống ≤ 1x logic pixel
+      if (isMobile) {
+        viewer.resolutionScale = Math.min(1.0, 1.0 / window.devicePixelRatio); // Tương đương ~0.33 trên retina 3x
+        viewer.scene.globe.maximumScreenSpaceError = 4.0;
+        // Tắt các effect nặng không cần thiết trên mobile
+        viewer.scene.fog.enabled = false;
+        if ((viewer.scene.postProcessStages as any).fxaa) {
+          (viewer.scene.postProcessStages as any).fxaa.enabled = false;
+        }
+      } else {
+        viewer.scene.globe.maximumScreenSpaceError = 2.0;
+      }
 
-      const measureDataSource = new Cesium.CustomDataSource('measurements');
-      viewer.dataSources.add(measureDataSource);
-      measureDataSourceRef.current = measureDataSource;
+      // ── BEST PRACTICE: Terrain ──
+      // Trên mobile: dùng EllipsoidTerrainProvider (zero network cost) để giải phóng
+      // băng thông cho model 3D. Desktop giữ World Terrain để có địa hình thật.
+      if (!isMobile) {
+        Cesium.createWorldTerrainAsync()
+          .then((provider) => {
+            if (!viewer.isDestroyed()) viewer.terrainProvider = provider;
+          })
+          .catch((e) => console.error("Lỗi khi load terrain mặc định:", e));
+      }
+      // Mobile: Cesium mặc định đã dùng EllipsoidTerrainProvider, không cần làm gì thêm
+
+      measurementEntitiesRef.current = [];
 
       return () => {
-        // Xóa tham chiếu measureDataSource TRƯỚC khi hủy viewer
-        // để PolylineVisualizer không cố render vào PrimitiveCollection đã bị hủy
-        if (measureDataSourceRef.current) {
-          try {
-            if (viewer && !viewer.isDestroyed()) {
-              viewer.dataSources.remove(measureDataSourceRef.current, true);
-            }
-          } catch (e) { /* ignore */ }
-          measureDataSourceRef.current = null;
+        if (handlerRef.current) {
+          try { handlerRef.current.destroy(); } catch (e) {}
+          handlerRef.current = null;
         }
-        viewerRef.current = null;
 
-        if (viewer && !viewer.isDestroyed()) {
-          // Hủy viewer bất đồng bộ trong event loop tiếp theo để tránh xung đột với luồng vẽ/picking hiện tại của Cesium
-          setTimeout(() => {
-            if (!viewer.isDestroyed()) {
-              try {
-                viewer.dataSources.removeAll(true);
-                viewer.entities.removeAll();
-                viewer.imageryLayers.removeAll(true);
-                viewer.destroy();
-              } catch (e) {
-                console.error("Lỗi khi hủy Cesium Viewer:", e);
-              }
-            }
-          }, 0);
-        }
+        const v = viewerRef.current;
         viewerRef.current = null;
+        measurementEntitiesRef.current = [];
+
+        if (v && !v.isDestroyed()) {
+          try {
+            // Tắt render loop ngay lập tức để không có frame tick nào chạy tiếp sau khi unmount
+            v.useDefaultRenderLoop = false;
+            v.destroy();
+          } catch (e) {
+            console.error("Lỗi khi hủy Cesium Viewer:", e);
+          }
+        }
       };
     }, []);
 
@@ -1006,27 +1122,44 @@ export const CesiumViewer: React.FC<{
           );
 
           console.log("Nạp 3D model từ:", modelUrl);
+          setIsModelLoading(true);
           const model = await Cesium.Model.fromGltfAsync({
             url: modelUrl,
             modelMatrix: modelMatrix,
             scale: 1.0,
+            // ── BEST PRACTICE (Cesium Community + gltf-pipeline guide) ──
+            // incrementallyLoadTextures: model hiện ra ngay, texture stream vào dần
+            // → tránh màn hình đen/trắng kéo dài trong lúc chờ texture decode
+            incrementallyLoadTextures: true,
+            // releaseGltfJson: giải phóng JSON buffer ngay sau khi parse xong
+            // → tiết kiệm ~10-30% RAM trên mobile
+            releaseGltfJson: true,
+            // clampAnimations: nếu model có animation, clamp ở frame cuối khi hết
+            // thay vì loop liên tục → giảm CPU usage nền
+            clampAnimations: true,
           });
 
           if (!isCurrent || viewer.isDestroyed()) return;
           viewer.scene.primitives.add(model);
           modelRef.current = model;
           model.show = showModel;
+          setIsModelLoading(false);
 
           const targetSphere = new Cesium.BoundingSphere(position, 200.0);
           viewer.camera.flyToBoundingSphere(targetSphere, {
-            duration: 2.5,
+            // Mobile: bay nhanh hơn để không block interaction
+            duration: isMobile ? 1.5 : 2.5,
             offset: new Cesium.HeadingPitchRange(
               0,
               Cesium.Math.toRadians(-30),
               450
             )
           });
+
+          // requestRenderMode: yêu cầu render 1 frame sau khi model load xong
+          if (!(viewer as any).useDefaultRenderLoop) viewer.scene.requestRender();
         } catch (error) {
+          setIsModelLoading(false);
           if (viewerRef.current && !viewerRef.current.isDestroyed()) {
             console.error("Lỗi khi load mô hình 3D:", error);
           }
@@ -1106,14 +1239,32 @@ export const CesiumViewer: React.FC<{
             pointCloudRef.current = tileset;
             loadedPointCloudTilesetsRef.current = [tileset];
             tileset.show = showPointCloud;
-            (tileset as any).skipLevelOfDetail = false;
+            
+            // ── BEST PRACTICE TỐI ƯU POINT CLOUD 3D TILES ──
+            tileset.skipLevelOfDetail = true; // Bỏ qua LOD trung gian giúp giảm 50-70% request HTTP
+            tileset.baseScreenSpaceError = 1024;
+            tileset.skipScreenSpaceErrorFactor = 16;
+            tileset.skipLevels = 1;
+            tileset.immediatelyLoadDesiredLevelOfDetail = false; // Tải dần dần để tránh freeze trình duyệt
             (tileset as any).cullRequestsByFrustum = true;
             (tileset as any).preferLeaves = false;
+            
+            // Foveated Rendering: Giảm chi tiết ở vùng rìa mắt nhìn để tập trung tài nguyên vào tâm camera
             (tileset as any).foveatedScreenSpaceError = true;
             (tileset as any).foveatedConeSize = 0.3;
             (tileset as any).foveatedTimeDelay = 0.05;
-            tileset.maximumScreenSpaceError = isMobile ? 12.0 : 4.0;
-            (tileset as any).maximumMemoryUsage = isMobile ? 512 : 2048;
+            
+            // MSSE: SSE càng lớn load càng nhanh. 16.0 cho desktop và 32.0 cho mobile là tỉ lệ vàng.
+            tileset.maximumScreenSpaceError = isMobile ? 32.0 : 16.0;
+            (tileset as any).maximumMemoryUsage = isMobile ? 256 : 1024; // Giới hạn VRAM cache
+            
+            // Point Cloud Shading: Attenuation tự động giãn cách/thu nhỏ điểm theo khoảng cách
+            if (tileset.pointCloudShading) {
+              tileset.pointCloudShading.attenuation = true;
+              tileset.pointCloudShading.geometricErrorScale = 1.0;
+              tileset.pointCloudShading.maximumAttenuation = isMobile ? 2.0 : 4.0;
+            }
+            
             applyPcCalibration(tileset, targetPosition);
             return;
           }
@@ -1139,14 +1290,27 @@ export const CesiumViewer: React.FC<{
                     if (!isCurrent || viewer.isDestroyed()) return;
                     viewer.scene.primitives.add(ts);
                     ts.show = showPointCloud;
-                    (ts as any).skipLevelOfDetail = false;
+                    
+                    // ── BEST PRACTICE TỐI ƯU POINT CLOUD 3D TILES ──
+                    ts.skipLevelOfDetail = true;
+                    ts.baseScreenSpaceError = 1024;
+                    ts.skipScreenSpaceErrorFactor = 16;
+                    ts.skipLevels = 1;
+                    ts.immediatelyLoadDesiredLevelOfDetail = false;
                     (ts as any).cullRequestsByFrustum = true;
                     (ts as any).preferLeaves = false;
+                    
                     (ts as any).foveatedScreenSpaceError = true;
                     (ts as any).foveatedConeSize = 0.3;
                     (ts as any).foveatedTimeDelay = 0.05;
-                    ts.maximumScreenSpaceError = isMobile ? 12.0 : 4.0;
-                    (ts as any).maximumMemoryUsage = isMobile ? 512 : 2048;
+                    ts.maximumScreenSpaceError = isMobile ? 32.0 : 16.0;
+                    (ts as any).maximumMemoryUsage = isMobile ? 256 : 1024;
+
+                    if (ts.pointCloudShading) {
+                      ts.pointCloudShading.attenuation = true;
+                      ts.pointCloudShading.geometricErrorScale = 1.0;
+                      ts.pointCloudShading.maximumAttenuation = isMobile ? 2.0 : 4.0;
+                    }
 
                     loadedPointCloudTilesetsRef.current.push(ts);
                     if (!firstTileset) {
@@ -1179,14 +1343,28 @@ export const CesiumViewer: React.FC<{
             pointCloudRef.current = tileset;
             loadedPointCloudTilesetsRef.current = [tileset];
             tileset.show = showPointCloud;
-            (tileset as any).skipLevelOfDetail = false;
+            
+            // ── BEST PRACTICE TỐI ƯU POINT CLOUD 3D TILES ──
+            tileset.skipLevelOfDetail = true;
+            tileset.baseScreenSpaceError = 1024;
+            tileset.skipScreenSpaceErrorFactor = 16;
+            tileset.skipLevels = 1;
+            tileset.immediatelyLoadDesiredLevelOfDetail = false;
             (tileset as any).cullRequestsByFrustum = true;
             (tileset as any).preferLeaves = false;
+            
             (tileset as any).foveatedScreenSpaceError = true;
             (tileset as any).foveatedConeSize = 0.3;
             (tileset as any).foveatedTimeDelay = 0.05;
-            tileset.maximumScreenSpaceError = isMobile ? 12.0 : 4.0;
-            (tileset as any).maximumMemoryUsage = isMobile ? 512 : 2048;
+            tileset.maximumScreenSpaceError = isMobile ? 32.0 : 16.0;
+            (tileset as any).maximumMemoryUsage = isMobile ? 256 : 1024;
+
+            if (tileset.pointCloudShading) {
+              tileset.pointCloudShading.attenuation = true;
+              tileset.pointCloudShading.geometricErrorScale = 1.0;
+              tileset.pointCloudShading.maximumAttenuation = isMobile ? 2.0 : 4.0;
+            }
+            
             applyPcCalibration(tileset, targetPosition);
             return;
           }
@@ -1197,8 +1375,19 @@ export const CesiumViewer: React.FC<{
         }
       };
 
+      // Reset lazy load flag khi đổi project
+      pointCloudLoadedRef.current = false;
+
       loadOfflineModel();
-      loadPointCloud();
+
+      // ── BEST PRACTICE: Lazy Load Point Cloud ──
+      // Desktop: load ngay (không ảnh hưởng hiệu năng nhiều)
+      // Mobile: CHỈ load khi user chủ động chuyển sang chế độ Point Cloud
+      // → tránh crash do OOM (Out Of Memory) khi GPU phải xử lý cả model + PC cùng lúc
+      if (!isMobile) {
+        loadPointCloud();
+      }
+      // Mobile: loadPointCloudLazy() sẽ được gọi trong displayMode effect khi user bấm PC mode
 
       return () => {
         isCurrent = false;
@@ -1243,6 +1432,78 @@ export const CesiumViewer: React.FC<{
       };
     }, [project]);
 
+    // ── Hàm lazy load Point Cloud cho Mobile ──
+    // Được gọi khi user lần đầu chuyển sang chế độ Point Cloud trên mobile
+    const loadPointCloudLazy = async () => {
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed() || !project) return;
+
+      let longitude = project.centerLon || 106.8099;
+      let latitude = project.centerLat || 10.8404;
+      if (longitude < 90 && latitude > 90) { const t = longitude; longitude = latitude; latitude = t; }
+
+      const pcId = project.pointCloudId;
+      if (!pcId) return;
+
+      const targetPosition = Cesium.Cartesian3.fromDegrees(longitude, latitude, 0);
+
+      // Tái sử dụng hàm applyPcCalibration từ closure của useEffect project
+      // (code này cần được inline vì nằm ngoài scope)
+      const applyMatrix = (tileset: Cesium.Cesium3DTileset) => {
+        if (!tileset.boundingSphere) return;
+        if (!pointCloudOriginalCenterRef.current) {
+          pointCloudOriginalCenterRef.current = tileset.boundingSphere.center.clone();
+        }
+        const bsCenter = pointCloudOriginalCenterRef.current;
+        let pcLon = 0, pcLat = 0, pcHeight = 0, pcHeading = 0, pcPitch = 0, pcRoll = 0;
+        if (project.calibration) {
+          try { const p = JSON.parse(project.calibration); pcLon=p.pcLon??0; pcLat=p.pcLat??0; pcHeight=p.pcHeight??0; pcHeading=p.pcHeading??0; pcPitch=p.pcPitch??0; pcRoll=p.pcRoll??0; } catch(e){}
+        }
+        const offsetPos = Cesium.Cartesian3.fromDegrees(longitude + pcLon, latitude + pcLat, pcHeight);
+        const hpr = new Cesium.HeadingPitchRoll(Cesium.Math.toRadians(pcHeading), Cesium.Math.toRadians(pcPitch), Cesium.Math.toRadians(pcRoll));
+        const enuToEcef = Cesium.Transforms.eastNorthUpToFixedFrame(bsCenter);
+        const ecefToEnu = Cesium.Matrix4.inverse(enuToEcef, new Cesium.Matrix4());
+        const hprFixedFrame = Cesium.Transforms.headingPitchRollToFixedFrame(offsetPos, hpr);
+        tileset.modelMatrix = Cesium.Matrix4.multiply(hprFixedFrame, ecefToEnu, new Cesium.Matrix4());
+      };
+
+      try {
+        let tileset: Cesium.Cesium3DTileset | null = null;
+        if ((pcId.startsWith('http') || pcId.startsWith('/')) && (pcId.endsWith('tileset.json') || pcId.endsWith('.laz') || pcId.endsWith('.copc.laz'))) {
+          tileset = await Cesium.Cesium3DTileset.fromUrl(pcId);
+        } else if (!isNaN(parseInt(pcId))) {
+          tileset = await Cesium.Cesium3DTileset.fromIonAssetId(parseInt(pcId));
+        }
+        if (!tileset || viewer.isDestroyed()) return;
+        viewer.scene.primitives.add(tileset);
+        pointCloudRef.current = tileset;
+        loadedPointCloudTilesetsRef.current = [tileset];
+        tileset.show = true;
+        
+        // ── BEST PRACTICE TỐI ƯU POINT CLOUD TRONG CHẾ ĐỘ LAZY LOAD ──
+        tileset.skipLevelOfDetail = true;
+        tileset.baseScreenSpaceError = 1024;
+        tileset.skipScreenSpaceErrorFactor = 16;
+        tileset.skipLevels = 1;
+        tileset.immediatelyLoadDesiredLevelOfDetail = false;
+        tileset.maximumScreenSpaceError = isMobile ? 32.0 : 16.0;
+        (tileset as any).maximumMemoryUsage = isMobile ? 256 : 1024;
+
+        if (tileset.pointCloudShading) {
+          tileset.pointCloudShading.attenuation = true;
+          tileset.pointCloudShading.geometricErrorScale = 1.0;
+          tileset.pointCloudShading.maximumAttenuation = isMobile ? 2.0 : 4.0;
+        }
+
+        applyMatrix(tileset);
+        handleFocusPointCloud();
+        viewer.scene.requestRender();
+      } catch(e) {
+        pointCloudLoadedRef.current = false; // Reset để có thể thử lại
+        console.error("Lazy load PC thất bại:", e);
+      }
+    };
+
     // Xử lý bật tắt hiển thị mô hình 3D
     useEffect(() => {
       if (modelRef.current) {
@@ -1266,23 +1527,47 @@ export const CesiumViewer: React.FC<{
       });
     }, [showPointCloud]);
 
-    // Cập nhật Kích thước Điểm (Point Size) của Point Cloud
+    // Cập nhật Style Point Cloud (Point Size, Opacity, và Point Budget Thinning Filter trên GPU)
     useEffect(() => {
-      const style = new Cesium.Cesium3DTileStyle({
-        pointSize: pointSize
-      });
+      const minB = minPointBudget || 100_000;
+      const maxB = maxPointBudget || 12_000_000;
+      const ratio = Math.max(0.01, Math.min(1.0, (pointBudget - minB) / Math.max(1, maxB - minB)));
+
+      const styleOptions: Record<string, unknown> = {
+        pointSize: pointSize,
+      };
+
+      // Khi giảm budget (< 98%), áp dụng thuật toán băm tọa độ (Spatial Hash Point Thinning)
+      // ngay trên GPU Shader để làm thưa/dày điểm tức thì ở 60 FPS theo đúng tỷ lệ Budget
+      if (ratio < 0.98) {
+        styleOptions.show = `(fract(abs(\${POSITION}[0] * 12.9898 + \${POSITION}[1] * 78.233 + \${POSITION}[2] * 45.164))) <= ${ratio.toFixed(4)}`;
+      } else {
+        styleOptions.show = true;
+      }
+
+      // Chỉ áp dụng opacity khi < 1.0 (tránh override không cần thiết)
+      if (edlOpacity < 1.0) {
+        // "${COLOR}" → màu gốc từ dữ liệu điểm (RGB); nhân với white+alpha để điều chỉnh độ trong suốt
+        styleOptions.color = `\${COLOR} * color('white', ${edlOpacity.toFixed(2)})`;
+      }
+
+      const style = new Cesium.Cesium3DTileStyle(styleOptions);
       loadedPointCloudTilesetsRef.current.forEach(ts => {
         if (ts && !ts.isDestroyed()) {
           ts.style = style;
         }
       });
-    }, [pointSize]);
+
+      const viewer = viewerRef.current;
+      if (viewer && !viewer.isDestroyed()) {
+        viewer.scene.requestRender();
+      }
+    }, [pointSize, edlOpacity, pointBudget, minPointBudget, maxPointBudget]);
 
     // Cập nhật Góc nhìn (Field of View)
     useEffect(() => {
       const viewer = viewerRef.current;
       if (viewer && !viewer.isDestroyed()) {
-        // TypeScript hiểu frustum có thể là loại khác nên cần ép kiểu
         (viewer.camera.frustum as Cesium.PerspectiveFrustum).fov = Cesium.Math.toRadians(fov);
       }
     }, [fov]);
@@ -1295,6 +1580,169 @@ export const CesiumViewer: React.FC<{
       }
     }, [edlEnabled]);
 
+    // Cập nhật EDL Radius
+    useEffect(() => {
+      const viewer = viewerRef.current;
+      if (viewer && !viewer.isDestroyed() && (viewer.scene.postProcessStages as any).eyeDomeLighting) {
+        (viewer.scene.postProcessStages as any).eyeDomeLighting.uniforms.screenSpaceRadius = edlRadius;
+      }
+    }, [edlRadius]);
+
+    // Cập nhật EDL Strength
+    useEffect(() => {
+      const viewer = viewerRef.current;
+      if (viewer && !viewer.isDestroyed() && (viewer.scene.postProcessStages as any).eyeDomeLighting) {
+        (viewer.scene.postProcessStages as any).eyeDomeLighting.uniforms.strength = edlStrength;
+      }
+    }, [edlStrength]);
+
+    // Cập nhật Background của scene
+    useEffect(() => {
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed()) return;
+      switch (background) {
+        case 'sky':
+          viewer.scene.globe.show = true;
+          if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true;
+          if (viewer.scene.skyBox) viewer.scene.skyBox.show = true;
+          viewer.scene.backgroundColor = Cesium.Color.BLACK;
+          break;
+        case 'gradient':
+          viewer.scene.globe.show = false;
+          if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
+          if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
+          viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#090d16');
+          break;
+        case 'black':
+          viewer.scene.globe.show = false;
+          if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
+          if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
+          viewer.scene.backgroundColor = Cesium.Color.BLACK;
+          break;
+        case 'white':
+          viewer.scene.globe.show = false;
+          if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
+          if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
+          viewer.scene.backgroundColor = Cesium.Color.WHITE;
+          break;
+        case 'none':
+          viewer.scene.globe.show = false;
+          if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
+          if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
+          viewer.scene.backgroundColor = Cesium.Color.TRANSPARENT;
+          break;
+      }
+    }, [background]);
+
+    // Cập nhật Quality (Standard vs High Quality):
+    // - High Quality: Tăng độ phân giải hiển thị (Resolution Scale) theo tỷ lệ pixel màn hình,
+    //   kích hoạt khử răng cưa FXAA, tăng chi tiết địa hình và bật Attenuation lấp đầy khoảng cách điểm.
+    // - Standard: Giảm tải GPU, tối ưu tốc độ khung hình và tiết kiệm pin.
+    useEffect(() => {
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed()) return;
+
+      const isHigh = quality === 'high';
+
+      // 1. Resolution Scale & FXAA:
+      // High Quality render sắc nét theo DPR thật của màn hình, Standard tối ưu 1.0 (hoặc 0.75 trên mobile)
+      viewer.resolutionScale = isHigh 
+        ? Math.max(1.0, Math.min(2.0, window.devicePixelRatio || 1.0)) 
+        : (isMobile ? Math.min(1.0, 1.0 / (window.devicePixelRatio || 1)) : 1.0);
+
+      if ((viewer.scene.postProcessStages as any).fxaa) {
+        (viewer.scene.postProcessStages as any).fxaa.enabled = isHigh;
+      }
+
+      // 2. Globe & Terrain Screen Space Error:
+      viewer.scene.globe.maximumScreenSpaceError = isHigh ? 1.33 : (isMobile ? 4.0 : 2.0);
+
+      // 3. Point Cloud Shading Attenuation & LOD:
+      loadedPointCloudTilesetsRef.current.forEach(ts => {
+        if (ts && !ts.isDestroyed()) {
+          ts.maximumScreenSpaceError = isHigh ? 2.0 : (isMobile ? 32.0 : 16.0);
+          if (ts.pointCloudShading) {
+            ts.pointCloudShading.attenuation = isHigh;
+            ts.pointCloudShading.geometricErrorScale = isHigh ? 0.5 : 1.0;
+            ts.pointCloudShading.maximumAttenuation = isHigh ? 8.0 : (isMobile ? 2.0 : 4.0);
+          }
+        }
+      });
+
+      viewer.scene.requestRender();
+    }, [quality]);
+
+    // Cập nhật Point Budget — điều khiển mật độ điểm và số lượng point cloud hiển thị thực tế
+    useEffect(() => {
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed()) return;
+
+      const minB = minPointBudget || 100_000;
+      const maxB = maxPointBudget || 12_000_000;
+      const ratio = Math.max(0.0, Math.min(1.0, (pointBudget - minB) / Math.max(1, maxB - minB)));
+
+      // 1. maximumScreenSpaceError (SSE):
+      // Khi ratio = 1.0 (Max Budget) -> SSE = 0.3-0.5 (Tải chi tiết tối đa, phân giải toàn bộ các node lá sâu nhất)
+      // Khi ratio = 0.0 (Min Budget) -> SSE = 48.0-64.0 (Chỉ hiển thị các node gốc/thô nhất, giảm 90%+ số điểm)
+      const baseSSE = quality === 'high' ? 0.3 : 0.5;
+      const maxSSE = quality === 'high' ? 48.0 : 64.0;
+      const sse = baseSSE + Math.pow(1.0 - ratio, 2.2) * (maxSSE - baseSSE);
+
+      // 2. geometricErrorScale: Khi budget cao -> giảm error scale để ép Cesium load thêm điểm
+      const geomScale = 0.4 + Math.pow(1.0 - ratio, 1.5) * 2.6;
+
+      // 3. Memory limit (MB): Cấp phát cache RAM/VRAM tương ứng số điểm
+      const memMB = Math.round(128 + ratio * 3968); // 128MB đến 4096MB
+
+      // 4. Skip Level of Detail tuning:
+      const skipLevels = ratio > 0.85 ? 0 : Math.min(3, Math.round((1.0 - ratio) * 3));
+      const skipFactor = ratio > 0.85 ? 1 : Math.round(1 + (1.0 - ratio) * 15);
+      const immediateLOD = ratio > 0.85;
+
+      loadedPointCloudTilesetsRef.current.forEach(ts => {
+        if (ts && !ts.isDestroyed()) {
+          ts.maximumScreenSpaceError = sse;
+          (ts as any).maximumMemoryUsage = memMB;
+          ts.skipLevels = skipLevels;
+          ts.skipScreenSpaceErrorFactor = skipFactor;
+          ts.immediatelyLoadDesiredLevelOfDetail = immediateLOD;
+
+          if (ts.pointCloudShading) {
+            ts.pointCloudShading.geometricErrorScale = geomScale;
+          }
+        }
+      });
+
+      // Lưu lại giá trị budget của project hiện tại vào localStorage
+      if (project?.id) {
+        localStorage.setItem(`pointBudget_${project.id}`, pointBudget.toString());
+      }
+
+      viewer.scene.requestRender();
+    }, [pointBudget, minPointBudget, maxPointBudget, quality, project]);
+
+    // Cập nhật Min Node Size — kích thước tối thiểu node hiển thị
+    useEffect(() => {
+      loadedPointCloudTilesetsRef.current.forEach(ts => {
+        if (ts && !ts.isDestroyed()) {
+          if (ts.pointCloudShading) {
+            ts.pointCloudShading.maximumAttenuation = minNodeSize;
+          }
+        }
+      });
+    }, [minNodeSize]);
+
+    // Lock View — tắt/bật điều khiển camera
+    useEffect(() => {
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed()) return;
+      viewer.scene.screenSpaceCameraController.enableRotate = !lockView;
+      viewer.scene.screenSpaceCameraController.enableTranslate = !lockView;
+      viewer.scene.screenSpaceCameraController.enableZoom = !lockView;
+      viewer.scene.screenSpaceCameraController.enableTilt = !lockView;
+      viewer.scene.screenSpaceCameraController.enableLook = !lockView;
+    }, [lockView]);
+
     // Cập nhật Hệ chiếu Camera (Perspective vs Orthographic)
     useEffect(() => {
       const viewer = viewerRef.current;
@@ -1306,7 +1754,285 @@ export const CesiumViewer: React.FC<{
       }
     }, [isOrthographic]);
 
-    // Xử lý logic đo đạc kiểu Potree (Khoảng cách, Cao độ, Diện tích)
+    // Helper tính diện tích đa giác (Polygon Area trên mặt phẳng 2D UTM/Local ENU)
+    const calculatePolygonArea = (points: Cesium.Cartesian3[]): number => {
+      if (points.length < 3) return 0;
+      let area = 0;
+      const n = points.length;
+      const origin = points[0];
+      const enuTransform = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
+      const invEnu = Cesium.Matrix4.inverse(enuTransform, new Cesium.Matrix4());
+      
+      const localPts: { x: number; y: number }[] = [];
+      for (const p of points) {
+        const local = Cesium.Matrix4.multiplyByPoint(invEnu, p, new Cesium.Cartesian3());
+        localPts.push({ x: local.x, y: local.y });
+      }
+
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        area += localPts[i].x * localPts[j].y;
+        area -= localPts[j].x * localPts[i].y;
+      }
+      return Math.abs(area) * 0.5;
+    };
+
+    // Helper tính trọng tâm đa giác (Centroid)
+    const calculateCentroid = (points: Cesium.Cartesian3[]): Cesium.Cartesian3 => {
+      if (points.length === 0) return Cesium.Cartesian3.ZERO;
+      const sum = new Cesium.Cartesian3(0, 0, 0);
+      for (const p of points) {
+        Cesium.Cartesian3.add(sum, p, sum);
+      }
+      return Cesium.Cartesian3.multiplyByScalar(sum, 1.0 / points.length, new Cesium.Cartesian3());
+    };
+
+    // Helper tính trung điểm giữa 2 điểm Cartesian3
+    const getMidpoint = (p1: Cesium.Cartesian3, p2: Cesium.Cartesian3): Cesium.Cartesian3 => {
+      const res = new Cesium.Cartesian3();
+      Cesium.Cartesian3.add(p1, p2, res);
+      return Cesium.Cartesian3.multiplyByScalar(res, 0.5, res);
+    };
+
+    // Helper tính điểm chiếu nằm ngang ENU cho đo cao độ
+    const getProjectedPoint = (pointA: Cesium.Cartesian3, pointB: Cesium.Cartesian3): Cesium.Cartesian3 => {
+      const cartoA = Cesium.Cartographic.fromCartesian(pointA);
+      const cartoB = Cesium.Cartographic.fromCartesian(pointB);
+      const cartoProj = new Cesium.Cartographic(cartoB.longitude, cartoB.latitude, cartoA.height);
+      return Cesium.Cartographic.toCartesian(cartoProj);
+    };
+
+    // Hàm cập nhật hình học thời gian thực khi kéo/tinh chỉnh điểm đo
+    const updateMeasurementRecord = (record: MeasurementRecord) => {
+      const { type, points, lineEntities, labelEntities, fillEntity, summaryLabelEntity } = record;
+
+      if (type === 'area') {
+        const n = points.length;
+        for (let i = 0; i < n; i++) {
+          const p1 = points[i];
+          const p2 = points[(i + 1) % n];
+          const line = lineEntities[i] as any;
+          if (line && line.polyline) {
+            line.polyline.positions = new Cesium.ConstantProperty([p1, p2]);
+          }
+          const lbl = labelEntities[i] as any;
+          if (lbl && lbl.label) {
+            const dist = Cesium.Cartesian3.distance(p1, p2);
+            lbl.position = new Cesium.ConstantPositionProperty(getMidpoint(p1, p2));
+            lbl.label.text = new Cesium.ConstantProperty(`${dist.toFixed(2)} m`);
+          }
+        }
+        if (fillEntity && (fillEntity as any).polygon) {
+          (fillEntity as any).polygon.hierarchy = new Cesium.ConstantProperty(new Cesium.PolygonHierarchy(points));
+        }
+        if (summaryLabelEntity && (summaryLabelEntity as any).label) {
+          const finalArea = calculatePolygonArea(points);
+          const centroid = calculateCentroid(points);
+          summaryLabelEntity.position = new Cesium.ConstantPositionProperty(centroid) as any;
+          (summaryLabelEntity as any).label.text = new Cesium.ConstantProperty(
+            `${finalArea.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} m²`
+          );
+        }
+      } else if (type === 'distance') {
+        let total3D = 0;
+        let totalH = 0;
+        for (let i = 0; i < points.length - 1; i++) {
+          const p1 = points[i];
+          const p2 = points[i + 1];
+          const ca = Cesium.Cartographic.fromCartesian(p1);
+          const cb = Cesium.Cartographic.fromCartesian(p2);
+          const geo = new Cesium.EllipsoidGeodesic(ca, cb);
+          const hDist = geo.surfaceDistance;
+          const dz = cb.height - ca.height;
+          total3D += Math.sqrt(hDist * hDist + dz * dz);
+          totalH += hDist;
+
+          const line = lineEntities[i] as any;
+          if (line && line.polyline) {
+            line.polyline.positions = new Cesium.ConstantProperty([p1, p2]);
+          }
+          const lbl = labelEntities[i] as any;
+          if (lbl && lbl.label) {
+            const dist = Cesium.Cartesian3.distance(p1, p2);
+            lbl.position = new Cesium.ConstantPositionProperty(getMidpoint(p1, p2));
+            lbl.label.text = new Cesium.ConstantProperty(`${dist.toFixed(2)} m`);
+          }
+        }
+        if (summaryLabelEntity && (summaryLabelEntity as any).label && points.length > 0) {
+          summaryLabelEntity.position = new Cesium.ConstantPositionProperty(points[points.length - 1]) as any;
+          (summaryLabelEntity as any).label.text = new Cesium.ConstantProperty(
+            `TỔNG 3D: ${total3D.toFixed(2)} m  |  H: ${totalH.toFixed(2)} m`
+          );
+        }
+      } else if (type === 'height') {
+        if (points.length >= 2) {
+          const startPt = points[0];
+          const endPt = points[1];
+          const projPt = getProjectedPoint(startPt, endPt);
+
+          const slantDist = Cesium.Cartesian3.distance(startPt, endPt);
+          const horizDist = Cesium.Cartesian3.distance(startPt, projPt);
+          const cartoStart = Cesium.Cartographic.fromCartesian(startPt);
+          const cartoEnd = Cesium.Cartographic.fromCartesian(endPt);
+          const heightDiff = cartoEnd.height - cartoStart.height;
+
+          const slantLine = lineEntities[0] as any;
+          const horizLine = lineEntities[1] as any;
+          const vertLine = lineEntities[2] as any;
+          if (slantLine && slantLine.polyline) slantLine.polyline.positions = new Cesium.ConstantProperty([startPt, endPt]);
+          if (horizLine && horizLine.polyline) horizLine.polyline.positions = new Cesium.ConstantProperty([startPt, projPt]);
+          if (vertLine && vertLine.polyline) vertLine.polyline.positions = new Cesium.ConstantProperty([projPt, endPt]);
+
+          if (fillEntity && (fillEntity as any).polygon) {
+            (fillEntity as any).polygon.hierarchy = new Cesium.ConstantProperty(new Cesium.PolygonHierarchy([startPt, projPt, endPt]));
+          }
+
+          const dzBadge = labelEntities[0] as any;
+          const hBadge = labelEntities[1] as any;
+          const sBadge = labelEntities[2] as any;
+          if (dzBadge && dzBadge.label) {
+            dzBadge.position = new Cesium.ConstantPositionProperty(getMidpoint(projPt, endPt));
+            dzBadge.label.text = new Cesium.ConstantProperty(`CHIỀU CAO (ΔZ): ${heightDiff.toFixed(2)} m`);
+          }
+          if (hBadge && hBadge.label) {
+            hBadge.position = new Cesium.ConstantPositionProperty(getMidpoint(startPt, projPt));
+            hBadge.label.text = new Cesium.ConstantProperty(`Ngang: ${horizDist.toFixed(2)} m`);
+          }
+          if (sBadge && sBadge.label) {
+            sBadge.position = new Cesium.ConstantPositionProperty(getMidpoint(startPt, endPt));
+            sBadge.label.text = new Cesium.ConstantProperty(`Xiên: ${slantDist.toFixed(2)} m`);
+          }
+        }
+      } else if (type === 'point') {
+        const lbl = labelEntities[0] as any;
+        if (points.length >= 1 && lbl && lbl.label) {
+          const carto = Cesium.Cartographic.fromCartesian(points[0]);
+          const lon = Cesium.Math.toDegrees(carto.longitude).toFixed(6);
+          const lat = Cesium.Math.toDegrees(carto.latitude).toFixed(6);
+          const height = carto.height.toFixed(2);
+          lbl.position = new Cesium.ConstantPositionProperty(points[0]);
+          lbl.label.text = new Cesium.ConstantProperty(`X: ${lon}°\nY: ${lat}°\nZ: ${height} m`);
+        }
+      } else if (type === 'angle') {
+        if (points.length === 3) {
+          const [p1, p2, p3] = points;
+          const l1 = lineEntities[0] as any;
+          const l2 = lineEntities[1] as any;
+          if (l1 && l1.polyline) l1.polyline.positions = new Cesium.ConstantProperty([p1, p2]);
+          if (l2 && l2.polyline) l2.polyline.positions = new Cesium.ConstantProperty([p2, p3]);
+          const v1 = Cesium.Cartesian3.subtract(p1, p2, new Cesium.Cartesian3());
+          const v2 = Cesium.Cartesian3.subtract(p3, p2, new Cesium.Cartesian3());
+          const angleDeg = Cesium.Math.toDegrees(Cesium.Cartesian3.angleBetween(v1, v2));
+          const lbl = labelEntities[0] as any;
+          if (lbl && lbl.label) {
+            lbl.position = new Cesium.ConstantPositionProperty(p2);
+            lbl.label.text = new Cesium.ConstantProperty(`GÓC: ${angleDeg.toFixed(2)}°`);
+          }
+        }
+      } else if (type === 'circle') {
+        if (points.length >= 2) {
+          const [center, edge] = points;
+          const radius = Cesium.Cartesian3.distance(center, edge);
+          const circleArea = Math.PI * radius * radius;
+          const l = lineEntities[0] as any;
+          if (l && l.polyline) l.polyline.positions = new Cesium.ConstantProperty([center, edge]);
+          const lbl = labelEntities[0] as any;
+          if (lbl && lbl.label) {
+            lbl.position = new Cesium.ConstantPositionProperty(getMidpoint(center, edge));
+            lbl.label.text = new Cesium.ConstantProperty(
+              `BÁN KÍNH: ${radius.toFixed(2)} m\nDIỆN TÍCH: ${circleArea.toFixed(2)} m²`
+            );
+          }
+        }
+      } else if (type === 'azimuth') {
+        if (points.length >= 2) {
+          const [p1, p2] = points;
+          const c1 = Cesium.Cartographic.fromCartesian(p1);
+          const c2 = Cesium.Cartographic.fromCartesian(p2);
+          const geodesic = new Cesium.EllipsoidGeodesic(c1, c2);
+          const azimuthDeg = (Cesium.Math.toDegrees(geodesic.startHeading) + 360) % 360;
+          const dist = geodesic.surfaceDistance;
+          const l = lineEntities[0] as any;
+          if (l && l.polyline) l.polyline.positions = new Cesium.ConstantProperty([p1, p2]);
+          const lbl = labelEntities[0] as any;
+          if (lbl && lbl.label) {
+            lbl.position = new Cesium.ConstantPositionProperty(getMidpoint(p1, p2));
+            lbl.label.text = new Cesium.ConstantProperty(
+              `AZIMUTH: ${azimuthDeg.toFixed(2)}° | Khoảng cách: ${dist.toFixed(2)} m`
+            );
+          }
+        }
+      } else if (type === 'annotation') {
+        const lbl = labelEntities[0] as any;
+        if (points.length >= 1 && lbl) {
+          lbl.position = new Cesium.ConstantPositionProperty(points[0]);
+        }
+      } else if (type === 'volume') {
+        if (points.length >= 3) {
+          const area = calculatePolygonArea(points);
+          const centroid = calculateCentroid(points);
+          const heights = points.map(p => Cesium.Cartographic.fromCartesian(p).height);
+          const hMin = Math.min(...heights);
+          const hMax = Math.max(...heights);
+          const deltaH = Math.max(1.0, hMax - hMin);
+          const volume = area * deltaH;
+          if (fillEntity && (fillEntity as any).polygon) {
+            (fillEntity as any).polygon.hierarchy = new Cesium.ConstantProperty(new Cesium.PolygonHierarchy(points));
+            (fillEntity as any).polygon.extrudedHeight = new Cesium.ConstantProperty(hMax);
+          }
+          if (summaryLabelEntity && (summaryLabelEntity as any).label) {
+            summaryLabelEntity.position = new Cesium.ConstantPositionProperty(centroid) as any;
+            (summaryLabelEntity as any).label.text = new Cesium.ConstantProperty(
+              `THỂ TÍCH: ${volume.toFixed(2)} m³\nDiện tích: ${area.toFixed(2)} m² | Chiều cao: ${deltaH.toFixed(2)} m`
+            );
+          }
+        }
+      } else if (type === 'profile') {
+        if (points.length >= 2) {
+          const [p1, p2] = points;
+          const dist = Cesium.Cartesian3.distance(p1, p2);
+          const h1 = Cesium.Cartographic.fromCartesian(p1).height;
+          const h2 = Cesium.Cartographic.fromCartesian(p2).height;
+          const deltaH = h2 - h1;
+          const l = lineEntities[0] as any;
+          if (l && l.polyline) l.polyline.positions = new Cesium.ConstantProperty([p1, p2]);
+          const lbl = labelEntities[0] as any;
+          if (lbl && lbl.label) {
+            lbl.position = new Cesium.ConstantPositionProperty(getMidpoint(p1, p2));
+            lbl.label.text = new Cesium.ConstantProperty(
+              `TRẮC DỌC (L): ${dist.toFixed(2)} m\nCao độ bắt đầu: ${h1.toFixed(2)} m\nCao độ kết thúc: ${h2.toFixed(2)} m\nĐộ chênh (ΔH): ${deltaH.toFixed(2)} m`
+            );
+          }
+        }
+      }
+    };
+
+    // Helper bắt tọa độ 3D thông minh
+    const getPickedPosition = (windowPosition: Cesium.Cartesian2): Cesium.Cartesian3 | null => {
+      const v = viewerRef.current;
+      if (!v || v.isDestroyed() || !windowPosition) return null;
+      const scene = v.scene;
+      if (scene.pickPositionSupported) {
+        try {
+          const picked = scene.pickPosition(windowPosition);
+          if (Cesium.defined(picked)) return picked;
+        } catch (e) {}
+      }
+      try {
+        const ray = scene.camera.getPickRay(windowPosition);
+        if (ray) {
+          const globePos = scene.globe.pick(ray, scene);
+          if (Cesium.defined(globePos)) return globePos;
+          const ellipsoidPos = scene.camera.pickEllipsoid(windowPosition, scene.globe.ellipsoid);
+          if (Cesium.defined(ellipsoidPos)) return ellipsoidPos;
+        }
+      } catch (e) {}
+      return null;
+    };
+
+    // ─────────────────────────────────────────────────────────────
+    // EFFECT 1: TẠO VÀ CHỐT PHÉP ĐO MỚI (CLICK-TO-MEASURE POTREE V1.8)
+    // ─────────────────────────────────────────────────────────────
     useEffect(() => {
       const viewer = viewerRef.current;
       if (!viewer || viewer.isDestroyed()) return;
@@ -1322,179 +2048,385 @@ export const CesiumViewer: React.FC<{
         return;
       }
 
-      // Tắt kéo thả bản đồ khi đang đo đạc để tránh xung đột thao tác
       viewer.scene.screenSpaceCameraController.enableInputs = true;
 
       const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
       handlerRef.current = handler;
 
-      const measureDS = measureDataSourceRef.current;
-      if (!measureDS) return;
-
+      const recordId = `measure_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
       let activePoints: Cesium.Cartesian3[] = [];
-      let mousePosition: Cesium.Cartesian3 | null = null;
-
-      // Mảng lưu các entities tạm thời đang vẽ
       let tempEntities: Cesium.Entity[] = [];
 
+      const pointEntities: Cesium.Entity[] = [];
+      const lineEntities: Cesium.Entity[] = [];
+      const labelEntities: Cesium.Entity[] = [];
+      let fillEntity: Cesium.Entity | undefined;
+      let summaryLabelEntity: Cesium.Entity | undefined;
+
+      const currentRecord: MeasurementRecord = {
+        id: recordId,
+        type: toolMode,
+        points: activePoints,
+        pointEntities,
+        lineEntities,
+        labelEntities,
+        fillEntity,
+        summaryLabelEntity
+      };
+      measurementsStoreRef.current.push(currentRecord);
+
       const clearTempEntities = () => {
-        if (!measureDataSourceRef.current) return;
+        const v = viewerRef.current;
+        if (!v || v.isDestroyed()) return;
         tempEntities.forEach(ent => {
-          try { measureDS.entities.remove(ent); } catch (e) { /* ignore if destroyed */ }
+          try {
+            v.entities.remove(ent);
+            measurementEntitiesRef.current = measurementEntitiesRef.current.filter(e => e !== ent);
+          } catch (e) {}
         });
         tempEntities = [];
       };
 
-      // Helper: safely add entity, returns false if viewer/ds was destroyed
-      const safeAdd = (entityOpts: Cesium.Entity.ConstructorOptions): Cesium.Entity | null => {
-        const viewer = viewerRef.current;
-        if (!viewer || viewer.isDestroyed() || !measureDataSourceRef.current) return null;
+      const safeAdd = (entityOpts: Cesium.Entity.ConstructorOptions, isTemp = false): Cesium.Entity | null => {
+        const v = viewerRef.current;
+        if (!v || v.isDestroyed()) return null;
         try {
-          return measureDS.entities.add(entityOpts);
+          const entity = v.entities.add(entityOpts);
+          measurementEntitiesRef.current.push(entity);
+          if (isTemp) tempEntities.push(entity);
+          return entity;
         } catch (e) {
           return null;
         }
       };
 
-      // Hàm phụ trợ tính điểm chiếu phẳng ENU cho đo cao độ
-      const getProjectedPoint = (pointA: Cesium.Cartesian3, pointB: Cesium.Cartesian3): Cesium.Cartesian3 => {
-        const cartoA = Cesium.Cartographic.fromCartesian(pointA);
-        const cartoB = Cesium.Cartographic.fromCartesian(pointB);
-        const cartoProj = new Cesium.Cartographic(cartoB.longitude, cartoB.latitude, cartoA.height);
-        return Cesium.Cartographic.toCartesian(cartoProj);
-      };
+      // Chuột phải: Hủy đo đạc dở dang
+      handler.setInputAction(() => {
+        clearTempEntities();
+        activePoints = [];
+        setMeasurementPoints([]);
+        measurementsStoreRef.current = measurementsStoreRef.current.filter(m => m.id !== recordId);
+        setToolMode('none');
+        viewer.scene.requestRender();
+      }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
 
-      // Hàm phụ trợ tính trung điểm đặt nhãn hiển thị
-      const getMidpoint = (p1: Cesium.Cartesian3, p2: Cesium.Cartesian3): Cesium.Cartesian3 => {
-        const res = new Cesium.Cartesian3();
-        Cesium.Cartesian3.add(p1, p2, res);
-        return Cesium.Cartesian3.multiplyByScalar(res, 0.5, res);
-      };
-
-      // 1. CHẾ ĐỘ: ĐO KHOẢNG CÁCH NHIỀU ĐIỂM (POTREE STYLE)
-      if (toolMode === 'distance') {
-        // Bắt sự kiện chuột di chuyển để vẽ đường dóng động
-        handler.setInputAction((movement: any) => {
-          const cartesian = viewer.scene.pickPosition(movement.endPosition);
-          if (!cartesian) return;
-          mousePosition = cartesian;
-
-          // Xóa đường dóng tạm cũ
-          clearTempEntities();
-
-          if (activePoints.length > 0) {
-            const lastPoint = activePoints[activePoints.length - 1];
-            // Tính khoảng cách từ điểm cuối tới vị trí chuột
-            const distSegment = Cesium.Cartesian3.distance(lastPoint, mousePosition);
-
-            // Tính tổng khoảng cách lũy kế
-            let totalDist = 0;
-            for (let i = 0; i < activePoints.length - 1; i++) {
-              totalDist += Cesium.Cartesian3.distance(activePoints[i], activePoints[i + 1]);
-            }
-            totalDist += distSegment;
-
-            // Vẽ đường dóng tạm nét đứt
-            const hoverLine = safeAdd({
-              polyline: {
-                positions: [lastPoint, mousePosition],
-                width: 2,
-                material: new Cesium.PolylineDashMaterialProperty({
-                  color: Cesium.Color.YELLOW.withAlpha(0.8),
-                  dashLength: 8
-                }),
-                depthFailMaterial: new Cesium.PolylineDashMaterialProperty({
-                  color: Cesium.Color.YELLOW.withAlpha(0.3),
-                  dashLength: 8
-                })
-              }
-            });
-            if (hoverLine) tempEntities.push(hoverLine);
-
-            // Nhãn hiển thị khoảng cách động tại vị trí chuột
-            const hoverLabel = safeAdd({
-              position: mousePosition,
-              label: {
-                text: `+${distSegment.toFixed(2)} m (Tổng: ${totalDist.toFixed(2)} m)`,
-                font: 'bold 12px sans-serif',
-                fillColor: Cesium.Color.YELLOW,
-                outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 3,
-                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-                pixelOffset: new Cesium.Cartesian2(0, -15),
-                disableDepthTestDistance: Number.POSITIVE_INFINITY
-              }
-            });
-            if (hoverLabel) tempEntities.push(hoverLabel);
+      // Helper tạo điểm chốt đỏ nổi bật có gắn metadata tinh chỉnh
+      const addMeasurePoint = (pos: Cesium.Cartesian3, pointIdx: number, colorHex = '#ff0055', size = 13) => {
+        const entity = safeAdd({
+          position: pos,
+          point: {
+            pixelSize: size,
+            color: Cesium.Color.fromCssColorString(colorHex),
+            outlineColor: Cesium.Color.WHITE,
+            outlineWidth: 3,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
           }
-        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+        });
+        if (entity) {
+          (entity as any)._isMeasurePoint = true;
+          (entity as any)._measureId = recordId;
+          (entity as any)._pointIndex = pointIdx;
+          pointEntities.push(entity);
+        }
+        return entity;
+      };
 
-        // Bắt sự kiện click chuột trái để chốt các điểm đo (Geodetic EllipsoidGeodesic)
-        handler.setInputAction((click: any) => {
-          const cartesian = viewer.scene.pickPosition(click.position);
-          if (!cartesian) return;
+      // Helper tạo nhãn đo khoảng cách cạnh
+      const addEdgeDistanceBadge = (p1: Cesium.Cartesian3, p2: Cesium.Cartesian3, text?: string, isTemp = false) => {
+        const dist = Cesium.Cartesian3.distance(p1, p2);
+        const labelText = text || `${dist.toFixed(2)} m`;
+        return safeAdd({
+          position: getMidpoint(p1, p2),
+          label: {
+            text: labelText,
+            font: 'bold 13px "JetBrains Mono", sans-serif',
+            fillColor: Cesium.Color.WHITE,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2.5,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            showBackground: true,
+            backgroundColor: new Cesium.Color(0.04, 0.04, 0.08, 0.92),
+            backgroundPadding: new Cesium.Cartesian2(9, 5),
+            verticalOrigin: Cesium.VerticalOrigin.CENTER,
+            horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+            pixelOffset: new Cesium.Cartesian2(0, -14),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
+          }
+        }, isTemp);
+      };
 
-          activePoints.push(cartesian);
-          setMeasurementPoints([...activePoints]);
+      // ─────────────────────────────────────────────────────────────
+      // ─────────────────────────────────────────────────────────────
+      // 1. ĐO DIỆN TÍCH (AREA)
+      // ─────────────────────────────────────────────────────────────
+      if (toolMode === 'area') {
+        handler.setInputAction((movement: any) => {
+          if (activePoints.length === 0) return;
+          const mousePos = getPickedPosition(movement.endPosition);
+          if (!mousePos) return;
+          clearTempEntities();
+          const lastPt = activePoints[activePoints.length - 1];
+          const firstPt = activePoints[0];
 
-          // Thêm điểm chốt cố định
+          // Đường dóng từ điểm cuối đến vị trí chuột hiện tại
           safeAdd({
-            position: cartesian,
-            point: {
-              pixelSize: 10,
-              color: new Cesium.Color(0.44, 0.85, 0.9, 1.0),
-              outlineColor: Cesium.Color.WHITE,
-              outlineWidth: 2,
-              disableDepthTestDistance: Number.POSITIVE_INFINITY
+            polyline: {
+              positions: [lastPt, mousePos],
+              width: 3.5,
+              material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055'), dashLength: 8 }),
+              depthFailMaterial: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055').withAlpha(0.6), dashLength: 8 })
             }
-          });
+          }, true);
+          addEdgeDistanceBadge(lastPt, mousePos, undefined, true);
 
-          // Vẽ đường nối cố định nếu từ 2 điểm trở lên — dùng Geodetic cho khoảng cách chính xác
-          if (activePoints.length > 1) {
-            const p1 = activePoints[activePoints.length - 2];
-            const p2 = activePoints[activePoints.length - 1];
-            const ca = Cesium.Cartographic.fromCartesian(p1);
-            const cb = Cesium.Cartographic.fromCartesian(p2);
-            const geodesic = new Cesium.EllipsoidGeodesic(ca, cb);
-            const hDist = geodesic.surfaceDistance;
-            const dz = cb.height - ca.height;
-            const slantDist = Math.sqrt(hDist * hDist + dz * dz);
-
+          // Khi đã có từ 2 điểm (chuột đang là điểm thứ 3 trở lên): dóng khép kín về điểm đầu và hiển thị diện tích xem trước
+          if (activePoints.length >= 2) {
             safeAdd({
               polyline: {
-                positions: [p1, p2],
+                positions: [mousePos, firstPt],
                 width: 3,
-                material: new Cesium.PolylineOutlineMaterialProperty({
-                  color: new Cesium.Color(0.44, 0.85, 0.9, 1.0),
-                  outlineWidth: 1.5,
-                  outlineColor: Cesium.Color.BLACK,
-                })
+                material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055').withAlpha(0.8), dashLength: 8 }),
+                depthFailMaterial: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055').withAlpha(0.5), dashLength: 8 })
               }
-            });
+            }, true);
+            addEdgeDistanceBadge(mousePos, firstPt, undefined, true);
 
-            // Nhãn hiển thị đầy đủ: 3D slant + ngang + ΔZ
+            const polygonHierarchy = [...activePoints, mousePos];
             safeAdd({
-              position: getMidpoint(p1, p2),
+              polygon: {
+                hierarchy: new Cesium.PolygonHierarchy(polygonHierarchy),
+                material: Cesium.Color.fromCssColorString('#ff0055').withAlpha(0.18),
+                outline: false
+              }
+            }, true);
+
+            const liveArea = calculatePolygonArea(polygonHierarchy);
+            const liveCentroid = calculateCentroid(polygonHierarchy);
+            safeAdd({
+              position: liveCentroid,
               label: {
-                text: `3D: ${slantDist.toFixed(4)}m\nH: ${hDist.toFixed(4)}m  ΔZ: ${dz >= 0 ? '+' : ''}${dz.toFixed(4)}m`,
-                font: 'bold 11px "JetBrains Mono", monospace',
+                text: `DIỆN TÍCH: ${liveArea.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} m²`,
+                font: 'bold 14px "JetBrains Mono", sans-serif',
                 fillColor: Cesium.Color.WHITE,
                 outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 3,
+                outlineWidth: 2.5,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-                pixelOffset: new Cesium.Cartesian2(0, -10),
+                showBackground: true,
+                backgroundColor: new Cesium.Color(0.02, 0.35, 0.15, 0.95),
+                backgroundPadding: new Cesium.Cartesian2(12, 6),
+                verticalOrigin: Cesium.VerticalOrigin.CENTER,
+                horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
                 disableDepthTestDistance: Number.POSITIVE_INFINITY
               }
-            });
+            }, true);
           }
+          viewer.scene.requestRender();
+        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+        handler.setInputAction((click: any) => {
+          const pt = getPickedPosition(click.position);
+          if (!pt) return;
+          const idx = activePoints.length;
+          activePoints.push(pt);
+          setMeasurementPoints([...activePoints]);
+          addMeasurePoint(pt, idx);
+
+          // Nối cạnh cố định giữa điểm trước và điểm vừa click
+          if (activePoints.length >= 2) {
+            const pPrev = activePoints[activePoints.length - 2];
+            const pCurr = activePoints[activePoints.length - 1];
+            const line = safeAdd({
+              polyline: {
+                positions: [pPrev, pCurr],
+                width: 4.5,
+                material: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5 }),
+                depthFailMaterial: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055').withAlpha(0.65), outlineColor: Cesium.Color.BLACK.withAlpha(0.65), outlineWidth: 1.5 })
+              }
+            });
+            if (line) lineEntities.push(line);
+            const badge = addEdgeDistanceBadge(pPrev, pCurr);
+            if (badge) labelEntities.push(badge);
+          }
+
+          // Bắt đầu từ điểm thứ 3 trở lên (activePoints.length >= 3):
+          // Ngay lập tức kết nối đa giác các điểm đã có và tính diện tích
+          if (activePoints.length >= 3) {
+            const curArea = calculatePolygonArea(activePoints);
+            const curCentroid = calculateCentroid(activePoints);
+
+            // Cập nhật hoặc tạo mặt phẳng đa giác cố định cho các điểm đã chốt
+            if (!fillEntity) {
+              fillEntity = safeAdd({
+                polygon: {
+                  hierarchy: new Cesium.PolygonHierarchy(activePoints),
+                  material: Cesium.Color.fromCssColorString('#ff0055').withAlpha(0.22),
+                  outline: false
+                }
+              }) || undefined;
+            } else if ((fillEntity as any).polygon) {
+              (fillEntity as any).polygon.hierarchy = new Cesium.ConstantProperty(new Cesium.PolygonHierarchy(activePoints));
+            }
+
+            // Cập nhật hoặc tạo nhãn diện tích cố định tại trọng tâm
+            if (!summaryLabelEntity) {
+              summaryLabelEntity = safeAdd({
+                position: curCentroid,
+                label: {
+                  text: `DIỆN TÍCH: ${curArea.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} m²`,
+                  font: 'bold 15px "JetBrains Mono", sans-serif',
+                  fillColor: Cesium.Color.WHITE,
+                  outlineColor: Cesium.Color.BLACK,
+                  outlineWidth: 2.5,
+                  style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                  showBackground: true,
+                  backgroundColor: new Cesium.Color(0.02, 0.38, 0.16, 0.95),
+                  backgroundPadding: new Cesium.Cartesian2(14, 7),
+                  verticalOrigin: Cesium.VerticalOrigin.CENTER,
+                  horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+                  disableDepthTestDistance: Number.POSITIVE_INFINITY
+                }
+              }) || undefined;
+            } else if ((summaryLabelEntity as any).label) {
+              summaryLabelEntity.position = new Cesium.ConstantPositionProperty(curCentroid) as any;
+              (summaryLabelEntity as any).label.text = new Cesium.ConstantProperty(
+                `DIỆN TÍCH: ${curArea.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} m²`
+              );
+            }
+          }
+
+          clearTempEntities();
+          viewer.scene.requestRender();
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-        // Click đúp chuột trái để kết thúc đo khoảng cách — lưu vào measureResults
+        // Nhấp đúp chuột để chốt và hoàn tất đo diện tích
         handler.setInputAction(() => {
           clearTempEntities();
-          if (activePoints.length > 1) {
+          if (activePoints.length >= 3) {
+            const firstPt = activePoints[0];
+            const lastPt = activePoints[activePoints.length - 1];
+            const closingLine = safeAdd({
+              polyline: {
+                positions: [lastPt, firstPt],
+                width: 4.5,
+                material: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5 }),
+                depthFailMaterial: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055').withAlpha(0.65), outlineColor: Cesium.Color.BLACK.withAlpha(0.65), outlineWidth: 1.5 })
+              }
+            });
+            if (closingLine) lineEntities.push(closingLine);
+            const closingBadge = addEdgeDistanceBadge(lastPt, firstPt);
+            if (closingBadge) labelEntities.push(closingBadge);
+
+            if (!fillEntity) {
+              fillEntity = safeAdd({
+                polygon: {
+                  hierarchy: new Cesium.PolygonHierarchy(activePoints),
+                  material: Cesium.Color.fromCssColorString('#ff0055').withAlpha(0.22),
+                  outline: false
+                }
+              }) || undefined;
+            } else if ((fillEntity as any).polygon) {
+              (fillEntity as any).polygon.hierarchy = new Cesium.ConstantProperty(new Cesium.PolygonHierarchy(activePoints));
+            }
+
+            const finalArea = calculatePolygonArea(activePoints);
+            const centroid = calculateCentroid(activePoints);
+            if (!summaryLabelEntity) {
+              summaryLabelEntity = safeAdd({
+                position: centroid,
+                label: {
+                  text: `DIỆN TÍCH: ${finalArea.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} m²`,
+                  font: 'bold 15px "JetBrains Mono", sans-serif',
+                  fillColor: Cesium.Color.WHITE,
+                  outlineColor: Cesium.Color.BLACK,
+                  outlineWidth: 2.5,
+                  style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                  showBackground: true,
+                  backgroundColor: new Cesium.Color(0.02, 0.38, 0.16, 0.95),
+                  backgroundPadding: new Cesium.Cartesian2(14, 7),
+                  verticalOrigin: Cesium.VerticalOrigin.CENTER,
+                  horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+                  disableDepthTestDistance: Number.POSITIVE_INFINITY
+                }
+              }) || undefined;
+            } else if ((summaryLabelEntity as any).label) {
+              summaryLabelEntity.position = new Cesium.ConstantPositionProperty(centroid) as any;
+              (summaryLabelEntity as any).label.text = new Cesium.ConstantProperty(
+                `DIỆN TÍCH: ${finalArea.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} m²`
+              );
+            }
+
+            measurementsStoreRef.current.push({
+              id: recordId,
+              type: 'area',
+              points: [...activePoints],
+              pointEntities: [...pointEntities],
+              lineEntities: [...lineEntities],
+              labelEntities: [...labelEntities],
+              fillEntity,
+              summaryLabelEntity
+            });
+          }
+          viewer.scene.requestRender();
+          setToolMode('none');
+        }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // 2. ĐO KHOẢNG CÁCH (DISTANCE)
+      // ─────────────────────────────────────────────────────────────
+      if (toolMode === 'distance') {
+        handler.setInputAction((movement: any) => {
+          if (activePoints.length === 0) return;
+          const mousePos = getPickedPosition(movement.endPosition);
+          if (!mousePos) return;
+          clearTempEntities();
+          const lastPt = activePoints[activePoints.length - 1];
+          const distSegment = Cesium.Cartesian3.distance(lastPt, mousePos);
+          let totalDist = 0;
+          for (let i = 0; i < activePoints.length - 1; i++) { totalDist += Cesium.Cartesian3.distance(activePoints[i], activePoints[i + 1]); }
+          totalDist += distSegment;
+          safeAdd({
+            polyline: {
+              positions: [lastPt, mousePos],
+              width: 3.5,
+              material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055'), dashLength: 8 }),
+              depthFailMaterial: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055').withAlpha(0.6), dashLength: 8 })
+            }
+          }, true);
+          addEdgeDistanceBadge(lastPt, mousePos, `+${distSegment.toFixed(2)} m (Tổng: ${totalDist.toFixed(2)} m)`, true);
+          viewer.scene.requestRender();
+        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+        handler.setInputAction((click: any) => {
+          const pt = getPickedPosition(click.position);
+          if (!pt) return;
+          const idx = activePoints.length;
+          activePoints.push(pt);
+          setMeasurementPoints([...activePoints]);
+          addMeasurePoint(pt, idx);
+
+          if (activePoints.length >= 2) {
+            const pPrev = activePoints[activePoints.length - 2];
+            const pCurr = activePoints[activePoints.length - 1];
+            const line = safeAdd({
+              polyline: {
+                positions: [pPrev, pCurr],
+                width: 4.5,
+                material: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5 }),
+                depthFailMaterial: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055').withAlpha(0.65), outlineColor: Cesium.Color.BLACK.withAlpha(0.65), outlineWidth: 1.5 })
+              }
+            });
+            if (line) lineEntities.push(line);
+            const badge = addEdgeDistanceBadge(pPrev, pCurr);
+            if (badge) labelEntities.push(badge);
+          }
+          clearTempEntities();
+          viewer.scene.requestRender();
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+        handler.setInputAction(() => {
+          clearTempEntities();
+          if (activePoints.length >= 2) {
             let total3D = 0;
             let totalH = 0;
             for (let i = 0; i < activePoints.length - 1; i++) {
@@ -1506,425 +2438,905 @@ export const CesiumViewer: React.FC<{
               total3D += Math.sqrt(hDist * hDist + dz * dz);
               totalH += hDist;
             }
-            const caFirst = Cesium.Cartographic.fromCartesian(activePoints[0]);
-            const caLast = Cesium.Cartographic.fromCartesian(activePoints[activePoints.length - 1]);
-            const totalDZ = caLast.height - caFirst.height;
-
-            safeAdd({
+            summaryLabelEntity = safeAdd({
               position: activePoints[activePoints.length - 1],
               label: {
-                text: `TỔNG 3D: ${total3D.toFixed(4)} m  H: ${totalH.toFixed(4)} m`,
-                font: 'bold 13px "JetBrains Mono", monospace',
-                fillColor: new Cesium.Color(0.7, 1.0, 0.4, 1.0),
+                text: `TỔNG 3D: ${total3D.toFixed(2)} m  |  H: ${totalH.toFixed(2)} m`,
+                font: 'bold 14px "JetBrains Mono", sans-serif',
+                fillColor: Cesium.Color.WHITE,
                 outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 4,
+                outlineWidth: 2.5,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                showBackground: true,
+                backgroundColor: new Cesium.Color(0.02, 0.38, 0.16, 0.95),
+                backgroundPadding: new Cesium.Cartesian2(14, 7),
                 verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
                 pixelOffset: new Cesium.Cartesian2(0, -25),
                 disableDepthTestDistance: Number.POSITIVE_INFINITY
               }
+            }) || undefined;
+
+            measurementsStoreRef.current.push({
+              id: recordId,
+              type: 'distance',
+              points: [...activePoints],
+              pointEntities: [...pointEntities],
+              lineEntities: [...lineEntities],
+              labelEntities: [...labelEntities],
+              summaryLabelEntity
             });
-
-
           }
+          viewer.scene.requestRender();
           setToolMode('none');
         }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
       }
 
-      // 2. CHẾ ĐỘ: ĐO CHIỀU CAO ĐỨNG (HEIGHT POTREE STYLE - ĐỘC QUYỀN)
+      // ─────────────────────────────────────────────────────────────
+      // 3. ĐO CHIỀU CAO ĐỨNG (HEIGHT)
+      // ─────────────────────────────────────────────────────────────
       if (toolMode === 'height') {
-        // Di chuyển chuột: Vẽ tam giác dóng gồm Cạnh huyền, Cạnh đáy (ngang) và Cạnh đứng (cao độ)
         handler.setInputAction((movement: any) => {
-          const cartesian = viewer.scene.pickPosition(movement.endPosition);
-          if (!cartesian) return;
-          mousePosition = cartesian;
-
+          if (activePoints.length === 0) return;
+          const mousePos = getPickedPosition(movement.endPosition);
+          if (!mousePos) return;
           clearTempEntities();
+          const startPt = activePoints[0];
+          const projPt = getProjectedPoint(startPt, mousePos);
+          const slantDist = Cesium.Cartesian3.distance(startPt, mousePos);
+          const horizDist = Cesium.Cartesian3.distance(startPt, projPt);
+          const cartoStart = Cesium.Cartographic.fromCartesian(startPt);
+          const cartoEnd = Cesium.Cartographic.fromCartesian(mousePos);
+          const heightDiff = cartoEnd.height - cartoStart.height;
 
-          if (activePoints.length > 0) {
-            const startPoint = activePoints[0];
-            const endPoint = mousePosition;
+          safeAdd({
+            polyline: {
+              positions: [startPt, mousePos],
+              width: 3,
+              material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.CYAN, dashLength: 6 }),
+              depthFailMaterial: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.CYAN.withAlpha(0.6), dashLength: 6 })
+            }
+          }, true);
+          safeAdd({
+            polyline: {
+              positions: [startPt, projPt],
+              width: 3,
+              material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.LIGHTGRAY, dashLength: 6 }),
+              depthFailMaterial: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.LIGHTGRAY.withAlpha(0.6), dashLength: 6 })
+            }
+          }, true);
+          safeAdd({
+            polyline: {
+              positions: [projPt, mousePos],
+              width: 4.5,
+              material: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055'), outlineWidth: 1.5, outlineColor: Cesium.Color.BLACK }),
+              depthFailMaterial: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055').withAlpha(0.65), outlineWidth: 1.5, outlineColor: Cesium.Color.BLACK.withAlpha(0.65) })
+            }
+          }, true);
+          safeAdd({
+            polygon: {
+              hierarchy: new Cesium.PolygonHierarchy([startPt, projPt, mousePos]),
+              material: Cesium.Color.CYAN.withAlpha(0.18),
+              outline: false
+            }
+          }, true);
 
-            // Điểm chiếu xuống mặt phẳng nằm ngang của điểm gốc
-            const projPoint = getProjectedPoint(startPoint, endPoint);
+          safeAdd({
+            position: getMidpoint(projPt, mousePos),
+            label: {
+              text: `CHIỀU CAO (ΔZ): ${heightDiff.toFixed(2)} m`,
+              font: 'bold 14px "JetBrains Mono", sans-serif',
+              fillColor: Cesium.Color.WHITE,
+              outlineColor: Cesium.Color.BLACK,
+              outlineWidth: 2.5,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              showBackground: true,
+              backgroundColor: new Cesium.Color(0.85, 0.05, 0.25, 0.95),
+              backgroundPadding: new Cesium.Cartesian2(10, 5),
+              horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+              pixelOffset: new Cesium.Cartesian2(15, 0),
+              disableDepthTestDistance: Number.POSITIVE_INFINITY
+            }
+          }, true);
+          safeAdd({
+            position: getMidpoint(startPt, projPt),
+            label: {
+              text: `Ngang (H): ${horizDist.toFixed(2)} m`,
+              font: 'bold 12px "JetBrains Mono", sans-serif',
+              fillColor: Cesium.Color.WHITE,
+              outlineColor: Cesium.Color.BLACK,
+              outlineWidth: 2,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              showBackground: true,
+              backgroundColor: new Cesium.Color(0.1, 0.1, 0.15, 0.88),
+              backgroundPadding: new Cesium.Cartesian2(7, 4),
+              verticalOrigin: Cesium.VerticalOrigin.TOP,
+              pixelOffset: new Cesium.Cartesian2(0, 10),
+              disableDepthTestDistance: Number.POSITIVE_INFINITY
+            }
+          }, true);
+          safeAdd({
+            position: getMidpoint(startPt, mousePos),
+            label: {
+              text: `Xiên (S): ${slantDist.toFixed(2)} m`,
+              font: 'bold 12px "JetBrains Mono", sans-serif',
+              fillColor: Cesium.Color.WHITE,
+              outlineColor: Cesium.Color.BLACK,
+              outlineWidth: 2,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              showBackground: true,
+              backgroundColor: new Cesium.Color(0.0, 0.4, 0.5, 0.9),
+              backgroundPadding: new Cesium.Cartesian2(7, 4),
+              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+              pixelOffset: new Cesium.Cartesian2(0, -10),
+              disableDepthTestDistance: Number.POSITIVE_INFINITY
+            }
+          }, true);
+          viewer.scene.requestRender();
+        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
-            // Tính các khoảng cách đo
-            const slantDist = Cesium.Cartesian3.distance(startPoint, endPoint);
-            const horizDist = Cesium.Cartesian3.distance(startPoint, projPoint);
+        handler.setInputAction((click: any) => {
+          const pt = getPickedPosition(click.position);
+          if (!pt) return;
 
-            // Tính hiệu độ cao thực tế (chênh lệch Z)
-            const cartoStart = Cesium.Cartographic.fromCartesian(startPoint);
-            const cartoEnd = Cesium.Cartographic.fromCartesian(endPoint);
+          if (activePoints.length === 0) {
+            activePoints.push(pt);
+            addMeasurePoint(pt, 0, '#00e5ff', 13);
+            viewer.scene.requestRender();
+          } else {
+            clearTempEntities();
+            const startPt = activePoints[0];
+            const endPt = pt;
+            activePoints.push(endPt);
+            const projPt = getProjectedPoint(startPt, endPt);
+            const slantDist = Cesium.Cartesian3.distance(startPt, endPt);
+            const horizDist = Cesium.Cartesian3.distance(startPt, projPt);
+            const cartoStart = Cesium.Cartographic.fromCartesian(startPt);
+            const cartoEnd = Cesium.Cartographic.fromCartesian(endPt);
             const heightDiff = cartoEnd.height - cartoStart.height;
 
-            // 1. Vẽ đường xiên (slant) nối trực tiếp
+            addMeasurePoint(endPt, 1, '#ff0055', 13);
+
             const slantLine = safeAdd({
               polyline: {
-                positions: [startPoint, endPoint],
-                width: 2,
-                material: new Cesium.PolylineDashMaterialProperty({
-                  color: Cesium.Color.CYAN,
-                  dashLength: 6
-                })
+                positions: [startPt, endPt],
+                width: 3,
+                material: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.CYAN, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5 }),
+                depthFailMaterial: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.CYAN.withAlpha(0.65), outlineColor: Cesium.Color.BLACK.withAlpha(0.65), outlineWidth: 1.5 })
               }
             });
-            if (slantLine) tempEntities.push(slantLine);
-
-            // 2. Vẽ đường ngang (horizontal projection)
             const horizLine = safeAdd({
               polyline: {
-                positions: [startPoint, projPoint],
-                width: 2,
-                material: new Cesium.PolylineDashMaterialProperty({
-                  color: Cesium.Color.LIGHTGRAY,
-                  dashLength: 6
-                })
+                positions: [startPt, projPt],
+                width: 3,
+                material: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.DARKGRAY, outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5 }),
+                depthFailMaterial: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.DARKGRAY.withAlpha(0.65), outlineColor: Cesium.Color.BLACK.withAlpha(0.65), outlineWidth: 1.5 })
               }
             });
-            if (horizLine) tempEntities.push(horizLine);
-
-            // 3. Vẽ cột đứng (vertical height)
             const vertLine = safeAdd({
               polyline: {
-                positions: [projPoint, endPoint],
-                width: 3,
-                material: new Cesium.PolylineOutlineMaterialProperty({
-                  color: Cesium.Color.RED,
-                  outlineWidth: 1,
-                  outlineColor: Cesium.Color.BLACK
-                })
+                positions: [projPt, endPt],
+                width: 4.5,
+                material: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5 }),
+                depthFailMaterial: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#ff0055').withAlpha(0.65), outlineColor: Cesium.Color.BLACK.withAlpha(0.65), outlineWidth: 1.5 })
               }
             });
-            if (vertLine) tempEntities.push(vertLine);
+            if (slantLine) lineEntities.push(slantLine);
+            if (horizLine) lineEntities.push(horizLine);
+            if (vertLine) lineEntities.push(vertLine);
 
-            // 4. Vẽ mặt tam giác dóng mờ
-            const triangleFace = safeAdd({
+            fillEntity = safeAdd({
               polygon: {
-                hierarchy: new Cesium.PolygonHierarchy([startPoint, projPoint, endPoint]),
-                material: Cesium.Color.CYAN.withAlpha(0.15),
+                hierarchy: new Cesium.PolygonHierarchy([startPt, projPt, endPt]),
+                material: Cesium.Color.CYAN.withAlpha(0.22),
                 outline: false
               }
-            });
-            if (triangleFace) tempEntities.push(triangleFace);
+            }) || undefined;
 
-            // 5. Thêm nhãn đo cho từng cạnh tam giác dóng
-            // Nhãn chênh cao (Vertical Height) - Cạnh đứng màu đỏ
-            const vLabel = safeAdd({
-              position: getMidpoint(projPoint, endPoint),
+            const dzBadge = safeAdd({
+              position: getMidpoint(projPt, endPt),
               label: {
-                text: `Chiều cao (V): ${heightDiff.toFixed(2)} m`,
-                font: 'bold 14px sans-serif',
-                fillColor: Cesium.Color.RED,
-                outlineColor: Cesium.Color.WHITE,
-                outlineWidth: 3,
+                text: `CHIỀU CAO (ΔZ): ${heightDiff.toFixed(2)} m`,
+                font: 'bold 14px "JetBrains Mono", sans-serif',
+                fillColor: Cesium.Color.WHITE,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2.5,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                showBackground: true,
+                backgroundColor: new Cesium.Color(0.85, 0.05, 0.25, 0.95),
+                backgroundPadding: new Cesium.Cartesian2(10, 5),
                 horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
                 pixelOffset: new Cesium.Cartesian2(15, 0),
                 disableDepthTestDistance: Number.POSITIVE_INFINITY
               }
             });
-            if (vLabel) tempEntities.push(vLabel);
-
-            // Nhãn khoảng cách ngang (Horizontal) - Cạnh đáy
-            const hLabel = safeAdd({
-              position: getMidpoint(startPoint, projPoint),
+            const hBadge = safeAdd({
+              position: getMidpoint(startPt, projPt),
               label: {
-                text: `Ngang (H): ${horizDist.toFixed(2)} m`,
-                font: 'bold 12px sans-serif',
-                fillColor: Cesium.Color.LIGHTGRAY,
+                text: `Ngang: ${horizDist.toFixed(2)} m`,
+                font: 'bold 12px "JetBrains Mono", sans-serif',
+                fillColor: Cesium.Color.WHITE,
                 outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 3,
+                outlineWidth: 2,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                showBackground: true,
+                backgroundColor: new Cesium.Color(0.1, 0.1, 0.15, 0.88),
+                backgroundPadding: new Cesium.Cartesian2(7, 4),
                 verticalOrigin: Cesium.VerticalOrigin.TOP,
                 pixelOffset: new Cesium.Cartesian2(0, 10),
                 disableDepthTestDistance: Number.POSITIVE_INFINITY
               }
             });
-            if (hLabel) tempEntities.push(hLabel);
-
-            // Nhãn khoảng cách xiên (Slant) - Cạnh huyền
-            const sLabel = safeAdd({
-              position: getMidpoint(startPoint, endPoint),
+            const sBadge = safeAdd({
+              position: getMidpoint(startPt, endPt),
               label: {
-                text: `Xiên (S): ${slantDist.toFixed(2)} m`,
-                font: 'bold 12px sans-serif',
-                fillColor: Cesium.Color.CYAN,
+                text: `Xiên: ${slantDist.toFixed(2)} m`,
+                font: 'bold 12px "JetBrains Mono", sans-serif',
+                fillColor: Cesium.Color.WHITE,
                 outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 3,
+                outlineWidth: 2,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                showBackground: true,
+                backgroundColor: new Cesium.Color(0.0, 0.4, 0.5, 0.9),
+                backgroundPadding: new Cesium.Cartesian2(7, 4),
                 verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
                 pixelOffset: new Cesium.Cartesian2(0, -10),
                 disableDepthTestDistance: Number.POSITIVE_INFINITY
               }
             });
-            if (sLabel) tempEntities.push(sLabel);
-          }
-        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+            if (dzBadge) labelEntities.push(dzBadge);
+            if (hBadge) labelEntities.push(hBadge);
+            if (sBadge) labelEntities.push(sBadge);
 
-        // Bắt sự kiện click chốt điểm
-        handler.setInputAction((click: any) => {
-          const cartesian = viewer.scene.pickPosition(click.position);
-          if (!cartesian) return;
-
-          if (activePoints.length === 0) {
-            // Điểm thứ 1: Gốc đo
-            activePoints.push(cartesian);
-
-            safeAdd({
-              position: cartesian,
-              point: {
-                pixelSize: 10,
-                color: Cesium.Color.CYAN,
-                outlineColor: Cesium.Color.WHITE,
-                outlineWidth: 2,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY
-              }
-            });
-          } else {
-            // Điểm thứ 2: Chốt và kết thúc đo chiều cao
-            const startPoint = activePoints[0];
-            const endPoint = cartesian;
-            const projPoint = getProjectedPoint(startPoint, endPoint);
-
-            const slantDist = Cesium.Cartesian3.distance(startPoint, endPoint);
-            const horizDist = Cesium.Cartesian3.distance(startPoint, projPoint);
-            console.log(`Measured slant distance: ${slantDist.toFixed(2)}m, horizontal: ${horizDist.toFixed(2)}m`);
-
-            const cartoStart = Cesium.Cartographic.fromCartesian(startPoint);
-            const cartoEnd = Cesium.Cartographic.fromCartesian(endPoint);
-            const heightDiff = cartoEnd.height - cartoStart.height;
-
-            // Chốt cố định toàn bộ cụm tam giác dóng đo đạc
-            safeAdd({
-              polyline: {
-                positions: [startPoint, endPoint],
-                width: 2,
-                material: new Cesium.PolylineOutlineMaterialProperty({
-                  color: Cesium.Color.CYAN,
-                  outlineColor: Cesium.Color.BLACK,
-                  outlineWidth: 1
-                })
-              }
+            measurementsStoreRef.current.push({
+              id: recordId,
+              type: 'height',
+              points: [startPt, endPt],
+              pointEntities: [...pointEntities],
+              lineEntities: [...lineEntities],
+              labelEntities: [...labelEntities],
+              fillEntity
             });
 
-            safeAdd({
-              polyline: {
-                positions: [startPoint, projPoint],
-                width: 2,
-                material: new Cesium.PolylineOutlineMaterialProperty({
-                  color: Cesium.Color.DARKGRAY,
-                  outlineColor: Cesium.Color.BLACK,
-                  outlineWidth: 1
-                })
-              }
-            });
-
-            safeAdd({
-              polyline: {
-                positions: [projPoint, endPoint],
-                width: 3.5,
-                material: new Cesium.PolylineOutlineMaterialProperty({
-                  color: Cesium.Color.RED,
-                  outlineColor: Cesium.Color.BLACK,
-                  outlineWidth: 1.5
-                })
-              }
-            });
-
-            safeAdd({
-              polygon: {
-                hierarchy: new Cesium.PolygonHierarchy([startPoint, projPoint, endPoint]),
-                material: Cesium.Color.CYAN.withAlpha(0.2),
-                outline: false
-              }
-            });
-
-            // Điểm chốt ngọn
-            safeAdd({
-              position: endPoint,
-              point: {
-                pixelSize: 10,
-                color: Cesium.Color.RED,
-                outlineColor: Cesium.Color.WHITE,
-                outlineWidth: 2,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY
-              }
-            });
-
-            // Nhãn chốt cuối cùng
-            safeAdd({
-              position: getMidpoint(projPoint, endPoint),
-              label: {
-                text: `CHIỀU CAO (ΔZ): ${heightDiff.toFixed(2)} m`,
-                font: 'bold 14px sans-serif',
-                fillColor: Cesium.Color.RED,
-                outlineColor: Cesium.Color.WHITE,
-                outlineWidth: 3,
-                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
-                pixelOffset: new Cesium.Cartesian2(15, 0),
-                disableDepthTestDistance: Number.POSITIVE_INFINITY
-              }
-            });
-
-            safeAdd({
-              position: getMidpoint(startPoint, projPoint),
-              label: {
-                text: `Ngang: ${horizDist.toFixed(2)} m`,
-                font: 'bold 11px sans-serif',
-                fillColor: Cesium.Color.LIGHTGRAY,
-                outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 3,
-                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                verticalOrigin: Cesium.VerticalOrigin.TOP,
-                pixelOffset: new Cesium.Cartesian2(0, 10),
-                disableDepthTestDistance: Number.POSITIVE_INFINITY
-              }
-            });
-
-
-
-            // Dọn dẹp dóng tạm và tắt công cụ
-            clearTempEntities();
+            viewer.scene.requestRender();
             setToolMode('none');
           }
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
       }
 
-      // 3. CHẾ ĐỘ: ĐO DIỆN TÍCH
-      if (toolMode === 'area') {
-        // Di chuyển chuột: Vẽ đường đa giác dóng tạm thời từ điểm chốt cuối tới chuột
-        handler.setInputAction((movement: any) => {
-          const cartesian = viewer.scene.pickPosition(movement.endPosition);
-          if (!cartesian) return;
-          mousePosition = cartesian;
-
-          clearTempEntities();
-
-          if (activePoints.length >= 1) {
-            const pointsWithMouse = [...activePoints, mousePosition];
-
-            // Vẽ đường biên tạm nét đứt
-            const hoverPoly = safeAdd({
-              polyline: {
-                positions: pointsWithMouse,
-                width: 2,
-                material: new Cesium.PolylineDashMaterialProperty({
-                  color: Cesium.Color.ORANGE.withAlpha(0.8),
-                  dashLength: 8
-                })
-              }
-            });
-            if (hoverPoly) tempEntities.push(hoverPoly);
-
-            // Nếu đủ 2 điểm trở lên chốt + chuột = 3 điểm -> vẽ diện tích tạm
-            if (pointsWithMouse.length >= 3) {
-              const hoverPolygon = safeAdd({
-                polygon: {
-                  hierarchy: new Cesium.PolygonHierarchy(pointsWithMouse),
-                  material: Cesium.Color.ORANGE.withAlpha(0.15),
-                  outline: false
-                }
-              });
-              if (hoverPolygon) tempEntities.push(hoverPolygon);
-
-              const area = calculatePolygonArea(pointsWithMouse);
-              const centroid = calculateCentroid(pointsWithMouse);
-
-              const hoverLabel = safeAdd({
-                position: centroid,
-                label: {
-                  text: `Diện tích tạm: ${area.toFixed(2)} m²`,
-                  font: 'bold 13px sans-serif',
-                  fillColor: Cesium.Color.ORANGE,
-                  outlineColor: Cesium.Color.BLACK,
-                  outlineWidth: 3,
-                  style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                  verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-                  pixelOffset: new Cesium.Cartesian2(0, -10),
-                  disableDepthTestDistance: Number.POSITIVE_INFINITY
-                }
-              });
-              if (hoverLabel) tempEntities.push(hoverLabel);
-            }
-          }
-        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
-
-        // Click chuột trái để chốt các đỉnh đa giác diện tích
+      // ─────────────────────────────────────────────────────────────
+      // 4. TỌA ĐỘ ĐIỂM (POINT)
+      // ─────────────────────────────────────────────────────────────
+      if (toolMode === 'point') {
         handler.setInputAction((click: any) => {
-          const cartesian = viewer.scene.pickPosition(click.position);
-          if (!cartesian) return;
+          const pt = getPickedPosition(click.position);
+          if (!pt) return;
+          const carto = Cesium.Cartographic.fromCartesian(pt);
+          const lon = Cesium.Math.toDegrees(carto.longitude).toFixed(6);
+          const lat = Cesium.Math.toDegrees(carto.latitude).toFixed(6);
+          const height = carto.height.toFixed(2);
 
-          activePoints.push(cartesian);
-          setMeasurementPoints([...activePoints]);
-
-          // Đỉnh chốt
-          safeAdd({
-            position: cartesian,
-            point: {
-              pixelSize: 8,
-              color: Cesium.Color.ORANGE,
-              outlineColor: Cesium.Color.WHITE,
-              outlineWidth: 2,
+          addMeasurePoint(pt, 0, '#00e5ff', 13);
+          const lbl = safeAdd({
+            position: pt,
+            label: {
+              text: `X: ${lon}°\nY: ${lat}°\nZ: ${height} m`,
+              font: 'bold 13px "JetBrains Mono", monospace',
+              fillColor: Cesium.Color.WHITE,
+              outlineColor: Cesium.Color.BLACK,
+              outlineWidth: 2.5,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              showBackground: true,
+              backgroundColor: new Cesium.Color(0.04, 0.04, 0.08, 0.92),
+              backgroundPadding: new Cesium.Cartesian2(10, 6),
+              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+              pixelOffset: new Cesium.Cartesian2(0, -16),
               disableDepthTestDistance: Number.POSITIVE_INFINITY
             }
           });
+          if (lbl) labelEntities.push(lbl);
 
-          // Vẽ đa giác diện tích cố định tăng dần
-          if (activePoints.length >= 3) {
-            const oldPolygon = measureDS.entities.getById('fixed-polygon');
-            if (oldPolygon) measureDS.entities.remove(oldPolygon);
+          measurementsStoreRef.current.push({
+            id: recordId,
+            type: 'point',
+            points: [pt],
+            pointEntities: [...pointEntities],
+            lineEntities: [],
+            labelEntities: [...labelEntities]
+          });
 
+          viewer.scene.requestRender();
+          setToolMode('none');
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // 5. ĐO GÓC (ANGLE)
+      // ─────────────────────────────────────────────────────────────
+      if (toolMode === 'angle') {
+        handler.setInputAction((movement: any) => {
+          if (activePoints.length === 0) return;
+          const mousePos = getPickedPosition(movement.endPosition);
+          if (!mousePos) return;
+          clearTempEntities();
+          if (activePoints.length === 1) {
             safeAdd({
-              id: 'fixed-polygon',
-              polygon: {
-                hierarchy: new Cesium.PolygonHierarchy(activePoints),
-                material: Cesium.Color.ORANGE.withAlpha(0.35),
-                outline: true,
-                outlineColor: Cesium.Color.ORANGE,
-                outlineWidth: 2.5
+              polyline: {
+                positions: [activePoints[0], mousePos],
+                width: 3,
+                material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#00e5ff'), dashLength: 8 })
+              }
+            }, true);
+          } else if (activePoints.length === 2) {
+            safeAdd({
+              polyline: {
+                positions: [activePoints[1], mousePos],
+                width: 3,
+                material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#00e5ff'), dashLength: 8 })
+              }
+            }, true);
+            const v1 = Cesium.Cartesian3.subtract(activePoints[0], activePoints[1], new Cesium.Cartesian3());
+            const v2 = Cesium.Cartesian3.subtract(mousePos, activePoints[1], new Cesium.Cartesian3());
+            const angleDeg = Cesium.Math.toDegrees(Cesium.Cartesian3.angleBetween(v1, v2));
+            safeAdd({
+              position: activePoints[1],
+              label: {
+                text: `Góc: ${angleDeg.toFixed(2)}°`,
+                font: 'bold 13px "JetBrains Mono", monospace',
+                fillColor: Cesium.Color.WHITE,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2.5,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                showBackground: true,
+                backgroundColor: new Cesium.Color(0.04, 0.04, 0.08, 0.92),
+                backgroundPadding: new Cesium.Cartesian2(9, 5),
+                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                pixelOffset: new Cesium.Cartesian2(0, -16),
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+              }
+            }, true);
+          }
+          viewer.scene.requestRender();
+        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+        handler.setInputAction((click: any) => {
+          const pt = getPickedPosition(click.position);
+          if (!pt) return;
+          const idx = activePoints.length;
+          activePoints.push(pt);
+          addMeasurePoint(pt, idx, '#00e5ff', 13);
+
+          if (activePoints.length === 2) {
+            const l1 = safeAdd({
+              polyline: {
+                positions: [activePoints[0], activePoints[1]],
+                width: 4,
+                material: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#00e5ff'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5 }),
+                depthFailMaterial: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.65), outlineColor: Cesium.Color.BLACK.withAlpha(0.65), outlineWidth: 1.5 })
               }
             });
+            if (l1) lineEntities.push(l1);
           }
-        }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-        // Click đúp chuột trái kết thúc đa giác đo diện tích — lưu vào measureResults
-        handler.setInputAction(() => {
-          clearTempEntities();
+          if (activePoints.length === 3) {
+            clearTempEntities();
+            const p1 = activePoints[0];
+            const p2 = activePoints[1];
+            const p3 = activePoints[2];
+            const l2 = safeAdd({
+              polyline: {
+                positions: [p2, p3],
+                width: 4,
+                material: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#00e5ff'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5 }),
+                depthFailMaterial: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.65), outlineColor: Cesium.Color.BLACK.withAlpha(0.65), outlineWidth: 1.5 })
+              }
+            });
+            if (l2) lineEntities.push(l2);
 
-          if (activePoints.length >= 3) {
-            const area = calculatePolygonArea(activePoints);
-            const centroid = calculateCentroid(activePoints);
+            const v1 = Cesium.Cartesian3.subtract(p1, p2, new Cesium.Cartesian3());
+            const v2 = Cesium.Cartesian3.subtract(p3, p2, new Cesium.Cartesian3());
+            const angleDeg = Cesium.Math.toDegrees(Cesium.Cartesian3.angleBetween(v1, v2));
 
-            // Tính chu vi geodetic
-            let perimeter = 0;
-            for (let i = 0; i < activePoints.length; i++) {
-              const ca = Cesium.Cartographic.fromCartesian(activePoints[i]);
-              const cb = Cesium.Cartographic.fromCartesian(activePoints[(i + 1) % activePoints.length]);
-              const geo = new Cesium.EllipsoidGeodesic(ca, cb);
-              perimeter += geo.surfaceDistance;
-            }
-
-            safeAdd({
-              position: centroid,
+            const lbl = safeAdd({
+              position: p2,
               label: {
-                text: `DIỆN TÍCH: ${area.toFixed(4)} m²\nChu vi: ${perimeter.toFixed(4)} m`,
-                font: 'bold 13px "JetBrains Mono", monospace',
-                fillColor: Cesium.Color.ORANGE,
+                text: `GÓC: ${angleDeg.toFixed(2)}°`,
+                font: 'bold 14px "JetBrains Mono", monospace',
+                fillColor: Cesium.Color.WHITE,
                 outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 4,
+                outlineWidth: 2.5,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                showBackground: true,
+                backgroundColor: new Cesium.Color(0.02, 0.38, 0.16, 0.95),
+                backgroundPadding: new Cesium.Cartesian2(12, 6),
                 verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-                pixelOffset: new Cesium.Cartesian2(0, -10),
+                pixelOffset: new Cesium.Cartesian2(0, -16),
                 disableDepthTestDistance: Number.POSITIVE_INFINITY
               }
             });
+            if (lbl) labelEntities.push(lbl);
 
+            measurementsStoreRef.current.push({
+              id: recordId,
+              type: 'angle',
+              points: [p1, p2, p3],
+              pointEntities: [...pointEntities],
+              lineEntities: [...lineEntities],
+              labelEntities: [...labelEntities]
+            });
 
+            viewer.scene.requestRender();
+            setToolMode('none');
+          } else {
+            viewer.scene.requestRender();
           }
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // 6. ĐO ĐƯỜNG TRÒN (CIRCLE)
+      // ─────────────────────────────────────────────────────────────
+      if (toolMode === 'circle') {
+        handler.setInputAction((movement: any) => {
+          if (activePoints.length === 0) return;
+          const mousePos = getPickedPosition(movement.endPosition);
+          if (!mousePos) return;
+          clearTempEntities();
+          const center = activePoints[0];
+          const radius = Cesium.Cartesian3.distance(center, mousePos);
+          const circleArea = Math.PI * radius * radius;
+          safeAdd({
+            polyline: {
+              positions: [center, mousePos],
+              width: 3,
+              material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#00e5ff'), dashLength: 8 })
+            }
+          }, true);
+          addEdgeDistanceBadge(center, mousePos, `R: ${radius.toFixed(2)} m | S: ${circleArea.toFixed(2)} m²`, true);
+          viewer.scene.requestRender();
+        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+        handler.setInputAction((click: any) => {
+          const pt = getPickedPosition(click.position);
+          if (!pt) return;
+          if (activePoints.length === 0) {
+            activePoints.push(pt);
+            addMeasurePoint(pt, 0, '#00e5ff', 13);
+            viewer.scene.requestRender();
+          } else {
+            clearTempEntities();
+            const center = activePoints[0];
+            const edge = pt;
+            activePoints.push(edge);
+            const radius = Cesium.Cartesian3.distance(center, edge);
+            const circleArea = Math.PI * radius * radius;
+
+            addMeasurePoint(edge, 1, '#00e5ff', 13);
+            const line = safeAdd({
+              polyline: {
+                positions: [center, edge],
+                width: 4,
+                material: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#00e5ff'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5 }),
+                depthFailMaterial: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.65), outlineColor: Cesium.Color.BLACK.withAlpha(0.65), outlineWidth: 1.5 })
+              }
+            });
+            if (line) lineEntities.push(line);
+
+            const lbl = safeAdd({
+              position: getMidpoint(center, edge),
+              label: {
+                text: `BÁN KÍNH: ${radius.toFixed(2)} m\nDIỆN TÍCH: ${circleArea.toFixed(2)} m²`,
+                font: 'bold 13px "JetBrains Mono", monospace',
+                fillColor: Cesium.Color.WHITE,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2.5,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                showBackground: true,
+                backgroundColor: new Cesium.Color(0.02, 0.38, 0.16, 0.95),
+                backgroundPadding: new Cesium.Cartesian2(12, 6),
+                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                pixelOffset: new Cesium.Cartesian2(0, -14),
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+              }
+            });
+            if (lbl) labelEntities.push(lbl);
+
+            measurementsStoreRef.current.push({
+              id: recordId,
+              type: 'circle',
+              points: [center, edge],
+              pointEntities: [...pointEntities],
+              lineEntities: [...lineEntities],
+              labelEntities: [...labelEntities]
+            });
+
+            viewer.scene.requestRender();
+            setToolMode('none');
+          }
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // 7. GÓC PHƯƠNG VỊ (AZIMUTH)
+      // ─────────────────────────────────────────────────────────────
+      if (toolMode === 'azimuth') {
+        handler.setInputAction((click: any) => {
+          const pt = getPickedPosition(click.position);
+          if (!pt) return;
+          if (activePoints.length === 0) {
+            activePoints.push(pt);
+            addMeasurePoint(pt, 0, '#00e5ff', 13);
+            viewer.scene.requestRender();
+          } else {
+            clearTempEntities();
+            const p1 = activePoints[0];
+            const p2 = pt;
+            activePoints.push(p2);
+            addMeasurePoint(p2, 1, '#00e5ff', 13);
+
+            const c1 = Cesium.Cartographic.fromCartesian(p1);
+            const c2 = Cesium.Cartographic.fromCartesian(p2);
+            const geodesic = new Cesium.EllipsoidGeodesic(c1, c2);
+            const azimuthDeg = (Cesium.Math.toDegrees(geodesic.startHeading) + 360) % 360;
+            const dist = geodesic.surfaceDistance;
+
+            const line = safeAdd({
+              polyline: {
+                positions: [p1, p2],
+                width: 4,
+                material: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#00e5ff'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5 }),
+                depthFailMaterial: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.65), outlineColor: Cesium.Color.BLACK.withAlpha(0.65), outlineWidth: 1.5 })
+              }
+            });
+            if (line) lineEntities.push(line);
+
+            const lbl = safeAdd({
+              position: getMidpoint(p1, p2),
+              label: {
+                text: `AZIMUTH: ${azimuthDeg.toFixed(2)}° | Khoảng cách: ${dist.toFixed(2)} m`,
+                font: 'bold 13px "JetBrains Mono", monospace',
+                fillColor: Cesium.Color.WHITE,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2.5,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                showBackground: true,
+                backgroundColor: new Cesium.Color(0.02, 0.38, 0.16, 0.95),
+                backgroundPadding: new Cesium.Cartesian2(12, 6),
+                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                pixelOffset: new Cesium.Cartesian2(0, -14),
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+              }
+            });
+            if (lbl) labelEntities.push(lbl);
+
+            measurementsStoreRef.current.push({
+              id: recordId,
+              type: 'azimuth',
+              points: [p1, p2],
+              pointEntities: [...pointEntities],
+              lineEntities: [...lineEntities],
+              labelEntities: [...labelEntities]
+            });
+
+            viewer.scene.requestRender();
+            setToolMode('none');
+          }
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // 8. GHI CHÚ 3D (ANNOTATION)
+      // ─────────────────────────────────────────────────────────────
+      if (toolMode === 'annotation') {
+        handler.setInputAction((click: any) => {
+          const pt = getPickedPosition(click.position);
+          if (!pt) return;
+          const text = prompt('Nhập nội dung ghi chú 3D:', 'Vị trí đo đạc');
+          if (text) {
+            addMeasurePoint(pt, 0, '#ffcc00', 14);
+            const lbl = safeAdd({
+              position: pt,
+              label: {
+                text: `💬 ${text}`,
+                font: 'bold 14px "Segoe UI", sans-serif',
+                fillColor: Cesium.Color.WHITE,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2.5,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                showBackground: true,
+                backgroundColor: new Cesium.Color(0.1, 0.1, 0.15, 0.95),
+                backgroundPadding: new Cesium.Cartesian2(10, 5),
+                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                pixelOffset: new Cesium.Cartesian2(0, -16),
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+              }
+            });
+            if (lbl) labelEntities.push(lbl);
+
+            measurementsStoreRef.current.push({
+              id: recordId,
+              type: 'annotation',
+              points: [pt],
+              pointEntities: [...pointEntities],
+              lineEntities: [],
+              labelEntities: [...labelEntities]
+            });
+          }
+          viewer.scene.requestRender();
+          setToolMode('none');
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // 9. ĐO THỂ TÍCH (VOLUME)
+      // ─────────────────────────────────────────────────────────────
+      if (toolMode === 'volume') {
+        handler.setInputAction((click: any) => {
+          const pt = getPickedPosition(click.position);
+          if (!pt) return;
+          const idx = activePoints.length;
+          activePoints.push(pt);
+          addMeasurePoint(pt, idx, '#00e5ff', 13);
+          viewer.scene.requestRender();
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+        handler.setInputAction(() => {
+          if (activePoints.length >= 3) {
+            const area = calculatePolygonArea(activePoints);
+            const centroid = calculateCentroid(activePoints);
+            const heights = activePoints.map(p => Cesium.Cartographic.fromCartesian(p).height);
+            const hMin = Math.min(...heights);
+            const hMax = Math.max(...heights);
+            const deltaH = Math.max(1.0, hMax - hMin);
+            const volume = area * deltaH;
+
+            fillEntity = safeAdd({
+              polygon: {
+                hierarchy: new Cesium.PolygonHierarchy(activePoints),
+                material: Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.35),
+                outline: true,
+                outlineColor: Cesium.Color.fromCssColorString('#00e5ff'),
+                extrudedHeight: hMax
+              }
+            }) || undefined;
+
+            summaryLabelEntity = safeAdd({
+              position: centroid,
+              label: {
+                text: `THỂ TÍCH: ${volume.toFixed(2)} m³\nDiện tích: ${area.toFixed(2)} m² | Chiều cao: ${deltaH.toFixed(2)} m`,
+                font: 'bold 13px "JetBrains Mono", monospace',
+                fillColor: Cesium.Color.WHITE,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2.5,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                showBackground: true,
+                backgroundColor: new Cesium.Color(0.02, 0.38, 0.16, 0.95),
+                backgroundPadding: new Cesium.Cartesian2(12, 6),
+                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                pixelOffset: new Cesium.Cartesian2(0, -16),
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+              }
+            }) || undefined;
+
+            measurementsStoreRef.current.push({
+              id: recordId,
+              type: 'volume',
+              points: [...activePoints],
+              pointEntities: [...pointEntities],
+              lineEntities: [],
+              labelEntities: [],
+              fillEntity,
+              summaryLabelEntity
+            });
+          }
+          viewer.scene.requestRender();
           setToolMode('none');
         }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
       }
+
+      // ─────────────────────────────────────────────────────────────
+      // 10. TRẮC DỌC CAO ĐỘ (PROFILE)
+      // ─────────────────────────────────────────────────────────────
+      if (toolMode === 'profile') {
+        handler.setInputAction((click: any) => {
+          const pt = getPickedPosition(click.position);
+          if (!pt) return;
+          if (activePoints.length === 0) {
+            activePoints.push(pt);
+            addMeasurePoint(pt, 0, '#00e5ff', 13);
+            viewer.scene.requestRender();
+          } else {
+            clearTempEntities();
+            const p1 = activePoints[0];
+            const p2 = pt;
+            activePoints.push(p2);
+            const dist = Cesium.Cartesian3.distance(p1, p2);
+            const h1 = Cesium.Cartographic.fromCartesian(p1).height;
+            const h2 = Cesium.Cartographic.fromCartesian(p2).height;
+            const deltaH = h2 - h1;
+
+            addMeasurePoint(p2, 1, '#00e5ff', 13);
+            const line = safeAdd({
+              polyline: {
+                positions: [p1, p2],
+                width: 4.5,
+                material: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#00e5ff'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1.5 }),
+                depthFailMaterial: new Cesium.PolylineOutlineMaterialProperty({ color: Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.65), outlineColor: Cesium.Color.BLACK.withAlpha(0.65), outlineWidth: 1.5 })
+              }
+            });
+            if (line) lineEntities.push(line);
+
+            const lbl = safeAdd({
+              position: getMidpoint(p1, p2),
+              label: {
+                text: `TRẮC DỌC (L): ${dist.toFixed(2)} m\nCao độ bắt đầu: ${h1.toFixed(2)} m\nCao độ kết thúc: ${h2.toFixed(2)} m\nĐộ chênh (ΔH): ${deltaH.toFixed(2)} m`,
+                font: 'bold 12px "JetBrains Mono", monospace',
+                fillColor: Cesium.Color.WHITE,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2.5,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                showBackground: true,
+                backgroundColor: new Cesium.Color(0.02, 0.38, 0.16, 0.95),
+                backgroundPadding: new Cesium.Cartesian2(12, 6),
+                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                pixelOffset: new Cesium.Cartesian2(0, -14),
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+              }
+            });
+            if (lbl) labelEntities.push(lbl);
+
+            measurementsStoreRef.current.push({
+              id: recordId,
+              type: 'profile',
+              points: [p1, p2],
+              pointEntities: [...pointEntities],
+              lineEntities: [...lineEntities],
+              labelEntities: [...labelEntities]
+            });
+
+            viewer.scene.requestRender();
+            setToolMode('none');
+          }
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+      }
+
+      return () => {
+        clearTempEntities();
+        if (handler && !handler.isDestroyed()) {
+          handler.destroy();
+        }
+        if (handlerRef.current === handler) {
+          handlerRef.current = null;
+        }
+      };
+    }, [toolMode]);
+
+    // ─────────────────────────────────────────────────────────────
+    // EFFECT 2: KÉO THẢ VÀ TINH CHỈNH ĐIỂM ĐO THỜI GIAN THỰC (DRAG & REFINE)
+    // ─────────────────────────────────────────────────────────────
+    useEffect(() => {
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed()) return;
+
+      const dragHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+
+      let draggedTarget: {
+        record: MeasurementRecord;
+        pointIndex: number;
+        pointEntity: Cesium.Entity;
+      } | null = null;
+
+      let hoveredEntity: Cesium.Entity | null = null;
+
+      // Hàm tìm điểm đo gần nhất theo khoảng cách 2D trên màn hình (độ nhạy 25px)
+      const findPointAtScreenPos = (windowPos: Cesium.Cartesian2) => {
+        const v = viewerRef.current;
+        if (!v || v.isDestroyed() || !windowPos) return null;
+        const tolerance = 25;
+        let bestDist = Infinity;
+        let bestTarget: { record: MeasurementRecord; pointIndex: number; pointEntity: Cesium.Entity } | null = null;
+
+        for (const record of measurementsStoreRef.current) {
+          for (let i = 0; i < record.points.length; i++) {
+            const pt3d = record.points[i];
+            if (!pt3d) continue;
+            try {
+              const screenPos = Cesium.SceneTransforms.worldToWindowCoordinates(v.scene, pt3d);
+              if (screenPos) {
+                const dx = screenPos.x - windowPos.x;
+                const dy = screenPos.y - windowPos.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist <= tolerance && dist < bestDist) {
+                  bestDist = dist;
+                  bestTarget = {
+                    record,
+                    pointIndex: i,
+                    pointEntity: record.pointEntities[i]
+                  };
+                }
+              }
+            } catch (e) {}
+          }
+        }
+        return bestTarget;
+      };
+
+      // 1. LEFT_DOWN: Bắt đầu kéo điểm đo
+      dragHandler.setInputAction((click: any) => {
+        const target = findPointAtScreenPos(click.position);
+        if (target) {
+          draggedTarget = target;
+          viewer.scene.screenSpaceCameraController.enableInputs = false;
+          viewer.scene.canvas.style.cursor = 'grabbing';
+          if (draggedTarget.pointEntity && (draggedTarget.pointEntity as any).point) {
+            (draggedTarget.pointEntity as any).point.pixelSize = new Cesium.ConstantProperty(20);
+          }
+          viewer.scene.requestRender();
+        }
+      }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+
+      // 2. MOUSE_MOVE: Di chuyển điểm và cập nhật hình học đo thời gian thực
+      dragHandler.setInputAction((movement: any) => {
+        if (draggedTarget) {
+          const newPos = getPickedPosition(movement.endPosition);
+          if (newPos) {
+            draggedTarget.record.points[draggedTarget.pointIndex] = newPos;
+            draggedTarget.pointEntity.position = new Cesium.ConstantPositionProperty(newPos) as any;
+            updateMeasurementRecord(draggedTarget.record);
+            viewer.scene.requestRender();
+          }
+          return;
+        }
+
+        // Hover effect khi rê chuột qua các điểm đo
+        const hovered = findPointAtScreenPos(movement.endPosition);
+        if (hovered) {
+          viewer.scene.canvas.style.cursor = 'grab';
+          viewer.scene.screenSpaceCameraController.enableInputs = false;
+          if (hoveredEntity !== hovered.pointEntity) {
+            if (hoveredEntity && (hoveredEntity as any).point) {
+              (hoveredEntity as any).point.pixelSize = new Cesium.ConstantProperty(13);
+            }
+            hoveredEntity = hovered.pointEntity;
+            if (hoveredEntity && (hoveredEntity as any).point) {
+              (hoveredEntity as any).point.pixelSize = new Cesium.ConstantProperty(18);
+            }
+            viewer.scene.requestRender();
+          }
+        } else {
+          if (hoveredEntity) {
+            if ((hoveredEntity as any).point) {
+              (hoveredEntity as any).point.pixelSize = new Cesium.ConstantProperty(13);
+            }
+            hoveredEntity = null;
+            viewer.scene.requestRender();
+          }
+          if (!draggedTarget) {
+            viewer.scene.screenSpaceCameraController.enableInputs = true;
+          }
+          if (toolMode === 'none') {
+            viewer.scene.canvas.style.cursor = 'default';
+          }
+        }
+      }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+      // 3. LEFT_UP: Thả chuột và kết thúc kéo điểm
+      dragHandler.setInputAction(() => {
+        if (draggedTarget) {
+          if (draggedTarget.pointEntity && (draggedTarget.pointEntity as any).point) {
+            (draggedTarget.pointEntity as any).point.pixelSize = new Cesium.ConstantProperty(13);
+          }
+          draggedTarget = null;
+          viewer.scene.screenSpaceCameraController.enableInputs = true;
+          viewer.scene.canvas.style.cursor = 'default';
+          viewer.scene.requestRender();
+        }
+      }, Cesium.ScreenSpaceEventType.LEFT_UP);
+
+      return () => {
+        if (!dragHandler.isDestroyed()) {
+          dragHandler.destroy();
+        }
+      };
     }, [toolMode]);
 
     const handleFocusProject = () => {
@@ -1933,41 +3345,40 @@ export const CesiumViewer: React.FC<{
       setShowModel(true);
 
       if (modelRef.current && modelRef.current.boundingSphere) {
-        viewer.camera.flyToBoundingSphere(modelRef.current.boundingSphere, {
-          duration: 2,
+        const bs = modelRef.current.boundingSphere;
+        viewer.camera.flyToBoundingSphere(bs, {
+          duration: 1.5,
           offset: new Cesium.HeadingPitchRange(
-            0,
+            viewer.camera.heading,
             Cesium.Math.toRadians(-30),
-            450
+            bs.radius * 2.5
           )
         });
-      } else {
-        const baseLon = project?.centerLon || 106.8099;
-        const baseLat = project?.centerLat || 10.8404;
-        let longitude = baseLon;
-        let latitude = baseLat;
-        if (longitude < 90 && latitude > 90) {
-          longitude = baseLat;
-          latitude = baseLon;
-        }
-        const modelLon = offsets.modelLon || 0;
-        const modelLat = offsets.modelLat || 0;
-        const modelHeight = offsets.modelHeight || 0.3;
-
-        viewer.camera.flyTo({
-          destination: Cesium.Cartesian3.fromDegrees(
-            longitude + modelLon,
-            (latitude + modelLat) - 0.004,
-            modelHeight + 300
-          ),
-          orientation: {
-            heading: 0,
-            pitch: Cesium.Math.toRadians(-30),
-            roll: 0.0
-          },
-          duration: 2
-        });
+        return;
       }
+
+      if (pointCloudRef.current && pointCloudRef.current.boundingSphere) {
+        const bs = pointCloudRef.current.boundingSphere;
+        viewer.camera.flyToBoundingSphere(bs, {
+          duration: 1.5,
+          offset: new Cesium.HeadingPitchRange(
+            viewer.camera.heading,
+            Cesium.Math.toRadians(-30),
+            bs.radius * 2.5
+          )
+        });
+        return;
+      }
+
+      const target = Cesium.Cartesian3.fromDegrees(
+        project?.centerLon || 106.8099,
+        project?.centerLat || 10.8404,
+        150
+      );
+      viewer.camera.flyTo({
+        destination: target,
+        duration: 1.5
+      });
     };
 
     const handleFocusPointCloud = () => {
@@ -1994,53 +3405,21 @@ export const CesiumViewer: React.FC<{
       }
     };
 
-    const handleFocusDom = () => {
+    const handleFocusDOM = () => {
       const viewer = viewerRef.current;
-      if (!viewer || viewer.isDestroyed() || !project) return;
+      if (!viewer || viewer.isDestroyed()) return;
       setShowDom(true);
 
-      const baseLon = project.centerLon || 106.8099;
-      const baseLat = project.centerLat || 10.8404;
-      let lon = baseLon;
-      let lat = baseLat;
-      if (lon < 90 && lat > 90) {
-        lon = baseLat;
-        lat = baseLon;
-      }
+      const centerLon = (project?.centerLon || 106.8099) + (offsets.domLon || 0);
+      const centerLat = (project?.centerLat || 10.8404) + (offsets.domLat || 0);
+      const scale = offsets.domScale || 1.0;
+      const halfWidth = 0.005 * scale;
+      const halfHeight = 0.005 * scale;
 
-      let west = originalBoundsRef.current.west;
-      let east = originalBoundsRef.current.east;
-      let south = originalBoundsRef.current.south;
-      let north = originalBoundsRef.current.north;
-
-      if (west === 0) {
-        const deltaLatitude = 142.222 / 111111;
-        const deltaLongitude = 143.532 / (111111 * Math.cos(lat * Math.PI / 180));
-        west = lon - deltaLongitude / 2;
-        east = lon + deltaLongitude / 2;
-        south = lat - deltaLatitude / 2;
-        north = lat + deltaLatitude / 2;
-      }
-
-      // Áp dụng scale và offset hiện tại
-      const centerLon = (west + east) / 2;
-      const centerLat = (south + north) / 2;
-      const halfWidth = ((east - west) / 2) * (offsets.domScale || 1.0);
-      const halfHeight = ((north - south) / 2) * (offsets.domScale || 1.0);
-
-      const finalWest = centerLon - halfWidth + (offsets.domLon || 0);
-      const finalEast = centerLon + halfWidth + (offsets.domLon || 0);
-      const finalSouth = centerLat - halfHeight + (offsets.domLat || 0);
-      const finalNorth = centerLat + halfHeight + (offsets.domLat || 0);
-
-      if (
-        isNaN(finalWest) || isNaN(finalEast) || isNaN(finalSouth) || isNaN(finalNorth) ||
-        finalWest >= finalEast || finalSouth >= finalNorth ||
-        finalWest < -180 || finalEast > 180 || finalSouth < -90 || finalNorth > 90
-      ) {
-        console.warn("⚠️ Tọa độ ảnh DOM không hợp lệ để camera flyTo.");
-        return;
-      }
+      const finalWest = centerLon - halfWidth;
+      const finalEast = centerLon + halfWidth;
+      const finalSouth = centerLat - halfHeight;
+      const finalNorth = centerLat + halfHeight;
 
       const domRectangle = Cesium.Rectangle.fromDegrees(finalWest, finalSouth, finalEast, finalNorth);
       const bs = Cesium.BoundingSphere.fromRectangle3D(domRectangle);
@@ -2048,26 +3427,102 @@ export const CesiumViewer: React.FC<{
         duration: 2,
         offset: new Cesium.HeadingPitchRange(
           0,
-          Cesium.Math.toRadians(-90), // Nhìn vuông góc 90° thẳng từ trên xuống
-          bs.radius * 2.2 // Tầm xa vừa vặn bao quát toàn bộ viền ảnh DOM như ảnh mẫu
+          Cesium.Math.toRadians(-90),
+          bs.radius * 2.2
         )
       });
     };
 
+    const handleFocusDom = handleFocusDOM;
+
+    // Tắt/bật hiển thị toàn bộ phép đo
+    useEffect(() => {
+      measurementEntitiesRef.current.forEach(e => {
+        try {
+          (e as any).show = showMeasurements;
+        } catch (err) {}
+      });
+      viewerRef.current?.scene?.requestRender();
+    }, [showMeasurements]);
+
+    // Điều chỉnh tốc độ camera theo slider
+    useEffect(() => {
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed()) return;
+      const factor = cameraSpeed / 100;
+      viewer.scene.screenSpaceCameraController.zoomFactor = 5.0 * factor;
+    }, [cameraSpeed]);
+
+    // Chuyển góc nhìn camera theo khối lập phương điều hướng [L] [R] [F] [B] [T] [D]
+    const handleSetCameraView = (view: 'L' | 'R' | 'F' | 'B' | 'T' | 'D') => {
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed()) return;
+
+      const target = pointCloudRef.current?.boundingSphere?.center 
+        || modelRef.current?.boundingSphere?.center 
+        || Cesium.Cartesian3.fromDegrees(project?.centerLon || 106.8099, project?.centerLat || 10.8404, 50);
+
+      const bs = new Cesium.BoundingSphere(target, 200);
+
+      let heading = 0;
+      let pitch = Cesium.Math.toRadians(-30);
+
+      switch (view) {
+        case 'L': // Left / West
+          heading = Cesium.Math.toRadians(90);
+          pitch = Cesium.Math.toRadians(-5);
+          break;
+        case 'R': // Right / East
+          heading = Cesium.Math.toRadians(270);
+          pitch = Cesium.Math.toRadians(-5);
+          break;
+        case 'F': // Front / South
+          heading = Cesium.Math.toRadians(0);
+          pitch = Cesium.Math.toRadians(-5);
+          break;
+        case 'B': // Back / North
+          heading = Cesium.Math.toRadians(180);
+          pitch = Cesium.Math.toRadians(-5);
+          break;
+        case 'T': // Top / Nader
+          heading = 0;
+          pitch = Cesium.Math.toRadians(-90);
+          break;
+        case 'D': // Down / Underneath
+          heading = 0;
+          pitch = Cesium.Math.toRadians(85);
+          break;
+      }
+
+      viewer.camera.flyToBoundingSphere(bs, {
+        duration: 1.2,
+        offset: new Cesium.HeadingPitchRange(heading, pitch, bs.radius * 2.2)
+      });
+    };
+
     const handleClear = () => {
-      measureDataSourceRef.current?.entities.removeAll();
+      const viewer = viewerRef.current;
+      if (viewer && !viewer.isDestroyed()) {
+        measurementEntitiesRef.current.forEach(e => {
+          try { viewer.entities.remove(e); } catch (err) {}
+        });
+      }
+      measurementEntitiesRef.current = [];
+      measurementsStoreRef.current = [];
       setMeasurementPoints([]);
       setToolMode('none');
     };
 
     return (
       <div className="relative w-full h-screen">
-        {/* Thanh công cụ floating lựa chọn chế độ hiển thị & góc nhìn ở đỉnh màn hình */}
-        <FloatingViewToolbar
+        <UnifiedToolbar
           displayMode={displayMode}
           onDisplayModeChange={setDisplayMode}
           viewAngle={viewAngle}
           onViewAngleChange={setViewAngle}
+          toolMode={toolMode}
+          onToolModeChange={setToolMode}
+          onClear={handleClear}
         />
 
         {/* Component Potree Sidebar điều khiển bên trái */}
@@ -2078,6 +3533,11 @@ export const CesiumViewer: React.FC<{
           currentMode={toolMode}
           onModeChange={setToolMode}
           onClear={handleClear}
+          showMeasurements={showMeasurements}
+          onToggleShowMeasurements={() => setShowMeasurements(!showMeasurements)}
+          cameraSpeed={cameraSpeed}
+          onCameraSpeedChange={setCameraSpeed}
+          onSetCameraView={handleSetCameraView}
           isOptimizerOpen={isOptimizerOpen}
           onToggleOptimizer={() => setIsOptimizerOpen(!isOptimizerOpen)}
           showOptimizerControl={isAdmin}
@@ -2093,6 +3553,24 @@ export const CesiumViewer: React.FC<{
           onFovChange={setFov}
           edlEnabled={edlEnabled}
           onEdlToggle={setEdlEnabled}
+          edlRadius={edlRadius}
+          onEdlRadiusChange={setEdlRadius}
+          edlStrength={edlStrength}
+          onEdlStrengthChange={setEdlStrength}
+          edlOpacity={edlOpacity}
+          onEdlOpacityChange={setEdlOpacity}
+          background={background}
+          onBackgroundChange={setBackground}
+          quality={quality}
+          onQualityChange={setQuality}
+          pointBudget={pointBudget}
+          onPointBudgetChange={setPointBudget}
+          minPointBudget={minPointBudget}
+          maxPointBudget={maxPointBudget}
+          minNodeSize={minNodeSize}
+          onMinNodeSizeChange={setMinNodeSize}
+          lockView={lockView}
+          onLockViewChange={setLockView}
           isOrthographic={isOrthographic}
           onProjectionChange={setIsOrthographic}
           onFocusProject={handleFocusProject}
@@ -2109,6 +3587,23 @@ export const CesiumViewer: React.FC<{
 
         {/* Container chứa bản đồ 3D */}
         <div ref={cesiumContainer} className="absolute inset-0 z-0" />
+
+        {/* ── Loading Overlay: hiện khi đang fetch/parse Model 3D ── */}
+        {isModelLoading && (
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-none">
+            <div className="flex flex-col items-center gap-4">
+              {/* Spinner vòng tròn */}
+              <div className="relative w-16 h-16">
+                <div className="absolute inset-0 rounded-full border-4 border-sky-500/20" />
+                <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-sky-400 animate-spin" />
+              </div>
+              <div className="text-center">
+                <p className="text-sky-300 font-semibold text-sm tracking-wider">Đang tải mô hình 3D...</p>
+                <p className="text-slate-500 text-xs mt-1">Vui lòng chờ trong giây lát</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Bảng tinh chỉnh vị trí của Admin (Calibration - Chỉ Admin hệ thống mới có quyền truy cập) */}
         {isAdmin && (

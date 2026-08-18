@@ -1,13 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { submitDemoLead } from '../services/api';
+import { fetchDemoAccess, submitDemoLead } from '../services/api';
 import { useAuthStore } from '../store/useAuthStore';
 import logoImg from '../assets/logo.webp';
-import { CheckCircle2, ArrowRight, ArrowLeft, Loader2, Sparkles, Building2, ShieldCheck, Mail, MapPin } from 'lucide-react';
+import { ArrowRight, Loader2, Sparkles, Building2, ShieldCheck } from 'lucide-react';
 
 export const BookDemoPage: React.FC = () => {
   const navigate = useNavigate();
-  const { user, isAuthenticated } = useAuthStore();
+  const { user, isAuthenticated, isLoading } = useAuthStore();
 
   const [formData, setFormData] = useState({
     email: '',
@@ -21,8 +21,94 @@ export const BookDemoPage: React.FC = () => {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
   const [serverMessage, setServerMessage] = useState('');
+  const [serverMessageType, setServerMessageType] = useState<'success' | 'error' | ''>('');
+  const [isRedirecting, setIsRedirecting] = useState(false);
+
+  const [isCheckingAccess, setIsCheckingAccess] = useState(true);
+
+  const openGrantedDemo = (demoProjectId?: string) => {
+    navigate(
+      demoProjectId ? `/viewer/${demoProjectId}` : '/dashboard',
+      { replace: true }
+    );
+  };
+
+  useEffect(() => {
+    if (isLoading) return;
+
+    if (!isAuthenticated) {
+      navigate('/login', {
+        replace: true,
+        state: { returnTo: '/book-demo' }
+      });
+      return;
+    }
+
+    // Prefill thông tin tài khoản vào form.
+    setFormData((current) => ({
+      ...current,
+      email: current.email || user?.email || '',
+      fullName: current.fullName || user?.fullName || ''
+    }));
+
+    let cancelled = false;
+
+    const checkExistingDemoAccess = async () => {
+      setIsCheckingAccess(true);
+
+      const demoAccess = await fetchDemoAccess();
+
+      if (cancelled) return;
+
+      // User đã đăng ký Demo trước đó:
+      // không hiển thị lại form, mở Demo luôn.
+      if (demoAccess.success && demoAccess.hasAccess) {
+        openGrantedDemo(demoAccess.demoProjectId);
+        return;
+      }
+
+      setIsCheckingAccess(false);
+    };
+
+    void checkExistingDemoAccess();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isAuthenticated,
+    isLoading,
+    navigate,
+    user?.email,
+    user?.fullName
+  ]);
+
+  const handleEnterPlatform = async () => {
+    if (isLoading || isCheckingAccess) return;
+
+    if (!isAuthenticated) {
+      navigate('/login', {
+        state: { returnTo: '/book-demo' }
+      });
+      return;
+    }
+
+    setIsCheckingAccess(true);
+    const demoAccess = await fetchDemoAccess();
+
+    if (demoAccess.success && demoAccess.hasAccess) {
+      openGrantedDemo(demoAccess.demoProjectId);
+      return;
+    }
+
+    setIsCheckingAccess(false);
+    document.getElementById('demo-form')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start'
+    });
+  };
+
 
   const validate = () => {
     const errs: Record<string, string> = {};
@@ -54,6 +140,7 @@ export const BookDemoPage: React.FC = () => {
 
     setIsSubmitting(true);
     setServerMessage('');
+    setServerMessageType('');
 
     const res = await submitDemoLead({
       email: formData.email.trim(),
@@ -68,12 +155,42 @@ export const BookDemoPage: React.FC = () => {
     setIsSubmitting(false);
 
     if (res.success) {
-      setIsSuccess(true);
-      setServerMessage(res.message || 'Yêu cầu Demo của bạn đã được gửi thành công!');
-    } else {
-      alert(res.message || 'Không thể gửi yêu cầu demo. Vui lòng thử lại.');
+      // Hiển thị thông báo thành công trước, sau đó tự chuyển vào Demo.
+      // Nếu POST /demo-leads chưa trả demoProjectId thì thử lấy lại từ /demo-access.
+      let demoProjectId = res.demoProjectId;
+
+      if (!demoProjectId) {
+        const demoAccess = await fetchDemoAccess();
+        demoProjectId = demoAccess.demoProjectId;
+      }
+
+      setServerMessage(
+        'Cảm ơn bạn! Yêu cầu Demo đã được gửi thành công. Đang chuyển bạn vào Demo...'
+      );
+      setServerMessageType('success');
+      setIsRedirecting(true);
+
+      window.setTimeout(() => {
+        openGrantedDemo(demoProjectId);
+      }, 1500);
+
+      return;
     }
+
+    setServerMessageType('error');
+    setServerMessage(res.message || 'Không thể gửi yêu cầu Demo. Vui lòng thử lại.');
   };
+
+  if (isLoading || isCheckingAccess) {
+    return (
+      <div className="min-h-screen bg-[#080c14] text-white flex items-center justify-center">
+        <div className="flex items-center gap-3 text-sm text-slate-300">
+          <Loader2 size={18} className="animate-spin text-blue-400" />
+          <span>Đang kiểm tra quyền Demo...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#080c14] text-white flex flex-col font-sans relative overflow-x-hidden selection:bg-blue-600 selection:text-white">
@@ -122,8 +239,9 @@ export const BookDemoPage: React.FC = () => {
             )}
 
             <button
-              onClick={() => navigate('/dashboard')}
-              className="text-xs font-mono font-bold bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-full transition-all shadow-lg shadow-blue-600/30"
+              onClick={handleEnterPlatform}
+              disabled={isLoading || isCheckingAccess || isRedirecting}
+              className="text-xs font-mono font-bold bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-full transition-all shadow-lg shadow-blue-600/30 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Vào Platform 3D
             </button>
@@ -183,35 +301,31 @@ export const BookDemoPage: React.FC = () => {
         </div>
 
         {/* Right Column: White Form Card (Matching Screenshot) */}
-        <div className="lg:col-span-6">
+        <div id="demo-form" className="lg:col-span-6 scroll-mt-24">
           <div className="bg-white text-slate-900 rounded-3xl p-8 sm:p-10 shadow-2xl border border-slate-100 relative">
             
-            {isSuccess ? (
-              <div className="py-12 text-center space-y-4">
-                <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
-                  <CheckCircle2 size={36} />
-                </div>
-                <h3 className="text-2xl font-bold text-slate-900">Thank you!</h3>
-                <p className="text-slate-600 text-sm max-w-md mx-auto leading-relaxed">
-                  {serverMessage}
-                </p>
-                <div className="pt-6">
-                  <button
-                    onClick={() => {
-                      setIsSuccess(false);
-                      setFormData({ email: '', fullName: '', jobTitle: '', company: '', phone: '', message: '', source: '' });
-                    }}
-                    className="text-xs font-mono font-bold text-blue-600 hover:text-blue-700 underline"
-                  >
-                    Gửi thêm yêu cầu khác
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-6">
                 <h2 className="text-2xl font-bold text-slate-900 tracking-tight">
                   Contact Sales
                 </h2>
+
+                {serverMessage && (
+                  <div
+                    role="status"
+                    className={`rounded-xl border px-4 py-3 text-sm ${
+                      serverMessageType === 'success'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : 'border-red-200 bg-red-50 text-red-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {serverMessageType === 'success' && (
+                        <Loader2 size={15} className="shrink-0 animate-spin" />
+                      )}
+                      <span>{serverMessage}</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Business Email */}
                 <div className="space-y-1">
@@ -350,10 +464,12 @@ export const BookDemoPage: React.FC = () => {
                 <div className="pt-3">
                   <button
                     type="submit"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || isRedirecting}
                     className="w-auto px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-full shadow-lg shadow-blue-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                   >
-                    {isSubmitting ? (
+                    {isRedirecting ? (
+                      <><Loader2 size={16} className="animate-spin" /> Opening Demo...</>
+                    ) : isSubmitting ? (
                       <><Loader2 size={16} className="animate-spin" /> Submitting...</>
                     ) : (
                       'Book a demo'
@@ -361,7 +477,6 @@ export const BookDemoPage: React.FC = () => {
                   </button>
                 </div>
               </form>
-            )}
           </div>
         </div>
       </main>

@@ -19,7 +19,8 @@ import {
   Eye,
   Trash2,
 } from 'lucide-react';
-import type { ToolMode, MeasureTarget } from './CesiumViewer';
+
+import type { ToolMode } from './CesiumViewer';
 
 /* ─── Prop types ─── */
 type BgMode = 'sky' | 'gradient' | 'black' | 'white' | 'none';
@@ -31,7 +32,8 @@ interface PotreeSidebarProps {
   isOpen?: boolean;
   onToggleOpen?: () => void;
 
-  /* Measurement mode */
+  projectName?: string;
+
   currentMode: ToolMode;
   onModeChange: (mode: ToolMode) => void;
   onClear: () => void;
@@ -46,6 +48,7 @@ interface PotreeSidebarProps {
   /* Optimizer toggle */
   isOptimizerOpen: boolean;
   onToggleOptimizer: () => void;
+  showOptimizerControl?: boolean;
 
   /* Layer visibility */
   showModel: boolean;
@@ -239,6 +242,9 @@ function PtCheckbox({
 export function PotreeSidebar({
   isOpen: controlledIsOpen,
   onToggleOpen,
+
+  projectName = 'Dự án 3D',
+
   currentMode,
   onModeChange,
   onClear,
@@ -270,8 +276,21 @@ export function PotreeSidebar({
   onFocusPointCloud,
   onFocusDom,
 }: PotreeSidebarProps) {
-  const [localIsOpen, setLocalIsOpen] = useState(true);
-  const isOpen = controlledIsOpen !== undefined ? controlledIsOpen : localIsOpen;
+
+  const [localIsOpen, setLocalIsOpen] =
+    useState(true);
+
+  const isOpen =
+    controlledIsOpen !== undefined
+      ? controlledIsOpen
+      : localIsOpen;
+
+  const [expandedSections, setExpandedSections] =
+    useState({
+      scene: true,
+      tools: true,
+      appearance: false,
+    });
 
   const handleToggle = () => {
     if (onToggleOpen) onToggleOpen();
@@ -555,8 +574,6 @@ export function PotreeSidebar({
                   >
                     Inside All
                   </button>
-                </div>
-              </div>
 
               {/* ── Section: Navigation ── */}
               <div className="space-y-2 pt-2" style={{ borderTop: '1px solid #142130' }}>
@@ -762,6 +779,7 @@ export function PotreeSidebar({
                     </button>
                   ))}
                 </div>
+
               </div>
 
               {/* ── Quality ── */}

@@ -1,13 +1,45 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, X, ShieldAlert, Loader2, ArrowLeft } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
-import { useAuthStore } from '../store/useAuthStore';
+import { useAuthStore, type UserProfile } from '../store/useAuthStore';
+import { fetchDemoAccess } from '../services/api';
 import logoImg from '../assets/logo.webp';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const setAuth = useAuthStore((state) => state.setAuth);
+  const cameFromDemo = location.state?.returnTo === '/book-demo';
+
+  const finishLogin = async (user: UserProfile, accessToken: string) => {
+    // setAuth lưu accessToken vào localStorage ngay,
+    // vì vậy fetchDemoAccess() phía dưới có thể dùng token mới.
+    setAuth(user, accessToken);
+
+    // Login bình thường: giữ behavior hiện tại.
+    if (!cameFromDemo) {
+      navigate('/dashboard', { replace: true });
+      return;
+    }
+
+    // Login xuất phát từ nút Demo:
+    // - đã đăng ký Demo -> mở Demo luôn
+    // - chưa đăng ký    -> mở Book Demo
+    const demoAccess = await fetchDemoAccess();
+
+    if (demoAccess.success && demoAccess.hasAccess) {
+      navigate(
+        demoAccess.demoProjectId
+          ? `/viewer/${demoAccess.demoProjectId}`
+          : '/dashboard',
+        { replace: true }
+      );
+      return;
+    }
+
+    navigate('/book-demo', { replace: true });
+  };
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -34,8 +66,7 @@ export const LoginPage: React.FC = () => {
         throw new Error(data.message || 'Đăng nhập thất bại.');
       }
 
-      setAuth(data.user, data.accessToken);
-      navigate('/dashboard');
+      await finishLogin(data.user, data.accessToken);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -61,8 +92,7 @@ export const LoginPage: React.FC = () => {
         throw new Error(data.message || 'Đăng nhập Google thất bại.');
       }
 
-      setAuth(data.user, data.accessToken);
-      navigate('/dashboard');
+      await finishLogin(data.user, data.accessToken);
     } catch (err: any) {
       setError(err.message);
     } finally {

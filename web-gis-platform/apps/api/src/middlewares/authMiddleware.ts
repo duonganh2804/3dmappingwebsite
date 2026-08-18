@@ -94,8 +94,13 @@ export const requireProjectRole = (requiredRole: 'OWNER' | 'EDITOR' | 'VIEWER') 
         return next();
       }
 
-      // Nếu dự án Công khai (isPublic = true) và chỉ yêu cầu quyền VIEWER
-      if (project.isPublic && requiredRole === 'VIEWER') {
+      // Demo chính thức luôn yêu cầu entitlement thành viên, kể cả khi project
+      // vô tình được đánh dấu public. ID chỉ đến từ cấu hình backend.
+      const isConfiguredDemoProject = Boolean(process.env.DEMO_PROJECT_ID)
+        && project.id === process.env.DEMO_PROJECT_ID;
+
+      // Nếu dự án Công khai (isPublic = true), không phải Demo, và chỉ yêu cầu VIEWER
+      if (project.isPublic && !isConfiguredDemoProject && requiredRole === 'VIEWER') {
         return next();
       }
 
@@ -105,7 +110,7 @@ export const requireProjectRole = (requiredRole: 'OWNER' | 'EDITOR' | 'VIEWER') 
       }
 
       // Cho phép sửa đổi/hiệu chỉnh nếu dự án chưa có chủ sở hữu (legacy hoặc global projects)
-      if (!project.createdById) {
+      if (!project.createdById && !isConfiguredDemoProject) {
         return next();
       }
 

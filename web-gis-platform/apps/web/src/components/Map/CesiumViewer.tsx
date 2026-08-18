@@ -88,10 +88,12 @@ export interface MeasurementRecord {
 
 export const CesiumViewer: React.FC<{
   projectId?: string;
+  projectName?: string;
   isSidebarOpen?: boolean;
   onToggleSidebar?: (open: boolean) => void;
 }> = ({
   projectId,
+  projectName = 'Dự án 3D',
   isSidebarOpen = true,
   onToggleSidebar
 }) => {
@@ -115,7 +117,6 @@ export const CesiumViewer: React.FC<{
     const [project, setProject] = useState<any>(null);
     const [toolMode, setToolMode] = useState<ToolMode>('none');
     const [measurementPoints, setMeasurementPoints] = useState<Cesium.Cartesian3[]>([]);
-    const [measureTarget, setMeasureTarget] = useState<MeasureTarget>('all');
     const [isOptimizerOpen, setIsOptimizerOpen] = useState(false);
     const [displayMode, setDisplayMode] = useState<DisplayMode>('full');
     const [viewAngle, setViewAngle] = useState<ViewAngle>('default');
@@ -3528,6 +3529,7 @@ export const CesiumViewer: React.FC<{
         <PotreeSidebar
           isOpen={isSidebarOpen}
           onToggleOpen={onToggleSidebar ? () => onToggleSidebar(!isSidebarOpen) : undefined}
+          projectName={projectName}
           currentMode={toolMode}
           onModeChange={setToolMode}
           onClear={handleClear}
@@ -3538,6 +3540,7 @@ export const CesiumViewer: React.FC<{
           onSetCameraView={handleSetCameraView}
           isOptimizerOpen={isOptimizerOpen}
           onToggleOptimizer={() => setIsOptimizerOpen(!isOptimizerOpen)}
+          showOptimizerControl={isAdmin}
           showModel={showModel}
           setShowModel={setShowModel}
           showDom={showDom}
@@ -3573,14 +3576,12 @@ export const CesiumViewer: React.FC<{
           onFocusProject={handleFocusProject}
           onFocusPointCloud={handleFocusPointCloud}
           onFocusDom={handleFocusDom}
-          measureTarget={measureTarget}
-          onMeasureTargetChange={setMeasureTarget}
         />
 
 
 
         {/* Component Optimizer Panel */}
-        {isOptimizerOpen && (
+        {isAdmin && isOptimizerOpen && (
           <OptimizerPanel projectId={projectId} onClose={() => setIsOptimizerOpen(false)} />
         )}
 

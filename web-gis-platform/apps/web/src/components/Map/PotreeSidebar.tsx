@@ -105,9 +105,7 @@ interface PotreeSidebarProps {
   onFocusPointCloud?: () => void;
   onFocusDom: () => void;
 
-  /* Measure target (legacy) */
-  measureTarget?: MeasureTarget;
-  onMeasureTargetChange?: (t: MeasureTarget) => void;
+
 }
 
 /* ─── Styled range slider (inline CSS injection) ─── */
@@ -574,6 +572,8 @@ export function PotreeSidebar({
                   >
                     Inside All
                   </button>
+                </div>
+              </div>
 
               {/* ── Section: Navigation ── */}
               <div className="space-y-2 pt-2" style={{ borderTop: '1px solid #142130' }}>

@@ -1,30 +1,59 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   ArrowRight,
-  Box,
-  Check,
-  Cloud,
-  Image as ImageIcon,
-  MapPinned,
-  Mountain,
-  Plane,
-  Ruler,
-  ScanLine,
-  Share2,
-  SquareDashed,
-  Workflow,
+  Loader2,
 } from 'lucide-react';
 
 import logoImg from '../assets/logo.webp';
 import lidarHeroImage from '../assets/point-cloud-lidar-hero.png';
 import lidarOverviewImage from '../assets/point-cloud-lidar-overview.png';
-import lidarTopViewImage from '../assets/point-cloud-lidar-topview.png';
 
 import { SolutionLanguageSwitcher } from '../components/SolutionLanguageSwitcher';
 import { useLanguage, type Language } from '../hooks/useLanguage';
 import { useDemoNavigation } from '../hooks/useDemoNavigation';
+
+const THEME_STORAGE_KEY = 'saolatek_theme';
+
+const THEME_COPY: Record<
+  Language,
+  {
+    switchToLight: string;
+    switchToDark: string;
+    demoLoading: string;
+  }
+> = {
+  vi: {
+    switchToLight: 'Chuyển sang giao diện sáng',
+    switchToDark: 'Chuyển sang giao diện tối',
+    demoLoading: 'Đang kiểm tra Demo...',
+  },
+  en: {
+    switchToLight: 'Switch to light mode',
+    switchToDark: 'Switch to dark mode',
+    demoLoading: 'Checking Demo...',
+  },
+  zh: {
+    switchToLight: '切换到浅色模式',
+    switchToDark: '切换到深色模式',
+    demoLoading: '正在检查 Demo...',
+  },
+};
+
+const readInitialTheme = () => {
+  if (typeof window === 'undefined') return true;
+
+  const saved =
+    window.localStorage.getItem(
+      THEME_STORAGE_KEY
+    );
+
+  if (saved === 'light') return false;
+  if (saved === 'dark') return true;
+
+  return true;
+};
 
 type CardItem = {
   title: string;
@@ -101,52 +130,52 @@ const COPY: Record<Language, Copy> = {
     heroTitle1: 'Từ dữ liệu khảo sát đến một project',
     heroTitle2: 'Web GIS 3D',
     heroBody:
-      'Tập trung dữ liệu UAV và LiDAR thành DOM, mô hình 3D và Point Cloud để quan sát, đo đạc và chia sẻ dữ liệu dự án trực tiếp trên trình duyệt.',
-    heroTags: ['UAV Mapping', 'LiDAR', 'Web GIS 3D'],
+      'Kết hợp nền tảng bay CHCNAV X500 với LiDAR AlphaAir 6 Dual (AA6D) để thu Point Cloud và ảnh RGB, sau đó tổ chức dữ liệu đã xử lý trong project Web GIS 3D để quan sát, đo đạc và chia sẻ trên trình duyệt.',
+    heroTags: ['X500 · 5 kg payload', 'AA6D · 2M pts/s', 'Dual camera · 26 MP × 2'],
     viewerLabel: '3D VIEWER',
     pointCloudLabel: 'POINT CLOUD',
     projectData: 'DỮ LIỆU DỰ ÁN',
     heroCaption: 'Quan sát dữ liệu LiDAR trong cùng bối cảnh project Web GIS 3D',
 
-    sourceEyebrow: 'NGUỒN DỮ LIỆU',
-    sourceTitle: 'UAV và LiDAR bổ sung cho nhau trong cùng một workflow dữ liệu',
+    sourceEyebrow: 'THIẾT BỊ THU NHẬN',
+    sourceTitle: 'X500 và AA6D đảm nhiệm hai vai trò khác nhau trong hệ thống khảo sát',
     sourceBody:
-      'Mỗi nguồn khảo sát tạo ra loại dữ liệu khác nhau, nhưng đều được tổ chức trong cùng một project để người dùng quan sát thống nhất.',
+      'Các thông số dưới đây được cập nhật theo X500 Datasheet Rev. September 2025 và AlphaAir 6 Datasheet Rev. January 2026. Giá trị tối đa và giá trị thử nghiệm được giữ kèm điều kiện quan trọng.',
     sources: [
       {
-        eyebrow: 'UAV MAPPING',
-        title: 'Ảnh khảo sát → DOM & 3D Mesh',
-        body: 'Dữ liệu ảnh từ UAV được tổ chức thành lớp ảnh trực giao và mô hình 3D để quan sát mặt bằng, địa hình và bối cảnh dự án.',
-        tags: ['DOM', '3D Mesh'],
+        eyebrow: 'CHCNAV X500',
+        title: 'Nền tảng bay · tải trọng tối đa 5 kg',
+        body: 'X500 là quadcopter 4 cánh với tải trọng tối đa 5 kg. Datasheet công bố 58 phút không payload, 52 phút với payload 2 kg và 40 phút với payload 4 kg; IP55, tốc độ tối đa 23 m/s và hỗ trợ tối đa 3 payload đồng thời.',
+        tags: ['5 kg payload', '58 / 52 / 40 min'],
       },
       {
-        eyebrow: 'LiDAR',
-        title: 'Quét không gian → Point Cloud',
-        body: 'Dữ liệu LiDAR được đưa vào Viewer dưới dạng Point Cloud để kiểm tra cấu trúc không gian và các khu vực cần quan sát chi tiết.',
-        tags: ['Point Cloud', '3D View'],
+        eyebrow: 'ALPHAAIR 6 DUAL',
+        title: 'LiDAR + dual APS-C · tới 2M pts/s',
+        body: 'AA6D nặng 1,85 kg, sử dụng laser 1535 nm, FOV 90°, tối đa 16 returns, IMU 500 Hz và hai camera APS-C 26 MP. Tầm đo tối đa 2.100 m áp dụng tại 100 kHz PRR với mục tiêu có reflectivity > 80%.',
+        tags: ['2M pts/s', '26 MP × 2'],
       },
     ],
 
-    workflowEyebrow: 'WORKFLOW',
-    workflowTitle: 'Từ khảo sát đến dữ liệu có thể sử dụng trên Viewer',
+    workflowEyebrow: 'WORKFLOW X500 + AA6D',
+    workflowTitle: 'Từ mission UAV đến Point Cloud và project Web GIS',
     workflowBody:
-      'Quy trình được tổ chức theo project, giúp dữ liệu luôn giữ đúng bối cảnh khi chuyển từ hiện trường lên nền tảng.',
+      'Tách rõ giai đoạn thu nhận bằng thiết bị, tiền xử lý dữ liệu LiDAR và giai đoạn xuất bản lên nền tảng để không trộn lẫn thông số phần cứng với tính năng Web GIS.',
     workflowItems: [
       {
-        title: 'Thu nhận dữ liệu',
-        body: 'Khảo sát bằng UAV hoặc LiDAR theo phạm vi và mục tiêu của dự án.',
+        title: 'Lập mission & bay X500',
+        body: 'Thiết lập phạm vi khảo sát và vận hành X500 theo payload, địa hình và điều kiện hiện trường phù hợp.',
       },
       {
-        title: 'Xử lý dữ liệu',
-        body: 'Tổ chức dữ liệu thành DOM, 3D Mesh và Point Cloud phù hợp cho Web GIS.',
+        title: 'AA6D thu LiDAR + RGB',
+        body: 'AA6D thu dữ liệu laser cùng ảnh từ hai camera APS-C trong một payload tích hợp GNSS và IMU 500 Hz.',
       },
       {
-        title: 'Đưa vào project',
-        body: 'Tập trung các lớp dữ liệu trong cùng một không gian dự án 3D.',
+        title: 'Tiền xử lý với CoPre',
+        body: 'Datasheet AlphaAir 6 nêu các bước POS solve, Adjust & Refine và Generate point cloud trước khi đưa dữ liệu sang quy trình tiếp theo.',
       },
       {
-        title: 'Quan sát & chia sẻ',
-        body: 'Kiểm tra dữ liệu trên Viewer và chia sẻ project theo quyền truy cập.',
+        title: 'Xuất bản lên Web GIS',
+        body: 'Dữ liệu sau xử lý được tổ chức theo project để quan sát, đo đạc và truy cập trên Viewer theo phạm vi được thiết lập.',
       },
     ],
 
@@ -172,42 +201,42 @@ const COPY: Record<Language, Copy> = {
     ],
 
     measureEyebrow: 'ĐO ĐẠC & GÓC NHÌN',
-    measureTitle: 'Kiểm tra dữ liệu từ nhiều góc nhìn ngay trên trình duyệt',
+    measureTitle: 'Đọc hiện trạng theo góc nhìn phù hợp với từng nội dung kiểm tra',
     measureBody:
-      'Viewer hỗ trợ góc nhìn phối cảnh và từ trên xuống, kết hợp với các công cụ đo để kiểm tra nhanh thông tin không gian.',
+      'Góc nhìn phối cảnh giúp đọc cấu trúc 3D, góc nhìn từ trên xuống hỗ trợ kiểm tra mặt bằng; các phép đo được thực hiện trực tiếp trên dữ liệu đang quan sát.',
     topViewLabel: 'GÓC NHÌN TỪ TRÊN',
     topViewCaption: 'Góc nhìn từ trên xuống trong cùng project 3D',
     measureItems: [
       {
-        title: 'Khoảng cách',
-        body: 'Đo khoảng cách giữa các vị trí ngay trên dữ liệu đang quan sát.',
+        title: 'Khoảng cách 2D / 3D',
+        body: 'Kiểm tra khoảng cách giữa các vị trí theo bối cảnh đang quan sát trong Viewer.',
       },
       {
-        title: 'Chênh cao',
-        body: 'Kiểm tra chênh lệch cao độ giữa hai điểm trong không gian 3D.',
+        title: 'Chênh lệch cao độ',
+        body: 'So sánh cao độ giữa hai vị trí trên dữ liệu 3D khi cần kiểm tra địa hình hoặc cấu trúc.',
       },
       {
-        title: 'Diện tích',
-        body: 'Khoanh vùng và xác định diện tích khu vực cần kiểm tra.',
+        title: 'Diện tích khu vực',
+        body: 'Khoanh vùng trực tiếp trên dữ liệu để đọc diện tích của phạm vi cần kiểm tra.',
       },
     ],
 
     valueEyebrow: 'GIÁ TRỊ SỬ DỤNG',
-    valueTitle: 'Tập trung dữ liệu khảo sát để dễ quan sát và dễ phối hợp hơn',
+    valueTitle: 'Giữ liền mạch dữ liệu từ thiết bị khảo sát đến project Web GIS',
     valueBody:
-      'Web GIS giúp các lớp dữ liệu từ UAV và LiDAR được đưa vào cùng một workflow thay vì nằm rời rạc ở nhiều công cụ khác nhau.',
+      'Giá trị của workflow nằm ở việc tách rõ vai trò phần cứng, bước xử lý và lớp dữ liệu sau cùng, nhưng vẫn đưa chúng về một project để tiếp tục kiểm tra trên cùng bối cảnh không gian.',
     valueItems: [
-      'DOM, 3D Mesh và Point Cloud trong cùng một project',
-      'Quan sát trực tiếp trên trình duyệt',
-      'Chuyển giữa góc nhìn phối cảnh và từ trên xuống',
-      'Đo đạc ngay trên dữ liệu đang hiển thị',
-      'Chia sẻ project theo quyền thành viên',
+      'X500 đảm nhiệm nền tảng bay, AA6D đảm nhiệm thu LiDAR và ảnh RGB',
+      'Dữ liệu sau xử lý được gom về cùng project thay vì nằm ở nhiều đầu ra rời rạc',
+      'Point Cloud, 3D Mesh và DOM được đọc trong cùng bối cảnh project khi có lớp tương ứng',
+      'Khoảng cách, chênh cao và diện tích được kiểm tra trực tiếp trên dữ liệu đang xem',
+      'Project được truy cập theo phạm vi quyền đã được thiết lập trong hệ thống',
     ],
 
     finalEyebrow: 'UAV · LiDAR · WEB GIS 3D',
     finalTitle: 'Trải nghiệm cách dữ liệu UAV & LiDAR được tổ chức trong một project 3D GIS',
     finalBody:
-      'Đăng ký Demo để mở project mẫu và xem trực tiếp Point Cloud, 3D Mesh, DOM và các công cụ đo trên trình duyệt.',
+      'Đăng ký Demo để mở project mẫu và xem cách Point Cloud cùng các lớp dữ liệu sau xử lý được tổ chức, hiển thị và đo đạc trực tiếp trên trình duyệt.',
     finalButton: 'Mở Demo',
     footer: 'UAV · LiDAR · 3D Mapping',
   },
@@ -223,52 +252,52 @@ const COPY: Record<Language, Copy> = {
     heroTitle1: 'From survey capture to a',
     heroTitle2: '3D Web GIS project',
     heroBody:
-      'Bring UAV and LiDAR data together as orthophotos, 3D models and Point Cloud layers for browser-based viewing, measurement and project sharing.',
-    heroTags: ['UAV Mapping', 'LiDAR', 'Web GIS 3D'],
+      'Combine the CHCNAV X500 flight platform with the AlphaAir 6 Dual (AA6D) LiDAR system to capture Point Cloud and RGB imagery, then organize processed data in a 3D Web GIS project for browser-based inspection, measurement and sharing.',
+    heroTags: ['X500 · 5 kg payload', 'AA6D · 2M pts/s', 'Dual camera · 26 MP × 2'],
     viewerLabel: '3D VIEWER',
     pointCloudLabel: 'POINT CLOUD',
     projectData: 'PROJECT DATA',
     heroCaption: 'Inspect LiDAR data inside the spatial context of the same 3D Web GIS project',
 
-    sourceEyebrow: 'DATA SOURCES',
-    sourceTitle: 'UAV and LiDAR complement each other in one data workflow',
+    sourceEyebrow: 'CAPTURE EQUIPMENT',
+    sourceTitle: 'X500 and AA6D serve different roles in the survey system',
     sourceBody:
-      'Each survey source produces different data, but all outputs are organized in the same project for consistent inspection.',
+      'The figures below are aligned with the X500 Datasheet Rev. September 2025 and AlphaAir 6 Datasheet Rev. January 2026. Maximum and test-condition values retain their important conditions.',
     sources: [
       {
-        eyebrow: 'UAV MAPPING',
-        title: 'Survey imagery → Orthophoto & 3D Mesh',
-        body: 'UAV imagery is organized into orthophoto and 3D model layers for reviewing site layout, terrain and project context.',
-        tags: ['Orthophoto', '3D Mesh'],
+        eyebrow: 'CHCNAV X500',
+        title: 'Flight platform · 5 kg maximum payload',
+        body: 'X500 is a four-propeller quadcopter with a 5 kg maximum payload. The datasheet specifies 58 min with no payload, 52 min with 2 kg and 40 min with 4 kg; IP55, 23 m/s maximum speed and support for up to three simultaneous payloads.',
+        tags: ['5 kg payload', '58 / 52 / 40 min'],
       },
       {
-        eyebrow: 'LiDAR',
-        title: 'Spatial scanning → Point Cloud',
-        body: 'LiDAR data is loaded into the Viewer as Point Cloud for checking spatial structures and locations that require detailed inspection.',
-        tags: ['Point Cloud', '3D View'],
+        eyebrow: 'ALPHAAIR 6 DUAL',
+        title: 'LiDAR + dual APS-C · up to 2M pts/s',
+        body: 'AA6D weighs 1.85 kg and integrates a 1535 nm laser, 90° FOV, up to 16 returns, a 500 Hz IMU and two 26 MP APS-C cameras. The 2,100 m maximum range applies at 100 kHz PRR for targets with reflectivity > 80%.',
+        tags: ['2M pts/s', '26 MP × 2'],
       },
     ],
 
-    workflowEyebrow: 'WORKFLOW',
-    workflowTitle: 'From survey capture to data ready for the Viewer',
+    workflowEyebrow: 'X500 + AA6D WORKFLOW',
+    workflowTitle: 'From UAV mission to Point Cloud and a Web GIS project',
     workflowBody:
-      'The workflow is organized by project so data preserves the correct context as it moves from field capture to the platform.',
+      'The workflow separates hardware capture, LiDAR pre-processing and platform publication so equipment specifications are not mixed with Web GIS capabilities.',
     workflowItems: [
       {
-        title: 'Capture data',
-        body: 'Survey with UAV or LiDAR according to the project scope and objectives.',
+        title: 'Plan mission & fly X500',
+        body: 'Define the survey extent and operate the X500 according to payload, terrain and suitable field conditions.',
       },
       {
-        title: 'Process data',
-        body: 'Organize outputs into orthophoto, 3D Mesh and Point Cloud suitable for Web GIS.',
+        title: 'AA6D captures LiDAR + RGB',
+        body: 'AA6D captures laser data together with imagery from two APS-C cameras in a payload integrating GNSS and a 500 Hz IMU.',
       },
       {
-        title: 'Load into project',
-        body: 'Centralize data layers inside the same 3D project workspace.',
+        title: 'Pre-process with CoPre',
+        body: 'The AlphaAir 6 datasheet lists POS solve, Adjust & Refine and Generate point cloud as CoPre processing functions.',
       },
       {
-        title: 'Inspect & share',
-        body: 'Review project data in the Viewer and share access according to permissions.',
+        title: 'Publish to Web GIS',
+        body: 'Processed data is organized by project for inspection, measurement and Viewer access according to the configured scope.',
       },
     ],
 
@@ -294,42 +323,42 @@ const COPY: Record<Language, Copy> = {
     ],
 
     measureEyebrow: 'MEASUREMENT & VIEWPOINTS',
-    measureTitle: 'Inspect data from multiple viewpoints directly in the browser',
+    measureTitle: 'Use the viewpoint that matches each inspection task',
     measureBody:
-      'The Viewer supports perspective and top-down views together with measurement tools for quick spatial checks.',
+      'Perspective view supports 3D structural inspection, while top-down view helps with plan-level checks; spatial measurements are performed directly on the data being viewed.',
     topViewLabel: 'TOP VIEW',
     topViewCaption: 'Top-down view inside the same 3D project',
     measureItems: [
       {
-        title: 'Distance',
-        body: 'Measure distances between positions directly on the data being viewed.',
+        title: '2D / 3D distance',
+        body: 'Check distances between positions within the current Viewer context.',
       },
       {
         title: 'Elevation difference',
-        body: 'Check height differences between two points in 3D space.',
+        body: 'Compare elevation between two positions when reviewing terrain or 3D structure.',
       },
       {
-        title: 'Area',
-        body: 'Draw a region and calculate the area that needs to be checked.',
+        title: 'Area of interest',
+        body: 'Draw a region directly on the data and read the area of the selected extent.',
       },
     ],
 
     valueEyebrow: 'OPERATIONAL VALUE',
-    valueTitle: 'Centralize survey data for easier inspection and coordination',
+    valueTitle: 'Keep the data path continuous from survey hardware to the Web GIS project',
     valueBody:
-      'Web GIS brings UAV and LiDAR outputs into one workflow instead of leaving them separated across different tools.',
+      'The workflow keeps hardware capture, processing, and final project layers clearly separated while bringing the resulting data back into one spatial project context for continued inspection.',
     valueItems: [
-      'Orthophoto, 3D Mesh and Point Cloud in one project',
-      'Browser-based viewing',
-      'Switch between perspective and top-down views',
-      'Measurements directly on displayed data',
-      'Project sharing based on member access',
+      'X500 provides the flight platform while AA6D captures LiDAR and RGB imagery',
+      'Processed outputs are organized in one project instead of remaining as disconnected deliverables',
+      'Point Cloud, 3D Mesh, and DOM can be reviewed in one project context when the corresponding layers are available',
+      'Distance, elevation difference, and area are checked directly on the data being viewed',
+      'Project access follows the scope configured in the system'
     ],
 
     finalEyebrow: 'UAV · LiDAR · WEB GIS 3D',
     finalTitle: 'Experience how UAV & LiDAR data is organized inside a 3D GIS project',
     finalBody:
-      'Request a Demo to open a sample project and explore Point Cloud, 3D Mesh, orthophoto and measurement tools directly in the browser.',
+      'Request a Demo to open a sample project and see how Point Cloud and other processed data layers are organized, displayed and measured directly in the browser.',
     finalButton: 'Open Demo',
     footer: 'UAV · LiDAR · 3D Mapping',
   },
@@ -345,52 +374,52 @@ const COPY: Record<Language, Copy> = {
     heroTitle1: '从测绘数据采集到一个',
     heroTitle2: '3D Web GIS 项目',
     heroBody:
-      '将无人机与 LiDAR 数据统一组织为正射影像、3D 模型和点云，用于直接在浏览器中查看、测量和共享项目数据。',
-    heroTags: ['UAV Mapping', 'LiDAR', 'Web GIS 3D'],
+      '结合 CHCNAV X500 飞行平台与 AlphaAir 6 Dual（AA6D）LiDAR 系统采集点云与 RGB 影像，再将处理后的数据组织到 3D Web GIS 项目中，用于浏览器内查看、测量和共享。',
+    heroTags: ['X500 · 5 kg 载荷', 'AA6D · 2M pts/s', '双相机 · 26 MP × 2'],
     viewerLabel: '3D VIEWER',
     pointCloudLabel: 'POINT CLOUD',
     projectData: '项目数据',
     heroCaption: '在同一个 3D Web GIS 项目的空间背景中查看 LiDAR 数据',
 
-    sourceEyebrow: '数据来源',
-    sourceTitle: 'UAV 与 LiDAR 在同一数据流程中相互补充',
+    sourceEyebrow: '采集设备',
+    sourceTitle: 'X500 与 AA6D 在测绘系统中承担不同角色',
     sourceBody:
-      '不同测绘方式会生成不同的数据类型，但所有成果都可以组织在同一个项目中进行统一查看。',
+      '以下规格依据 X500 Datasheet Rev. September 2025 与 AlphaAir 6 Datasheet Rev. January 2026 更新，并保留最大值与测试值的重要条件。',
     sources: [
       {
-        eyebrow: 'UAV MAPPING',
-        title: '测绘影像 → 正射影像与 3D Mesh',
-        body: '无人机影像被组织为正射影像和 3D 模型图层，用于查看场地平面、地形和项目背景。',
-        tags: ['Orthophoto', '3D Mesh'],
+        eyebrow: 'CHCNAV X500',
+        title: '飞行平台 · 最大载荷 5 kg',
+        body: 'X500 为四旋翼平台，最大载荷 5 kg。Datasheet 给出无载荷 58 分钟、2 kg 载荷 52 分钟、4 kg 载荷 40 分钟；IP55、最大速度 23 m/s，并支持最多三个载荷同时工作。',
+        tags: ['5 kg 载荷', '58 / 52 / 40 分钟'],
       },
       {
-        eyebrow: 'LiDAR',
-        title: '空间扫描 → Point Cloud',
-        body: 'LiDAR 数据以点云形式加载到 Viewer，用于检查空间结构和需要详细查看的位置。',
-        tags: ['Point Cloud', '3D View'],
+        eyebrow: 'ALPHAAIR 6 DUAL',
+        title: 'LiDAR + 双 APS-C · 最高 2M pts/s',
+        body: 'AA6D 重 1.85 kg，集成 1535 nm 激光、90° FOV、最多 16 回波、500 Hz IMU 与两颗 26 MP APS-C 相机。2,100 m 最大测距适用于 100 kHz PRR 且目标反射率 > 80% 的条件。',
+        tags: ['2M pts/s', '26 MP × 2'],
       },
     ],
 
-    workflowEyebrow: '工作流程',
-    workflowTitle: '从测绘采集到可在 Viewer 中使用的数据',
+    workflowEyebrow: 'X500 + AA6D 工作流程',
+    workflowTitle: '从 UAV 任务到点云与 Web GIS 项目',
     workflowBody:
-      '工作流程按项目组织，使数据从现场进入平台后仍保持正确的项目背景。',
+      '流程将硬件采集、LiDAR 预处理和平台发布分开，避免把设备规格与 Web GIS 功能混为一谈。',
     workflowItems: [
       {
-        title: '采集数据',
-        body: '根据项目范围和目标使用 UAV 或 LiDAR 进行测绘。',
+        title: '规划任务并飞行 X500',
+        body: '根据载荷、地形和适合的现场条件定义测绘范围并执行 X500 任务。',
       },
       {
-        title: '处理数据',
-        body: '将成果组织为适用于 Web GIS 的正射影像、3D Mesh 和点云。',
+        title: 'AA6D 采集 LiDAR + RGB',
+        body: 'AA6D 通过集成 GNSS 和 500 Hz IMU 的载荷，同时采集激光数据与两颗 APS-C 相机影像。',
       },
       {
-        title: '加载到项目',
-        body: '将多个数据图层集中到同一个 3D 项目空间。',
+        title: '使用 CoPre 预处理',
+        body: 'AlphaAir 6 Datasheet 列出 POS solve、Adjust & Refine 和 Generate point cloud 等 CoPre 处理功能。',
       },
       {
-        title: '查看与共享',
-        body: '在 Viewer 中检查项目数据，并根据权限共享项目。',
+        title: '发布到 Web GIS',
+        body: '处理后的数据按项目组织，用于在 Viewer 中查看、测量，并根据已配置的访问范围进行访问。',
       },
     ],
 
@@ -416,453 +445,821 @@ const COPY: Record<Language, Copy> = {
     ],
 
     measureEyebrow: '测量与视角',
-    measureTitle: '直接在浏览器中从多个视角检查数据',
+    measureTitle: '根据不同检查任务选择合适的查看视角',
     measureBody:
-      'Viewer 支持透视视角和俯视视角，并结合测量工具快速检查空间信息。',
+      '透视视角适合查看三维结构，俯视视角适合检查平面范围；空间测量可直接在当前查看的数据上进行。',
     topViewLabel: '俯视图',
     topViewCaption: '同一个 3D 项目中的俯视视角',
     measureItems: [
       {
-        title: '距离',
-        body: '直接在当前查看的数据上测量不同位置之间的距离。',
+        title: '2D / 3D 距离',
+        body: '在当前 Viewer 背景中检查不同位置之间的距离。',
       },
       {
         title: '高程差',
-        body: '检查 3D 空间中两个点之间的高度差。',
+        body: '在检查地形或三维结构时比较两个位置之间的高程差。',
       },
       {
-        title: '面积',
-        body: '框选需要检查的区域并计算其面积。',
+        title: '区域面积',
+        body: '直接在数据上框选范围并读取所选区域的面积。',
       },
     ],
 
     valueEyebrow: '使用价值',
-    valueTitle: '集中管理测绘数据，让查看和协同更加高效',
+    valueTitle: '保持从测绘设备到 Web GIS 项目的数据链路连续',
     valueBody:
-      'Web GIS 将 UAV 与 LiDAR 成果统一到一个工作流程中，而不是分散在多个不同工具中。',
+      '该流程清楚区分硬件采集、数据处理和最终项目图层，同时把处理结果重新组织到同一个空间项目背景中继续检查。',
     valueItems: [
-      '正射影像、3D Mesh 和点云位于同一项目',
-      '直接在浏览器中查看',
-      '在透视和俯视视角之间切换',
-      '直接在当前数据上进行测量',
-      '按成员访问权限共享项目',
+      'X500 负责飞行平台，AA6D 负责采集 LiDAR 与 RGB 影像',
+      '处理后的成果统一组织到同一个项目中，而不是分散为独立输出',
+      '当项目具备相应图层时，可在同一项目背景中查看 Point Cloud、3D Mesh 与 DOM',
+      '距离、高程差和面积直接在当前查看的数据上进行检查',
+      '项目访问遵循系统中已配置的权限范围'
     ],
 
     finalEyebrow: 'UAV · LiDAR · WEB GIS 3D',
     finalTitle: '体验 UAV 与 LiDAR 数据如何在 3D GIS 项目中进行组织',
     finalBody:
-      '申请演示以打开示例项目，并直接在浏览器中查看点云、3D Mesh、正射影像和测量工具。',
+      '申请演示以打开示例项目，查看点云与其他处理后数据图层如何在浏览器中组织、显示并直接测量。',
     finalButton: '打开演示',
     footer: 'UAV · LiDAR · 3D Mapping',
   },
 };
 
-const SOURCE_ICONS = [Plane, ScanLine] as const;
-const VIEWER_ICONS = [Cloud, Box, ImageIcon] as const;
-const MEASURE_ICONS = [Ruler, Mountain, SquareDashed] as const;
 
 export const UavMappingLidarSolutionPage: React.FC = () => {
   const navigate = useNavigate();
-  const { currentLang, setCurrentLang } = useLanguage('vi');
-  const { openDemo, isDemoLoading } = useDemoNavigation();
+
+  const {
+    currentLang,
+    setCurrentLang,
+  } = useLanguage('vi');
+
+  const {
+    openDemo,
+    isDemoLoading,
+  } = useDemoNavigation();
+
+  const [
+    isDarkMode,
+    setIsDarkMode,
+  ] = useState(readInitialTheme);
+
   const c = COPY[currentLang];
+  const themeCopy = THEME_COPY[currentLang];
+
+  useEffect(() => {
+    const theme =
+      isDarkMode ? 'dark' : 'light';
+
+    window.localStorage.setItem(
+      THEME_STORAGE_KEY,
+      theme
+    );
+
+    document.documentElement.dataset.saolatekTheme =
+      theme;
+  }, [isDarkMode]);
+
+  useEffect(() => {
+    const handleStorage = (
+      event: StorageEvent
+    ) => {
+      if (
+        event.key !==
+        THEME_STORAGE_KEY
+      ) {
+        return;
+      }
+
+      if (event.newValue === 'dark') {
+        setIsDarkMode(true);
+      }
+
+      if (event.newValue === 'light') {
+        setIsDarkMode(false);
+      }
+    };
+
+    window.addEventListener(
+      'storage',
+      handleStorage
+    );
+
+    return () => {
+      window.removeEventListener(
+        'storage',
+        handleStorage
+      );
+    };
+  }, []);
+
+  const themeLabel =
+    isDarkMode
+      ? themeCopy.switchToLight
+      : themeCopy.switchToDark;
 
   return (
-    <div className="min-h-screen overflow-x-clip bg-[#050914] text-white selection:bg-sky-400/30">
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#050914]/92 backdrop-blur-xl">
-        <div className="mx-auto flex h-[72px] max-w-[1440px] items-center justify-between gap-2 px-3 sm:px-5 md:px-8 lg:px-12">
-          <button
-            type="button"
-            onClick={() => navigate('/')}
-            className="shrink-0 border-0 bg-transparent p-0"
-            aria-label={c.home}
-          >
-            <img src={logoImg} alt="SAOLATEK" className="h-8 w-auto object-contain sm:h-9" />
-          </button>
+    <>
+      <style>{`
+        .uml-root {
+          --uml-bg: #050914;
+          --uml-bg-2: #07101c;
+          --uml-surface: #0b1523;
 
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 md:gap-3">
-            <div className="[&_button]:min-w-[44px]">
+          --uml-ink: #f8fafc;
+          --uml-muted: #94a3b8;
+          --uml-soft: #64748b;
+
+          --uml-border: rgba(255,255,255,.09);
+          --uml-border-strong: rgba(255,255,255,.16);
+
+          --uml-accent: #38bdf8;
+          --uml-accent-strong: #0ea5e9;
+          --uml-cta-ink: #03111d;
+
+          --uml-header: rgba(5,9,20,.88);
+          --uml-shadow: 0 26px 80px rgba(0,0,0,.34);
+
+          color-scheme: dark;
+        }
+
+        .uml-root.uml-light {
+          --uml-bg: #f8fafc;
+          --uml-bg-2: #eef4f8;
+          --uml-surface: #ffffff;
+
+          --uml-ink: #0f172a;
+          --uml-muted: #526174;
+          --uml-soft: #64748b;
+
+          --uml-border: rgba(15,23,42,.11);
+          --uml-border-strong: rgba(15,23,42,.20);
+
+          --uml-accent: #0369a1;
+          --uml-accent-strong: #0284c7;
+          --uml-cta-ink: #ffffff;
+
+          --uml-header: rgba(248,250,252,.90);
+          --uml-shadow: 0 24px 65px rgba(15,23,42,.14);
+
+          color-scheme: light;
+        }
+
+        .uml-root {
+          min-height: 100vh;
+          overflow-x: clip;
+          background: var(--uml-bg);
+          color: var(--uml-ink);
+          transition:
+            background-color .22s ease,
+            color .22s ease;
+        }
+
+        .uml-header {
+          background: var(--uml-header);
+        }
+
+        .uml-media {
+          box-shadow: var(--uml-shadow);
+        }
+
+        .uml-focus:focus-visible {
+          outline: none;
+          box-shadow:
+            0 0 0 2px var(--uml-bg),
+            0 0 0 4px var(--uml-accent);
+        }
+
+        .uml-theme-toggle {
+          position: relative;
+          width: 76px;
+          height: 32px;
+          flex-shrink: 0;
+          overflow: hidden;
+          display: flex;
+          align-items: center;
+          padding: 0;
+          cursor: pointer;
+          border-radius: 9999px;
+          border: 1px solid rgba(255,255,255,.20);
+          background:
+            linear-gradient(
+              180deg,
+              #2a80f1 0%,
+              #70a7ff 100%
+            );
+          box-shadow:
+            inset 0 2px 4px rgba(0,0,0,.10),
+            0 1px 2px rgba(255,255,255,.05);
+          transition:
+            background .4s cubic-bezier(.16,1,.3,1),
+            border-color .4s cubic-bezier(.16,1,.3,1);
+        }
+
+        .uml-theme-toggle:focus-visible {
+          outline: 2px solid var(--uml-accent);
+          outline-offset: 3px;
+        }
+
+        .uml-theme-toggle.is-dark {
+          background:
+            linear-gradient(
+              180deg,
+              #0b1022 0%,
+              #19213d 100%
+            );
+          border-color: rgba(255,255,255,.10);
+        }
+
+        .uml-theme-toggle__thumb {
+          position: absolute;
+          left: 4px;
+          top: 4px;
+          width: 24px;
+          height: 24px;
+          z-index: 3;
+          border-radius: 50%;
+          background: #ffd34e;
+          box-shadow:
+            0 0 10px rgba(255,211,78,.75);
+          transition:
+            transform .4s cubic-bezier(.16,1,.3,1),
+            background .4s cubic-bezier(.16,1,.3,1),
+            box-shadow .4s cubic-bezier(.16,1,.3,1);
+        }
+
+        .uml-theme-toggle.is-dark
+        .uml-theme-toggle__thumb {
+          transform: translateX(43px);
+          background: #eef2ff;
+          box-shadow:
+            inset -6px -2px 0 #c7d2fe,
+            0 0 9px rgba(224,231,255,.5);
+        }
+
+        .uml-theme-toggle__clouds,
+        .uml-theme-toggle__stars {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+        }
+
+        .uml-theme-toggle__clouds {
+          opacity: 1;
+          transition: opacity .35s ease;
+        }
+
+        .uml-theme-toggle.is-dark
+        .uml-theme-toggle__clouds {
+          opacity: 0;
+        }
+
+        .uml-theme-toggle__cloud {
+          position: absolute;
+          height: 8px;
+          border-radius: 999px;
+          background: rgba(255,255,255,.82);
+        }
+
+        .uml-theme-toggle__cloud-1 {
+          right: 8px;
+          bottom: 5px;
+          width: 22px;
+        }
+
+        .uml-theme-toggle__cloud-2 {
+          right: 22px;
+          bottom: 8px;
+          width: 14px;
+        }
+
+        .uml-theme-toggle__cloud-3 {
+          right: 4px;
+          bottom: 12px;
+          width: 12px;
+        }
+
+        .uml-theme-toggle__stars {
+          opacity: 0;
+          transition: opacity .35s ease;
+        }
+
+        .uml-theme-toggle.is-dark
+        .uml-theme-toggle__stars {
+          opacity: 1;
+        }
+
+        .uml-theme-toggle__star {
+          position: absolute;
+          width: 2px;
+          height: 2px;
+          border-radius: 50%;
+          background: #fff;
+          animation:
+            uml-star-pulse
+            2s infinite ease-in-out;
+        }
+
+        .uml-theme-toggle__star-1 {
+          top: 7px;
+          left: 13px;
+        }
+
+        .uml-theme-toggle__star-2 {
+          top: 17px;
+          left: 27px;
+          animation-delay: .5s;
+        }
+
+        .uml-theme-toggle__star-3 {
+          top: 8px;
+          left: 37px;
+          animation-delay: 1s;
+        }
+
+        @keyframes uml-star-pulse {
+          0%, 100% {
+            opacity: .35;
+            transform: scale(.85);
+          }
+
+          50% {
+            opacity: 1;
+            transform: scale(1.2);
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .uml-root *,
+          .uml-root *::before,
+          .uml-root *::after {
+            scroll-behavior: auto !important;
+            animation-duration: .01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: .01ms !important;
+          }
+        }
+      `}</style>
+
+      <div
+        lang={currentLang}
+        className={`uml-root ${
+          isDarkMode ? '' : 'uml-light'
+        }`}
+      >
+        <header className="uml-header sticky top-0 z-50 border-b border-[var(--uml-border)] backdrop-blur-xl">
+          <div className="mx-auto flex h-[68px] w-full max-w-[1560px] items-center justify-between gap-2 px-5 sm:px-8 lg:px-10 xl:px-12">
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="uml-focus shrink-0 rounded-lg border-0 bg-transparent p-1"
+              aria-label={c.home}
+            >
+              <img
+                src={logoImg}
+                alt="SAOLATEK"
+                className="h-8 w-auto object-contain sm:h-9"
+              />
+            </button>
+
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
               <SolutionLanguageSwitcher
                 currentLang={currentLang}
                 onChange={setCurrentLang}
                 ariaLabel={c.languageLabel}
               />
-            </div>
 
-            <button
-              type="button"
-              onClick={() => navigate('/')}
-              className="hidden h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-slate-300 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-white sm:inline-flex"
-            >
-              <ArrowLeft size={16} />
-              {c.home}
-            </button>
-
-            <button
-              type="button"
-              onClick={openDemo}
-              disabled={isDemoLoading}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-sky-400 px-4 text-sm font-bold text-[#04101a] transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50 sm:h-10"
-            >
-              <span className="hidden sm:inline">{c.demo}</span>
-              <ArrowRight size={15} />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main>
-        <section className="relative overflow-hidden border-b border-white/10">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(14,165,233,.12),transparent_34%),radial-gradient(circle_at_82%_68%,rgba(139,92,246,.10),transparent_31%)]" />
-
-          <div className="relative mx-auto grid max-w-[1360px] grid-cols-1 gap-10 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,.43fr)_minmax(0,.57fr)] lg:items-center lg:gap-14 lg:px-12 lg:py-20">
-            <div className="min-w-0">
-              <div className="inline-flex items-center gap-2 rounded-full border border-sky-300/20 bg-sky-300/10 px-3 py-1.5 text-[11px] font-bold tracking-[.14em] text-sky-300">
-                <ScanLine size={14} />
-                {c.eyebrow}
-              </div>
-
-              <h1 className="mt-5 max-w-[13ch] text-[40px] font-semibold leading-[1.03] tracking-[-.045em] sm:text-[50px] lg:text-[60px]">
-                {c.heroTitle1}
-                <span className="block text-sky-400">{c.heroTitle2}</span>
-              </h1>
-
-              <p className="mt-6 max-w-[60ch] text-base leading-7 text-slate-300 sm:text-lg sm:leading-8">
-                {c.heroBody}
-              </p>
-
-              <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={openDemo}
-                  disabled={isDemoLoading}
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-sky-400 px-6 text-sm font-bold text-[#04101a] transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {c.openDemo3D}
-                  <ArrowRight size={16} />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => navigate('/platform/point-cloud-lidar')}
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-white/12 bg-white/[0.04] px-6 text-sm font-semibold text-white transition hover:bg-white/[0.07]"
-                >
-                  {c.pointCloudLink}
-                </button>
-              </div>
-
-              <div className="mt-8 grid max-w-[620px] grid-cols-1 gap-2 sm:grid-cols-3">
-                {c.heroTags.map((item) => (
-                  <div
-                    key={item}
-                    className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3.5 py-3 text-xs font-semibold text-slate-300"
-                  >
-                    <Check size={14} className="shrink-0 text-sky-400" />
-                    {item}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <figure className="min-w-0">
-              <div className="group relative overflow-hidden rounded-[28px] border border-white/10 bg-black shadow-[0_26px_80px_rgba(0,0,0,.34)]">
-                <img
-                  src={lidarHeroImage}
-                  alt={c.heroCaption}
-                  className="aspect-[16/11] w-full object-cover transition duration-700 group-hover:scale-[1.015]"
-                  loading="eager"
-                />
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
-
-                <div className="absolute left-4 top-4 flex flex-wrap gap-2">
-                  <span className="rounded-full border border-white/15 bg-black/45 px-3 py-1.5 text-[10px] font-bold tracking-[.12em] text-sky-300 backdrop-blur">
-                    {c.viewerLabel}
-                  </span>
-                  <span className="rounded-full border border-violet-300/20 bg-violet-400/10 px-3 py-1.5 text-[10px] font-bold tracking-[.12em] text-violet-300 backdrop-blur">
-                    {c.pointCloudLabel}
-                  </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setIsDarkMode(
+                    (current) => !current
+                  )
+                }
+                aria-label={themeLabel}
+                title={themeLabel}
+                aria-pressed={isDarkMode}
+                className={`uml-theme-toggle ${
+                  isDarkMode ? 'is-dark' : ''
+                }`}
+              >
+                <div className="uml-theme-toggle__clouds">
+                  <div className="uml-theme-toggle__cloud uml-theme-toggle__cloud-1" />
+                  <div className="uml-theme-toggle__cloud uml-theme-toggle__cloud-2" />
+                  <div className="uml-theme-toggle__cloud uml-theme-toggle__cloud-3" />
                 </div>
 
-                <figcaption className="absolute inset-x-0 bottom-0 p-5 sm:p-6">
-                  <div className="mb-2 flex items-center gap-2 text-[10px] font-bold tracking-[.14em] text-sky-300">
-                    <MapPinned size={13} />
-                    {c.projectData}
+                <div className="uml-theme-toggle__stars">
+                  <div className="uml-theme-toggle__star uml-theme-toggle__star-1" />
+                  <div className="uml-theme-toggle__star uml-theme-toggle__star-2" />
+                  <div className="uml-theme-toggle__star uml-theme-toggle__star-3" />
+                </div>
+
+                <div className="uml-theme-toggle__thumb" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/')}
+                className="uml-focus hidden h-10 items-center gap-2 rounded-lg border border-[var(--uml-border)] bg-transparent px-3.5 text-sm font-semibold text-[var(--uml-muted)] transition-colors hover:text-[var(--uml-ink)] sm:inline-flex"
+              >
+                <ArrowLeft size={15} />
+                {c.home}
+              </button>
+
+              <button
+                type="button"
+                onClick={openDemo}
+                disabled={isDemoLoading}
+                className="uml-focus inline-flex h-10 min-w-10 items-center justify-center gap-2 rounded-lg bg-[var(--uml-accent)] px-3.5 text-sm font-bold text-[var(--uml-cta-ink)] transition-colors hover:bg-[var(--uml-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label={c.demo}
+              >
+                <span className="hidden md:inline">
+                  {isDemoLoading
+                    ? themeCopy.demoLoading
+                    : c.demo}
+                </span>
+
+                {isDemoLoading ? (
+                  <Loader2
+                    size={15}
+                    className="animate-spin"
+                  />
+                ) : (
+                  <ArrowRight size={15} />
+                )}
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <main>
+          {/* HERO */}
+          <section className="border-b border-[var(--uml-border)] bg-[var(--uml-bg)]">
+            <div className="mx-auto flex min-h-[calc(100svh-68px)] w-full max-w-[1560px] items-center px-5 py-14 sm:px-8 md:py-16 lg:px-10 lg:py-20 xl:px-12">
+              <div className="w-full">
+                <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(420px,.82fr)_minmax(0,1.18fr)] lg:items-center lg:gap-16">
+                  <div className="min-w-0">
+                    <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--uml-accent)]">
+                      {c.eyebrow}
+                    </div>
+
+                    <h1 className="mt-5 max-w-[13ch] text-[40px] font-semibold leading-[1.02] tracking-[-.045em] sm:text-[50px] lg:text-[62px] xl:text-[68px]">
+                      {c.heroTitle1}
+                      <span className="block text-[var(--uml-accent)]">
+                        {c.heroTitle2}
+                      </span>
+                    </h1>
+
+                    <p className="mt-6 max-w-[60ch] text-base leading-7 text-[var(--uml-muted)] sm:text-lg sm:leading-8">
+                      {c.heroBody}
+                    </p>
+
+                    <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={openDemo}
+                        disabled={isDemoLoading}
+                        className="uml-focus inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[var(--uml-accent)] px-6 text-sm font-bold text-[var(--uml-cta-ink)] transition-colors hover:bg-[var(--uml-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isDemoLoading ? (
+                          <>
+                            <Loader2
+                              size={15}
+                              className="animate-spin"
+                            />
+                            {themeCopy.demoLoading}
+                          </>
+                        ) : (
+                          <>
+                            {c.openDemo3D}
+                            <ArrowRight size={15} />
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          navigate(
+                            '/platform/point-cloud-lidar'
+                          )
+                        }
+                        className="uml-focus inline-flex h-12 items-center justify-center rounded-lg border border-[var(--uml-border)] bg-transparent px-6 text-sm font-semibold text-[var(--uml-ink)] transition-colors hover:border-[var(--uml-border-strong)]"
+                      >
+                        {c.pointCloudLink}
+                      </button>
+                    </div>
                   </div>
-                  <p className="max-w-[540px] text-sm font-medium leading-6 text-white sm:text-base">
-                    {c.heroCaption}
-                  </p>
-                </figcaption>
+
+                  <figure className="min-w-0">
+                    <div className="uml-media overflow-hidden rounded-xl border border-[var(--uml-border)] bg-black sm:rounded-2xl">
+                      <img
+                        src={lidarHeroImage}
+                        alt={c.heroCaption}
+                        className="aspect-[16/10] w-full object-cover"
+                        loading="eager"
+                      />
+                    </div>
+
+                    <figcaption className="mt-4 text-center text-xs leading-5 text-[var(--uml-muted)]">
+                      {c.heroCaption}
+                    </figcaption>
+                  </figure>
+                </div>
+
               </div>
-            </figure>
-          </div>
-        </section>
-
-        <section className="border-b border-white/10 bg-[#07101c]">
-          <div className="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16 lg:px-12">
-            <div className="max-w-[840px]">
-              <div className="text-xs font-bold tracking-[.16em] text-sky-400">{c.sourceEyebrow}</div>
-              <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[40px]">
-                {c.sourceTitle}
-              </h2>
-              <p className="mt-4 text-base leading-7 text-slate-400">{c.sourceBody}</p>
             </div>
+          </section>
 
-            <div className="mt-9 grid grid-cols-1 gap-4 lg:grid-cols-2">
-              {c.sources.map((item, index) => {
-                const Icon = SOURCE_ICONS[index];
-                const isViolet = index === 1;
+          {/* HARDWARE DOSSIER */}
+          <section className="border-b border-[var(--uml-border)] bg-[var(--uml-bg-2)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-[72px] lg:px-10 lg:py-20 xl:px-12">
+              <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,.32fr)_minmax(0,.68fr)] lg:gap-16 xl:gap-20">
+                <div>
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--uml-accent)]">
+                    {c.sourceEyebrow}
+                  </div>
 
-                return (
-                  <article
-                    key={item.eyebrow}
-                    className={`rounded-[24px] border p-6 ${
-                      isViolet
-                        ? 'border-violet-300/15 bg-violet-400/[0.045]'
-                        : 'border-sky-300/15 bg-sky-400/[0.045]'
-                    }`}
-                  >
-                    <div
-                      className={`flex h-12 w-12 items-center justify-center rounded-xl ${
-                        isViolet
-                          ? 'bg-violet-400/10 text-violet-300'
-                          : 'bg-sky-400/10 text-sky-300'
+                  <h2 className="mt-4 max-w-[15ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                    {c.sourceTitle}
+                  </h2>
+
+                  <p className="mt-5 max-w-[520px] text-base leading-7 text-[var(--uml-muted)]">
+                    {c.sourceBody}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-10 xl:grid-cols-[minmax(0,.46fr)_minmax(0,.54fr)] xl:gap-12">
+                  {c.sources.map((item, index) => (
+                    <article
+                      key={item.eyebrow}
+                      className={`border-t pt-5 ${
+                        index === 0
+                          ? 'border-[var(--uml-accent)]'
+                          : 'border-[var(--uml-border-strong)]'
                       }`}
                     >
-                      <Icon size={21} />
-                    </div>
+                      <div className="font-mono text-[10px] font-bold tracking-[.14em] text-[var(--uml-accent)]">
+                        {item.eyebrow}
+                      </div>
 
-                    <div
-                      className={`mt-5 text-[10px] font-bold tracking-[.14em] ${
-                        isViolet ? 'text-violet-300' : 'text-sky-300'
-                      }`}
-                    >
-                      {item.eyebrow}
-                    </div>
+                      <h3 className="mt-2 max-w-[24ch] text-[22px] font-semibold leading-8">
+                        {item.title}
+                      </h3>
 
-                    <h3 className="mt-2 text-xl font-semibold">{item.title}</h3>
-                    <p className="mt-3 text-sm leading-6 text-slate-400">{item.body}</p>
+                      <p className="mt-4 text-sm leading-7 text-[var(--uml-muted)]">
+                        {item.body}
+                      </p>
 
-                    <div className="mt-5 flex flex-wrap gap-2">
-                      {item.tags.map((tag) => (
-                        <span
-                          key={tag}
-                          className="rounded-lg border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[10px] font-bold tracking-[.08em] text-slate-300"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  </article>
-                );
-              })}
+                      <div className="mt-6 flex flex-wrap gap-x-6 gap-y-2 border-t border-[var(--uml-border)] pt-4">
+                        {item.tags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="font-mono text-xs font-bold tracking-[.05em] text-[var(--uml-ink)]"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <section className="border-b border-white/10 bg-[#050914]">
-          <div className="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16 lg:px-12">
-            <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,.36fr)_minmax(0,.64fr)] lg:gap-14">
-              <div>
-                <div className="text-xs font-bold tracking-[.16em] text-violet-300">{c.workflowEyebrow}</div>
-                <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[40px]">
+          {/* PROCESSING PIPELINE */}
+          <section className="border-b border-[var(--uml-border)] bg-[var(--uml-bg)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-[72px] lg:px-10 lg:py-20 xl:px-12">
+              <div className="max-w-[980px]">
+                <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--uml-accent)]">
+                  {c.workflowEyebrow}
+                </div>
+
+                <h2 className="mt-4 max-w-[23ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
                   {c.workflowTitle}
                 </h2>
-                <p className="mt-4 text-base leading-7 text-slate-400">{c.workflowBody}</p>
+
+                <p className="mt-5 max-w-[760px] text-base leading-7 text-[var(--uml-muted)]">
+                  {c.workflowBody}
+                </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {c.workflowItems.map((item, index) => (
+              <div className="mt-10 overflow-x-auto">
+                <div className="grid min-w-[980px] grid-cols-4 border-y border-[var(--uml-border)]">
+                  {c.workflowItems.map((item) => (
+                    <article
+                      key={item.title}
+                      className="min-h-[210px] border-r border-[var(--uml-border)] px-6 py-7 first:pl-0 last:border-r-0 last:pr-0"
+                    >
+                      <h3 className="max-w-[15ch] text-base font-semibold leading-6">
+                        {item.title}
+                      </h3>
+
+                      <p className="mt-4 text-sm leading-7 text-[var(--uml-muted)]">
+                        {item.body}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* VIEWER DATA */}
+          <section className="border-b border-[var(--uml-border)] bg-[var(--uml-bg-2)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-[72px] lg:px-10 lg:py-20 xl:px-12">
+              <div className="max-w-[1040px]">
+                <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--uml-accent)]">
+                  {c.viewerEyebrow}
+                </div>
+
+                <h2 className="mt-4 max-w-[22ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                  {c.viewerTitle}
+                </h2>
+
+                <p className="mt-5 max-w-[760px] text-base leading-7 text-[var(--uml-muted)]">
+                  {c.viewerBody}
+                </p>
+              </div>
+
+              <figure className="mt-10 min-w-0">
+                <div className="uml-media overflow-hidden rounded-xl border border-[var(--uml-border)] bg-black sm:rounded-2xl">
+                  <img
+                    src={lidarOverviewImage}
+                    alt={c.overviewCaption}
+                    className="aspect-[21/9] w-full object-cover"
+                    loading="lazy"
+                  />
+                </div>
+
+                <figcaption className="mt-4 text-center text-xs leading-5 text-[var(--uml-muted)]">
+                  {c.overviewCaption}
+                </figcaption>
+              </figure>
+
+              <div className="mt-8 grid grid-cols-1 border-y border-[var(--uml-border)] md:grid-cols-3">
+                {c.viewerItems.map((item) => (
                   <article
                     key={item.title}
-                    className="rounded-2xl border border-white/10 bg-[#09131f] p-5"
+                    className="border-b border-[var(--uml-border)] py-5 md:border-b-0 md:border-r md:px-7 md:first:pl-0 md:last:border-r-0 md:last:pr-0"
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-400/10 text-sky-300">
-                        <Workflow size={18} />
-                      </span>
-                      <span className="text-[10px] font-bold tracking-[.16em] text-slate-600">
-                        0{index + 1}
-                      </span>
-                    </div>
-                    <h3 className="mt-5 text-lg font-semibold">{item.title}</h3>
-                    <p className="mt-2 text-sm leading-6 text-slate-400">{item.body}</p>
+                    <h3 className="text-base font-semibold">
+                      {item.title}
+                    </h3>
+
+                    <p className="mt-2 text-sm leading-6 text-[var(--uml-muted)]">
+                      {item.body}
+                    </p>
                   </article>
                 ))}
               </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <section className="border-b border-white/10 bg-[#07101c]">
-          <div className="mx-auto grid max-w-[1320px] grid-cols-1 gap-10 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,.57fr)_minmax(0,.43fr)] lg:items-center lg:gap-14 lg:px-12 lg:py-20">
-            <figure className="min-w-0">
-              <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-black shadow-[0_22px_65px_rgba(0,0,0,.3)]">
-                <img
-                  src={lidarOverviewImage}
-                  alt={c.overviewCaption}
-                  className="aspect-[16/10] w-full object-cover"
-                  loading="lazy"
-                />
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-
-                <div className="absolute bottom-4 left-4 right-4">
-                  <div className="text-[10px] font-bold tracking-[.14em] text-sky-300">{c.overviewLabel}</div>
-                  <p className="mt-1 text-sm font-medium text-white">{c.overviewCaption}</p>
-                </div>
-              </div>
-            </figure>
-
-            <div>
-              <div className="text-xs font-bold tracking-[.16em] text-sky-400">{c.viewerEyebrow}</div>
-              <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[40px]">
-                {c.viewerTitle}
-              </h2>
-              <p className="mt-4 text-base leading-7 text-slate-400">{c.viewerBody}</p>
-
-              <div className="mt-7 space-y-3">
-                {c.viewerItems.map((item, index) => {
-                  const Icon = VIEWER_ICONS[index];
-                  return (
-                    <article
-                      key={item.title}
-                      className="grid grid-cols-[42px_minmax(0,1fr)] gap-4 rounded-xl border border-white/10 bg-[#09131f] p-4"
-                    >
-                      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-sky-400/10 text-sky-300">
-                        <Icon size={18} />
-                      </span>
-                      <div>
-                        <h3 className="text-base font-semibold">{item.title}</h3>
-                        <p className="mt-1 text-sm leading-6 text-slate-400">{item.body}</p>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="border-b border-white/10 bg-[#050914]">
-          <div className="mx-auto grid max-w-[1320px] grid-cols-1 gap-10 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,.43fr)_minmax(0,.57fr)] lg:items-center lg:gap-14 lg:px-12 lg:py-20">
-            <div>
-              <div className="text-xs font-bold tracking-[.16em] text-violet-300">{c.measureEyebrow}</div>
-              <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[40px]">
-                {c.measureTitle}
-              </h2>
-              <p className="mt-4 text-base leading-7 text-slate-400">{c.measureBody}</p>
-
-              <div className="mt-7 grid grid-cols-1 gap-3">
-                {c.measureItems.map((item, index) => {
-                  const Icon = MEASURE_ICONS[index];
-                  return (
-                    <article
-                      key={item.title}
-                      className="grid grid-cols-[42px_minmax(0,1fr)] gap-4 rounded-xl border border-white/10 bg-[#09131f] p-4"
-                    >
-                      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-400/10 text-violet-300">
-                        <Icon size={18} />
-                      </span>
-                      <div>
-                        <h3 className="text-base font-semibold">{item.title}</h3>
-                        <p className="mt-1 text-sm leading-6 text-slate-400">{item.body}</p>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            </div>
-
-            <figure className="min-w-0">
-              <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-black shadow-[0_22px_65px_rgba(0,0,0,.3)]">
-                <img
-                  src={lidarTopViewImage}
-                  alt={c.topViewCaption}
-                  className="aspect-[16/10] w-full object-cover"
-                  loading="lazy"
-                />
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-
-                <div className="absolute bottom-4 left-4 right-4">
-                  <div className="text-[10px] font-bold tracking-[.14em] text-violet-300">{c.topViewLabel}</div>
-                  <p className="mt-1 text-sm font-medium text-white">{c.topViewCaption}</p>
-                </div>
-              </div>
-            </figure>
-          </div>
-        </section>
-
-        <section className="border-b border-white/10 bg-[#07101c]">
-          <div className="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16 lg:px-12">
-            <div className="overflow-hidden rounded-[24px] border border-white/10 bg-[#09131f]">
-              <div className="grid grid-cols-1 gap-8 p-6 md:p-8 lg:grid-cols-[minmax(0,.4fr)_minmax(0,.6fr)] lg:gap-14 lg:p-10">
+          {/* MEASUREMENT */}
+          <section className="border-b border-[var(--uml-border)] bg-[var(--uml-bg)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-[72px] lg:px-10 lg:py-20 xl:px-12">
+              <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,.48fr)_minmax(0,.52fr)] lg:items-end lg:gap-16">
                 <div>
-                  <div className="text-xs font-bold tracking-[.16em] text-sky-400">{c.valueEyebrow}</div>
-                  <h2 className="mt-4 text-[28px] font-semibold leading-tight tracking-[-.035em] md:text-[36px]">
-                    {c.valueTitle}
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--uml-accent)]">
+                    {c.measureEyebrow}
+                  </div>
+
+                  <h2 className="mt-4 max-w-[18ch] text-[30px] font-semibold leading-[1.06] tracking-[-.035em] md:text-[40px] lg:text-[46px]">
+                    {c.measureTitle}
                   </h2>
-                  <p className="mt-4 text-base leading-7 text-slate-400">{c.valueBody}</p>
                 </div>
 
-                <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {c.valueItems.map((item) => (
-                    <li
-                      key={item}
-                      className="flex gap-3 rounded-xl border border-white/10 bg-white/[0.025] p-4 text-sm leading-6 text-slate-300"
-                    >
-                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-400/10 text-sky-300">
-                        <Check size={12} />
-                      </span>
+                <p className="max-w-[650px] text-base leading-7 text-[var(--uml-muted)] lg:justify-self-end">
+                  {c.measureBody}
+                </p>
+              </div>
+
+              <div className="mt-10 grid grid-cols-1 gap-0 border-y border-[var(--uml-border)] lg:grid-cols-3">
+                {c.measureItems.map((item) => (
+                  <article
+                    key={item.title}
+                    className="border-b border-[var(--uml-border)] py-6 lg:min-h-[170px] lg:border-b-0 lg:border-r lg:px-8 lg:first:pl-0 lg:last:border-r-0 lg:last:pr-0"
+                  >
+                    <h3 className="max-w-[16ch] text-xl font-semibold leading-7">
+                      {item.title}
+                    </h3>
+
+                    <p className="mt-3 max-w-[360px] text-sm leading-7 text-[var(--uml-muted)]">
+                      {item.body}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          {/* OPERATIONAL VALUE */}
+          <section className="border-b border-[var(--uml-border)] bg-[var(--uml-bg-2)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-[72px] lg:px-10 lg:py-20 xl:px-12">
+              <div className="max-w-[1120px]">
+                <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--uml-accent)]">
+                  {c.valueEyebrow}
+                </div>
+
+                <h2 className="mt-4 max-w-[22ch] text-[32px] font-semibold leading-[1.06] tracking-[-.04em] md:text-[42px] lg:text-[48px]">
+                  {c.valueTitle}
+                </h2>
+
+                <p className="mt-5 max-w-[760px] text-base leading-7 text-[var(--uml-muted)]">
+                  {c.valueBody}
+                </p>
+              </div>
+
+              <div className="mt-10 grid grid-cols-1 gap-x-10 border-t border-[var(--uml-border)] sm:grid-cols-2 lg:grid-cols-[1.05fr_1.05fr_.9fr]">
+                {c.valueItems.map((item, index) => (
+                  <div
+                    key={item}
+                    className={`border-b border-[var(--uml-border)] py-5 ${
+                      index < 3
+                        ? 'lg:border-b'
+                        : ''
+                    }`}
+                  >
+                    <p className="max-w-[420px] text-sm leading-7 text-[var(--uml-muted)]">
                       {item}
-                    </li>
-                  ))}
-                </ul>
+                    </p>
+                  </div>
+                ))}
               </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <section className="relative overflow-hidden bg-[#050914]">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_100%,rgba(14,165,233,.15),transparent_42%)]" />
+          {/* CTA */}
+          <section className="bg-[var(--uml-bg)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-12 sm:px-8 md:py-14 lg:px-10 lg:py-16 xl:px-12">
+              <div className="grid grid-cols-1 gap-8 border-y border-[var(--uml-border)] py-9 lg:grid-cols-[minmax(0,.60fr)_minmax(320px,.40fr)] lg:items-end lg:gap-16">
+                <div>
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--uml-accent)]">
+                    {c.finalEyebrow}
+                  </div>
 
-          <div className="relative mx-auto grid max-w-[1160px] grid-cols-1 gap-7 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:px-12">
-            <div>
-              <div className="flex items-center gap-2 text-xs font-bold tracking-[.14em] text-sky-400">
-                <Share2 size={14} />
-                {c.finalEyebrow}
+                  <h2 className="mt-4 max-w-[21ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                    {c.finalTitle}
+                  </h2>
+                </div>
+
+                <div className="lg:pb-1">
+                  <p className="max-w-[620px] text-base leading-7 text-[var(--uml-muted)]">
+                    {c.finalBody}
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={openDemo}
+                    disabled={isDemoLoading}
+                    className="uml-focus mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[var(--uml-accent)] px-6 text-sm font-bold text-[var(--uml-cta-ink)] transition-colors hover:bg-[var(--uml-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                  >
+                    {isDemoLoading ? (
+                      <>
+                        <Loader2
+                          size={15}
+                          className="animate-spin"
+                        />
+                        {themeCopy.demoLoading}
+                      </>
+                    ) : (
+                      <>
+                        {c.finalButton}
+                        <ArrowRight size={15} />
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
+            </div>
+          </section>
+        </main>
 
-              <h2 className="mt-4 max-w-[760px] text-[28px] font-semibold leading-tight tracking-[-.035em] md:text-[38px]">
-                {c.finalTitle}
-              </h2>
+        <footer className="border-t border-[var(--uml-border)] bg-[var(--uml-bg-2)]">
+          <div className="mx-auto flex w-full max-w-[1560px] flex-col gap-3 px-5 py-6 text-sm text-[var(--uml-muted)] sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-10 xl:px-12">
+            <div className="flex items-center gap-3">
+              <img
+                src={logoImg}
+                alt="SAOLATEK"
+                className="h-7 w-auto"
+              />
 
-              <p className="mt-4 max-w-[720px] text-base leading-7 text-slate-400">
-                {c.finalBody}
-              </p>
+              <span>
+                {c.footer}
+              </span>
             </div>
 
-            <button
-              type="button"
-              onClick={openDemo}
-              disabled={isDemoLoading}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-sky-400 px-6 text-sm font-bold text-[#04101a] transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-            >
-              {c.finalButton}
-              <ArrowRight size={16} />
-            </button>
+            <span>
+              © 2026 SAOLATEK
+            </span>
           </div>
-        </section>
-      </main>
-
-      <footer className="border-t border-white/10 bg-[#03060d]">
-        <div className="mx-auto flex max-w-[1440px] flex-col gap-4 px-5 py-7 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between md:px-8 lg:px-12">
-          <div className="flex items-center gap-3">
-            <img src={logoImg} alt="SAOLATEK" className="h-7 w-auto object-contain" />
-            <span>{c.footer}</span>
-          </div>
-          <span>© 2026 SAOLATEK</span>
-        </div>
-      </footer>
-    </div>
+        </footer>
+      </div>
+    </>
   );
 };
 

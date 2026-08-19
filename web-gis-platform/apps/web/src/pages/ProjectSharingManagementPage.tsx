@@ -1,20 +1,9 @@
-/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 */
-/* Hallmark · genre: restrained enterprise · macrostructure: Project access overview → access matrix → project context → access flow → current scope · designed-as-app */
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   ArrowRight,
-  Check,
-  Eye,
-  FolderOpen,
-  Globe2,
-  LockKeyhole,
-  ShieldCheck,
-  KeyRound,
-  Database,
-  UserCheck,
-  ArrowUpRight,
+  Loader2,
 } from 'lucide-react';
 
 import logoImg from '../assets/logo.webp';
@@ -23,6 +12,55 @@ import projectSharingOverviewImage from '../assets/project-sharing-overview.png'
 import { SolutionLanguageSwitcher } from '../components/SolutionLanguageSwitcher';
 import { useLanguage, type Language } from '../hooks/useLanguage';
 import { useAuthStore } from '../store/useAuthStore';
+
+const THEME_STORAGE_KEY = 'saolatek_theme';
+
+const THEME_COPY: Record<
+  Language,
+  {
+    switchToLight: string;
+    switchToDark: string;
+    demoLoading: string;
+    publicLabel: string;
+    privateLabel: string;
+  }
+> = {
+  vi: {
+    switchToLight: 'Chuyển sang giao diện sáng',
+    switchToDark: 'Chuyển sang giao diện tối',
+    demoLoading: 'Đang kiểm tra Demo...',
+    publicLabel: 'PUBLIC',
+    privateLabel: 'PRIVATE',
+  },
+  en: {
+    switchToLight: 'Switch to light mode',
+    switchToDark: 'Switch to dark mode',
+    demoLoading: 'Checking Demo...',
+    publicLabel: 'PUBLIC',
+    privateLabel: 'PRIVATE',
+  },
+  zh: {
+    switchToLight: '切换到浅色模式',
+    switchToDark: '切换到深色模式',
+    demoLoading: '正在检查 Demo...',
+    publicLabel: 'PUBLIC',
+    privateLabel: 'PRIVATE',
+  },
+};
+
+const readInitialTheme = () => {
+  if (typeof window === 'undefined') return true;
+
+  const saved =
+    window.localStorage.getItem(
+      THEME_STORAGE_KEY
+    );
+
+  if (saved === 'light') return false;
+  if (saved === 'dark') return true;
+
+  return true;
+};
 
 type Item = {
   title: string;
@@ -479,13 +517,73 @@ const COPY: Record<Language, Copy> = {
   },
 };
 
-const PROJECT_ICONS = [FolderOpen, Eye, ShieldCheck] as const;
 
 export const ProjectSharingManagementPage: React.FC = () => {
   const navigate = useNavigate();
-  const { currentLang, setCurrentLang } = useLanguage('vi');
-  const { isAuthenticated, isLoading } = useAuthStore();
+
+  const {
+    currentLang,
+    setCurrentLang,
+  } = useLanguage('vi');
+
+  const {
+    isAuthenticated,
+    isLoading,
+  } = useAuthStore();
+
+  const [
+    isDarkMode,
+    setIsDarkMode,
+  ] = useState(readInitialTheme);
+
   const c = COPY[currentLang];
+  const themeCopy = THEME_COPY[currentLang];
+
+  useEffect(() => {
+    const theme =
+      isDarkMode ? 'dark' : 'light';
+
+    window.localStorage.setItem(
+      THEME_STORAGE_KEY,
+      theme
+    );
+
+    document.documentElement.dataset.saolatekTheme =
+      theme;
+  }, [isDarkMode]);
+
+  useEffect(() => {
+    const handleStorage = (
+      event: StorageEvent
+    ) => {
+      if (
+        event.key !==
+        THEME_STORAGE_KEY
+      ) {
+        return;
+      }
+
+      if (event.newValue === 'dark') {
+        setIsDarkMode(true);
+      }
+
+      if (event.newValue === 'light') {
+        setIsDarkMode(false);
+      }
+    };
+
+    window.addEventListener(
+      'storage',
+      handleStorage
+    );
+
+    return () => {
+      window.removeEventListener(
+        'storage',
+        handleStorage
+      );
+    };
+  }, []);
 
   const demo = () => {
     if (isLoading) return;
@@ -498,450 +596,808 @@ export const ProjectSharingManagementPage: React.FC = () => {
     navigate('/book-demo');
   };
 
-  return (
-    <div
-      lang={currentLang}
-      className="min-h-screen overflow-x-clip bg-[var(--color-paper)] text-[var(--color-ink)] [--color-accent-ink:var(--color-paper)]"
-    >
-      <header className="sticky top-0 z-50 border-b border-[var(--color-border)] bg-[color-mix(in_oklch,var(--color-paper)_92%,transparent)] backdrop-blur-xl">
-        <div className="mx-auto flex h-[72px] max-w-[1440px] items-center justify-between gap-2 px-3 sm:px-5 md:px-8 lg:px-12">
-          <button
-            type="button"
-            onClick={() => navigate('/')}
-            className="shrink-0 border-0 bg-transparent p-0"
-            aria-label={c.home}
-          >
-            <img src={logoImg} alt="SAOLATEK" className="h-8 w-auto object-contain sm:h-9" />
-          </button>
+  const themeLabel =
+    isDarkMode
+      ? themeCopy.switchToLight
+      : themeCopy.switchToDark;
 
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 md:gap-3">
-            <div className="[&_button]:min-w-[44px]">
+  return (
+    <>
+      <style>{`
+        .psm-root {
+          --color-paper: #050914;
+          --color-paper-2: #07101c;
+          --color-paper-3: #0b1523;
+
+          --color-ink: #f8fafc;
+          --color-ink-muted: #94a3b8;
+
+          --color-border:
+            rgba(255,255,255,.09);
+          --color-border-cyan:
+            rgba(56,189,248,.26);
+
+          --color-accent: #38bdf8;
+          --color-accent-strong: #0ea5e9;
+          --color-accent-ink: #03111d;
+
+          --psm-header:
+            rgba(5,9,20,.88);
+
+          --psm-shadow:
+            0 26px 80px
+            rgba(0,0,0,.34);
+
+          color-scheme: dark;
+        }
+
+        .psm-root.psm-light {
+          --color-paper: #f8fafc;
+          --color-paper-2: #eef4f8;
+          --color-paper-3: #ffffff;
+
+          --color-ink: #0f172a;
+          --color-ink-muted: #526174;
+
+          --color-border:
+            rgba(15,23,42,.11);
+          --color-border-cyan:
+            rgba(2,132,199,.28);
+
+          --color-accent: #0369a1;
+          --color-accent-strong: #0284c7;
+          --color-accent-ink: #ffffff;
+
+          --psm-header:
+            rgba(248,250,252,.90);
+
+          --psm-shadow:
+            0 24px 65px
+            rgba(15,23,42,.14);
+
+          color-scheme: light;
+        }
+
+        .psm-root {
+          min-height: 100vh;
+          overflow-x: clip;
+
+          background:
+            var(--color-paper);
+
+          color:
+            var(--color-ink);
+
+          transition:
+            background-color .22s ease,
+            color .22s ease;
+        }
+
+        .psm-header {
+          background:
+            var(--psm-header);
+        }
+
+        .psm-media {
+          box-shadow:
+            var(--psm-shadow);
+        }
+
+        .psm-focus:focus-visible {
+          outline: none;
+
+          box-shadow:
+            0 0 0 2px var(--color-paper),
+            0 0 0 4px var(--color-accent);
+        }
+
+        /* Landing-style day / night toggle */
+
+        .psm-theme-toggle {
+          position: relative;
+
+          width: 76px;
+          height: 32px;
+
+          flex-shrink: 0;
+          overflow: hidden;
+
+          display: flex;
+          align-items: center;
+
+          padding: 0;
+          cursor: pointer;
+
+          border-radius: 9999px;
+
+          border:
+            1px solid
+            rgba(255,255,255,.20);
+
+          background:
+            linear-gradient(
+              180deg,
+              #2a80f1 0%,
+              #70a7ff 100%
+            );
+
+          box-shadow:
+            inset 0 2px 4px
+              rgba(0,0,0,.10),
+            0 1px 2px
+              rgba(255,255,255,.05);
+
+          transition:
+            background .4s
+              cubic-bezier(.16,1,.3,1),
+            border-color .4s
+              cubic-bezier(.16,1,.3,1);
+        }
+
+        .psm-theme-toggle:focus-visible {
+          outline:
+            2px solid
+            var(--color-accent);
+
+          outline-offset: 3px;
+        }
+
+        .psm-theme-toggle.is-dark {
+          background:
+            linear-gradient(
+              180deg,
+              #0b1022 0%,
+              #19213d 100%
+            );
+
+          border-color:
+            rgba(255,255,255,.10);
+        }
+
+        .psm-theme-toggle__thumb {
+          position: absolute;
+
+          left: 4px;
+          top: 4px;
+
+          width: 24px;
+          height: 24px;
+
+          z-index: 3;
+
+          border-radius: 50%;
+          background: #ffd34e;
+
+          box-shadow:
+            0 0 10px
+            rgba(255,211,78,.75);
+
+          transition:
+            transform .4s
+              cubic-bezier(.16,1,.3,1),
+            background .4s
+              cubic-bezier(.16,1,.3,1),
+            box-shadow .4s
+              cubic-bezier(.16,1,.3,1);
+        }
+
+        .psm-theme-toggle.is-dark
+        .psm-theme-toggle__thumb {
+          transform:
+            translateX(43px);
+
+          background: #eef2ff;
+
+          box-shadow:
+            inset -6px -2px 0
+              #c7d2fe,
+            0 0 9px
+              rgba(224,231,255,.5);
+        }
+
+        .psm-theme-toggle__clouds,
+        .psm-theme-toggle__stars {
+          position: absolute;
+          inset: 0;
+
+          pointer-events: none;
+        }
+
+        .psm-theme-toggle__clouds {
+          opacity: 1;
+          transition:
+            opacity .35s ease;
+        }
+
+        .psm-theme-toggle.is-dark
+        .psm-theme-toggle__clouds {
+          opacity: 0;
+        }
+
+        .psm-theme-toggle__cloud {
+          position: absolute;
+
+          height: 8px;
+          border-radius: 999px;
+
+          background:
+            rgba(255,255,255,.82);
+        }
+
+        .psm-theme-toggle__cloud-1 {
+          right: 8px;
+          bottom: 5px;
+          width: 22px;
+        }
+
+        .psm-theme-toggle__cloud-2 {
+          right: 22px;
+          bottom: 8px;
+          width: 14px;
+        }
+
+        .psm-theme-toggle__cloud-3 {
+          right: 4px;
+          bottom: 12px;
+          width: 12px;
+        }
+
+        .psm-theme-toggle__stars {
+          opacity: 0;
+          transition:
+            opacity .35s ease;
+        }
+
+        .psm-theme-toggle.is-dark
+        .psm-theme-toggle__stars {
+          opacity: 1;
+        }
+
+        .psm-theme-toggle__star {
+          position: absolute;
+
+          width: 2px;
+          height: 2px;
+
+          border-radius: 50%;
+          background: #fff;
+
+          animation:
+            psm-star-pulse
+            2s infinite ease-in-out;
+        }
+
+        .psm-theme-toggle__star-1 {
+          top: 7px;
+          left: 13px;
+        }
+
+        .psm-theme-toggle__star-2 {
+          top: 17px;
+          left: 27px;
+          animation-delay: .5s;
+        }
+
+        .psm-theme-toggle__star-3 {
+          top: 8px;
+          left: 37px;
+          animation-delay: 1s;
+        }
+
+        @keyframes psm-star-pulse {
+          0%,
+          100% {
+            opacity: .35;
+            transform: scale(.85);
+          }
+
+          50% {
+            opacity: 1;
+            transform: scale(1.2);
+          }
+        }
+
+        @media (
+          prefers-reduced-motion: reduce
+        ) {
+          .psm-root *,
+          .psm-root *::before,
+          .psm-root *::after {
+            scroll-behavior:
+              auto !important;
+            animation-duration:
+              .01ms !important;
+            animation-iteration-count:
+              1 !important;
+            transition-duration:
+              .01ms !important;
+          }
+        }
+      `}</style>
+
+      <div
+        lang={currentLang}
+        className={`psm-root ${
+          isDarkMode
+            ? ''
+            : 'psm-light'
+        }`}
+      >
+        <header className="psm-header sticky top-0 z-50 border-b border-[var(--color-border)] backdrop-blur-xl">
+          <div className="mx-auto flex h-[68px] w-full max-w-[1560px] items-center justify-between gap-2 px-5 sm:px-8 lg:px-10 xl:px-12">
+            <button
+              type="button"
+              onClick={() =>
+                navigate('/')
+              }
+              className="psm-focus shrink-0 rounded-lg border-0 bg-transparent p-1"
+              aria-label={c.home}
+            >
+              <img
+                src={logoImg}
+                alt="SAOLATEK"
+                className="h-8 w-auto object-contain sm:h-9"
+              />
+            </button>
+
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
               <SolutionLanguageSwitcher
                 currentLang={currentLang}
                 onChange={setCurrentLang}
-                ariaLabel={c.languageLabel}
+                ariaLabel={
+                  c.languageLabel
+                }
               />
-            </div>
 
-            <button
-              type="button"
-              onClick={() => navigate('/')}
-              className="hidden h-10 items-center gap-2 whitespace-nowrap rounded-xl border border-[var(--color-border)] bg-[var(--color-paper-2)] px-4 text-sm font-semibold text-[var(--color-ink-muted)] sm:inline-flex"
-            >
-              <ArrowLeft size={16} />
-              {c.home}
-            </button>
-
-            <button
-              type="button"
-              onClick={demo}
-              disabled={isLoading}
-              className="inline-flex h-11 w-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[var(--color-accent)] text-sm font-bold text-[var(--color-accent-ink)] sm:h-10 md:w-auto md:px-4"
-              aria-label={c.demo}
-            >
-              <span className="hidden md:inline">{c.demo}</span>
-              <ArrowRight size={15} />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main>
-        {/* HERO */}
-        <section className="relative overflow-hidden border-b border-[var(--color-border)] bg-[var(--color-paper)]">
-          <div className="pointer-events-none absolute -right-32 top-8 h-96 w-96 rounded-full bg-[var(--color-accent)] opacity-[.035] blur-3xl" />
-
-          <div className="relative mx-auto grid max-w-[1360px] grid-cols-1 gap-10 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,.43fr)_minmax(0,.57fr)] lg:items-center lg:gap-14 lg:px-12 lg:py-20">
-            <div className="min-w-0">
-              <div className="text-xs font-semibold tracking-[.16em] text-[var(--color-accent)]">
-                {c.eyebrow}
-              </div>
-
-              <h1 className="mt-5 max-w-[14ch] text-[40px] font-semibold leading-[1.03] tracking-[-.045em] sm:text-[50px] lg:text-[60px]">
-                {c.heroTitle}
-              </h1>
-
-              <p className="mt-6 max-w-[60ch] text-base leading-7 text-[var(--color-ink-muted)] sm:text-lg sm:leading-8">
-                {c.heroBody}
-              </p>
-
-              <div className="mt-7 grid max-w-[620px] gap-2">
-                {c.heroFacts.map((fact, index) => {
-                  const Icon = [Globe2, LockKeyhole, Eye][index] ?? Check;
-                  return (
-                    <div
-                      key={fact}
-                      className="grid grid-cols-[36px_minmax(0,1fr)] items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-paper-2)] px-3.5 py-3"
-                    >
-                      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-paper-3)] text-[var(--color-accent)]">
-                        <Icon size={16} />
-                      </span>
-                      <span className="text-sm leading-6 text-[var(--color-ink-muted)]">{fact}</span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
-                <button
-                  type="button"
-                  onClick={demo}
-                  disabled={isLoading}
-                  className="inline-flex h-12 w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[var(--color-accent)] px-6 text-sm font-bold text-[var(--color-accent-ink)] sm:w-auto"
-                >
-                  {c.demo}
-                  <ArrowRight size={16} />
-                </button>
-
-                <p className="max-w-[420px] text-xs leading-5 text-[var(--color-ink-muted)]">
-                  {c.heroNote}
-                </p>
-              </div>
-            </div>
-
-            <figure className="min-w-0">
-              <div className="group relative overflow-hidden rounded-[26px] border border-[var(--color-border)] bg-black shadow-[0_24px_70px_rgba(0,0,0,.22)]">
-                <img
-                  src={projectSharingImage}
-                  alt={c.heroImageAlt}
-                  className="aspect-[16/10] w-full object-cover transition-transform duration-700 group-hover:scale-[1.015]"
-                  loading="eager"
-                />
-
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
-
-                <div className="absolute left-4 top-4 flex items-center gap-2 sm:left-5 sm:top-5">
-                  <span className="rounded-full border border-white/15 bg-black/50 px-3 py-1.5 text-[10px] font-bold tracking-[.12em] text-white backdrop-blur">
-                    PROJECT VIEW
-                  </span>
-                  <span className="rounded-full border border-white/15 bg-black/50 px-3 py-1.5 text-[10px] font-semibold text-cyan-300 backdrop-blur">
-                    {c.heroImageTag}
-                  </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setIsDarkMode(
+                    (current) =>
+                      !current
+                  )
+                }
+                aria-label={
+                  themeLabel
+                }
+                title={themeLabel}
+                aria-pressed={
+                  isDarkMode
+                }
+                className={`psm-theme-toggle ${
+                  isDarkMode
+                    ? 'is-dark'
+                    : ''
+                }`}
+              >
+                <div className="psm-theme-toggle__clouds">
+                  <div className="psm-theme-toggle__cloud psm-theme-toggle__cloud-1" />
+                  <div className="psm-theme-toggle__cloud psm-theme-toggle__cloud-2" />
+                  <div className="psm-theme-toggle__cloud psm-theme-toggle__cloud-3" />
                 </div>
 
-                <figcaption className="absolute inset-x-0 bottom-0 p-5 sm:p-6">
-                  <div className="flex items-end justify-between gap-4">
-                    <div>
-                      <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.14em] text-cyan-300">
-                        <FolderOpen size={13} />
-                        Project context
-                      </div>
-                      <p className="max-w-[520px] text-sm font-medium leading-6 text-white sm:text-base">
-                        {c.heroImageCaption}
-                      </p>
-                    </div>
+                <div className="psm-theme-toggle__stars">
+                  <div className="psm-theme-toggle__star psm-theme-toggle__star-1" />
+                  <div className="psm-theme-toggle__star psm-theme-toggle__star-2" />
+                  <div className="psm-theme-toggle__star psm-theme-toggle__star-3" />
+                </div>
 
-                    <span className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-black/35 text-cyan-300 backdrop-blur sm:flex">
-                      <ArrowUpRight size={18} />
-                    </span>
-                  </div>
-                </figcaption>
-              </div>
-            </figure>
+                <div className="psm-theme-toggle__thumb" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  navigate('/')
+                }
+                className="psm-focus hidden h-10 items-center gap-2 rounded-lg border border-[var(--color-border)] bg-transparent px-3.5 text-sm font-semibold text-[var(--color-ink-muted)] transition-colors hover:text-[var(--color-ink)] sm:inline-flex"
+              >
+                <ArrowLeft size={15} />
+                {c.home}
+              </button>
+
+              <button
+                type="button"
+                onClick={demo}
+                disabled={isLoading}
+                className="psm-focus inline-flex h-10 min-w-10 items-center justify-center gap-2 rounded-lg bg-[var(--color-accent)] px-3.5 text-sm font-bold text-[var(--color-accent-ink)] transition-colors hover:bg-[var(--color-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label={c.demo}
+              >
+                <span className="hidden md:inline">
+                  {isLoading
+                    ? themeCopy.demoLoading
+                    : c.demo}
+                </span>
+
+                {isLoading ? (
+                  <Loader2
+                    size={15}
+                    className="animate-spin"
+                  />
+                ) : (
+                  <ArrowRight size={15} />
+                )}
+              </button>
+            </div>
           </div>
-        </section>
+        </header>
 
-        {/* ACCESS MATRIX */}
-        <section className="bg-[var(--color-paper-2)]">
-          <div className="mx-auto max-w-[1260px] px-5 py-12 md:px-8 md:py-16 lg:px-12">
-            <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,.38fr)_minmax(0,.62fr)] lg:gap-14">
-              <div>
-                <div className="text-xs font-semibold tracking-[.16em] text-[var(--color-accent)]">
+        <main>
+          {/* HERO */}
+          <section className="border-b border-[var(--color-border)] bg-[var(--color-paper)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-16 lg:px-10 lg:py-20 xl:px-12">
+              <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,.46fr)_minmax(0,.54fr)] lg:items-center lg:gap-16">
+                <div className="min-w-0">
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--color-accent)]">
+                    {c.eyebrow}
+                  </div>
+
+                  <h1 className="mt-5 max-w-[12ch] text-[40px] font-semibold leading-[1.02] tracking-[-.045em] sm:text-[50px] lg:text-[62px] xl:text-[68px]">
+                    {c.heroTitle}
+                  </h1>
+
+                  <p className="mt-6 max-w-[58ch] text-base leading-7 text-[var(--color-ink-muted)] sm:text-lg sm:leading-8">
+                    {c.heroBody}
+                  </p>
+
+                  <div className="mt-7 max-w-[680px] border-l border-[var(--color-border)] pl-5">
+                    {c.heroFacts.map((fact) => (
+                      <p
+                        key={fact}
+                        className="border-b border-[var(--color-border)] py-3 text-sm leading-6 text-[var(--color-ink-muted)] last:border-b-0"
+                      >
+                        {fact}
+                      </p>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={demo}
+                    disabled={isLoading}
+                    className="psm-focus mt-8 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-accent)] px-6 text-sm font-bold text-[var(--color-accent-ink)] transition-colors hover:bg-[var(--color-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 size={15} className="animate-spin" />
+                        {themeCopy.demoLoading}
+                      </>
+                    ) : (
+                      <>
+                        {c.demo}
+                        <ArrowRight size={15} />
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <figure className="min-w-0">
+                  <div className="psm-media overflow-hidden rounded-xl border border-[var(--color-border)] bg-black sm:rounded-2xl">
+                    <img
+                      src={projectSharingImage}
+                      alt={c.heroImageAlt}
+                      className="aspect-[16/10] w-full object-cover"
+                      loading="eager"
+                    />
+                  </div>
+
+                  <figcaption className="mt-4 text-center text-xs leading-5 text-[var(--color-ink-muted)]">
+                    {c.heroImageCaption}
+                  </figcaption>
+                </figure>
+              </div>
+            </div>
+          </section>
+
+          {/* VISUAL STORY */}
+          <section className="border-b border-[var(--color-border)] bg-[var(--color-paper-2)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-18 lg:px-10 lg:py-20 xl:px-12">
+              <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,.60fr)_minmax(0,.40fr)] lg:items-center lg:gap-16">
+                <figure className="min-w-0">
+                  <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-black sm:rounded-2xl">
+                    <img
+                      src={projectSharingOverviewImage}
+                      alt={c.heroImageAlt}
+                      className="aspect-[16/9] w-full object-contain"
+                      loading="lazy"
+                    />
+                  </div>
+
+                  <figcaption className="mt-4 text-center text-xs leading-5 text-[var(--color-ink-muted)]">
+                    {c.heroImageCaption}
+                  </figcaption>
+                </figure>
+
+                <div>
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--color-accent)]">
+                    {c.projectEyebrow}
+                  </div>
+
+                  <h2 className="mt-4 max-w-[18ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                    {c.projectTitle}
+                  </h2>
+
+                  <p className="mt-5 max-w-[640px] text-base leading-7 text-[var(--color-ink-muted)]">
+                    {c.projectBody}
+                  </p>
+
+                  <div className="mt-8 space-y-6">
+                    {c.projectItems.map((item) => (
+                      <article
+                        key={item.title}
+                        className="border-t border-[var(--color-border)] pt-5"
+                      >
+                        <h3 className="text-base font-semibold">
+                          {item.title}
+                        </h3>
+
+                        <p className="mt-2 text-sm leading-7 text-[var(--color-ink-muted)]">
+                          {item.description}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* ACCESS COMPARISON */}
+          <section className="border-b border-[var(--color-border)] bg-[var(--color-paper)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-18 lg:px-10 lg:py-20 xl:px-12">
+              <div className="max-w-[960px]">
+                <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--color-accent)]">
                   {c.matrixEyebrow}
                 </div>
-                <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[38px]">
+
+                <h2 className="mt-4 max-w-[24ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
                   {c.matrixTitle}
                 </h2>
-                <p className="mt-4 text-base leading-7 text-[var(--color-ink-muted)]">
+
+                <p className="mt-5 max-w-[760px] text-base leading-7 text-[var(--color-ink-muted)]">
                   {c.matrixBody}
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <article className="overflow-hidden rounded-2xl border border-[var(--color-border-cyan)] bg-[var(--color-paper)]">
-                  <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-paper-3)] px-5 py-4">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-paper)] text-[var(--color-accent)]">
-                        <Globe2 size={18} />
-                      </span>
-                      <h3 className="text-base font-semibold">{c.matrixPublic}</h3>
-                    </div>
-                    <span className="rounded-full border border-[var(--color-border-cyan)] px-2.5 py-1 text-[10px] font-bold tracking-[.1em] text-[var(--color-accent)]">
-                      PUBLIC
-                    </span>
-                  </div>
-
-                  <div className="divide-y divide-[var(--color-border)]">
-                    {c.matrixRows.map((row) => (
-                      <div key={`pub-${row.label}`} className="px-5 py-4">
-                        <div className="text-xs font-semibold text-[var(--color-ink)]">{row.label}</div>
-                        <div className="mt-1 text-sm leading-6 text-[var(--color-ink-muted)]">
-                          {row.publicProject}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </article>
-
-                <article className="overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-paper)]">
-                  <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-paper-2)] px-5 py-4">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-paper-3)] text-[var(--color-accent)]">
-                        <LockKeyhole size={18} />
-                      </span>
-                      <h3 className="text-base font-semibold">{c.matrixPrivate}</h3>
-                    </div>
-                    <span className="rounded-full border border-[var(--color-border)] px-2.5 py-1 text-[10px] font-bold tracking-[.1em] text-[var(--color-ink-muted)]">
-                      PRIVATE
-                    </span>
-                  </div>
-
-                  <div className="divide-y divide-[var(--color-border)]">
-                    {c.matrixRows.map((row) => (
-                      <div key={`pri-${row.label}`} className="px-5 py-4">
-                        <div className="text-xs font-semibold text-[var(--color-ink)]">{row.label}</div>
-                        <div className="mt-1 text-sm leading-6 text-[var(--color-ink-muted)]">
-                          {row.privateProject}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </article>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* PROJECT CONTEXT */}
-        <section className="bg-[var(--color-paper)]">
-          <div className="mx-auto max-w-[1300px] px-5 py-12 md:px-8 md:py-16 lg:px-12 lg:py-20">
-            <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,.56fr)_minmax(0,.44fr)] lg:items-center lg:gap-14">
-              <figure className="min-w-0">
-                <div className="relative overflow-hidden rounded-[24px] border border-[var(--color-border)] bg-black shadow-[0_20px_60px_rgba(0,0,0,.18)]">
-                  <img
-                    src={projectSharingOverviewImage}
-                    alt={c.heroImageAlt}
-                    className="aspect-[16/10] w-full object-contain"
-                    loading="lazy"
-                  />
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/75 via-black/20 to-transparent" />
-                  <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-4">
+              <div className="mt-10 grid grid-cols-1 gap-8 lg:grid-cols-2">
+                <section className="border-t-2 border-[var(--color-accent)] pt-5">
+                  <div className="flex items-end justify-between gap-4">
                     <div>
-                      <div className="text-[10px] font-bold tracking-[.12em] text-cyan-300">
-                        PROJECT DATA
+                      <div className="font-mono text-[10px] font-bold tracking-[.12em] text-[var(--color-accent)]">
+                        {themeCopy.publicLabel}
                       </div>
-                      <p className="mt-1 text-sm font-medium leading-5 text-white">
-                        3D project overview · Viewer context
-                      </p>
+                      <h3 className="mt-1 text-xl font-semibold">
+                        {c.matrixPublic}
+                      </h3>
                     </div>
-                    <span className="hidden rounded-lg border border-white/15 bg-black/40 p-2.5 text-cyan-300 backdrop-blur sm:inline-flex">
-                      <Database size={18} />
-                    </span>
                   </div>
-                </div>
-              </figure>
 
-              <div>
-                <div className="text-xs font-semibold tracking-[.16em] text-[var(--color-accent)]">
-                  {c.projectEyebrow}
-                </div>
-                <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[38px]">
-                  {c.projectTitle}
-                </h2>
-                <p className="mt-4 text-base leading-7 text-[var(--color-ink-muted)]">
-                  {c.projectBody}
-                </p>
-
-                <div className="mt-7 space-y-3">
-                  {c.projectItems.map((item, index) => {
-                    const Icon = PROJECT_ICONS[index];
-                    return (
-                      <article
-                        key={item.title}
-                        className="grid grid-cols-[42px_minmax(0,1fr)] gap-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-paper-2)] p-4"
+                  <div className="mt-5 border-y border-[var(--color-border)]">
+                    {c.matrixRows.map((row) => (
+                      <div
+                        key={`public-${row.label}`}
+                        className="grid grid-cols-[150px_minmax(0,1fr)] gap-5 border-b border-[var(--color-border)] py-4 last:border-b-0"
                       >
-                        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-paper-3)] text-[var(--color-accent)]">
-                          <Icon size={18} />
+                        <span className="text-xs font-semibold">
+                          {row.label}
                         </span>
-                        <div>
-                          <h3 className="text-base font-semibold">{item.title}</h3>
-                          <p className="mt-1 text-sm leading-6 text-[var(--color-ink-muted)]">
-                            {item.description}
-                          </p>
-                        </div>
-                      </article>
-                    );
-                  })}
+
+                        <span className="text-sm leading-6 text-[var(--color-ink-muted)]">
+                          {row.publicProject}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="border-t-2 border-[var(--color-border)] pt-5">
+                  <div className="flex items-end justify-between gap-4">
+                    <div>
+                      <div className="font-mono text-[10px] font-bold tracking-[.12em] text-[var(--color-ink-muted)]">
+                        {themeCopy.privateLabel}
+                      </div>
+                      <h3 className="mt-1 text-xl font-semibold">
+                        {c.matrixPrivate}
+                      </h3>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 border-y border-[var(--color-border)]">
+                    {c.matrixRows.map((row) => (
+                      <div
+                        key={`private-${row.label}`}
+                        className="grid grid-cols-[150px_minmax(0,1fr)] gap-5 border-b border-[var(--color-border)] py-4 last:border-b-0"
+                      >
+                        <span className="text-xs font-semibold">
+                          {row.label}
+                        </span>
+
+                        <span className="text-sm leading-6 text-[var(--color-ink-muted)]">
+                          {row.privateProject}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            </div>
+          </section>
+
+          {/* ACCESS JOURNEY */}
+          <section className="border-b border-[var(--color-border)] bg-[var(--color-paper-2)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-18 lg:px-10 lg:py-20 xl:px-12">
+              <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,.34fr)_minmax(0,.66fr)] lg:gap-16 xl:gap-20">
+                <div>
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--color-accent)]">
+                    {c.flowEyebrow}
+                  </div>
+
+                  <h2 className="mt-4 max-w-[16ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                    {c.flowTitle}
+                  </h2>
+
+                  <p className="mt-5 max-w-[520px] text-base leading-7 text-[var(--color-ink-muted)]">
+                    {c.flowBody}
+                  </p>
+                </div>
+
+                <div className="relative border-l border-[var(--color-border)] pl-6 sm:pl-8">
+                  {c.flowItems.map((item) => (
+                    <article
+                      key={item.title}
+                      className="relative border-b border-[var(--color-border)] py-6 first:pt-0 last:border-b-0 last:pb-0"
+                    >
+                      <span className="absolute -left-[29px] top-7 h-2.5 w-2.5 rounded-full bg-[var(--color-accent)] sm:-left-[37px]" />
+
+                      <h3 className="text-lg font-semibold">
+                        {item.title}
+                      </h3>
+
+                      <p className="mt-2 max-w-[760px] text-sm leading-7 text-[var(--color-ink-muted)]">
+                        {item.description}
+                      </p>
+                    </article>
+                  ))}
                 </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        {/* ACCESS FLOW */}
-        <section className="border-y border-[var(--color-border)] bg-[var(--color-paper-2)]">
-          <div className="mx-auto max-w-[1260px] px-5 py-12 md:px-8 md:py-16 lg:px-12">
-            <div className="max-w-[820px]">
-              <div className="text-xs font-semibold tracking-[.16em] text-[var(--color-accent)]">
-                {c.flowEyebrow}
-              </div>
-              <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[38px]">
-                {c.flowTitle}
-              </h2>
-              <p className="mt-4 text-base leading-7 text-[var(--color-ink-muted)]">
-                {c.flowBody}
-              </p>
-            </div>
-
-            <div className="mt-9 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-              {c.flowItems.map((item, index) => {
-                const Icon = [FolderOpen, Globe2, UserCheck, Eye][index] ?? Check;
-                return (
-                  <article
-                    key={item.title}
-                    className="relative rounded-2xl border border-[var(--color-border)] bg-[var(--color-paper)] p-5"
-                  >
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-paper-3)] text-[var(--color-accent)]">
-                      <Icon size={18} />
-                    </div>
-                    <h3 className="mt-5 text-base font-semibold">{item.title}</h3>
-                    <p className="mt-2 text-sm leading-6 text-[var(--color-ink-muted)]">
-                      {item.description}
-                    </p>
-                  </article>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-
-        {/* CURRENT SCOPE */}
-        <section className="bg-[var(--color-paper)]">
-          <div className="mx-auto max-w-[1260px] px-5 py-12 md:px-8 md:py-16 lg:px-12">
-            <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,.38fr)_minmax(0,.62fr)] lg:gap-14">
-              <div>
-                <div className="text-xs font-semibold tracking-[.16em] text-[var(--color-accent)]">
+          {/* CURRENT SCOPE */}
+          <section className="border-b border-[var(--color-border)] bg-[var(--color-paper)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-18 lg:px-10 lg:py-20 xl:px-12">
+              <div className="max-w-[980px]">
+                <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--color-accent)]">
                   {c.scopeEyebrow}
                 </div>
-                <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[38px]">
+
+                <h2 className="mt-4 max-w-[22ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
                   {c.scopeTitle}
                 </h2>
-                <p className="mt-4 text-base leading-7 text-[var(--color-ink-muted)]">
+
+                <p className="mt-5 max-w-[760px] text-base leading-7 text-[var(--color-ink-muted)]">
                   {c.scopeBody}
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <article className="rounded-2xl border border-[var(--color-border-cyan)] bg-[var(--color-paper-3)] p-5">
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-paper)] text-[var(--color-accent)]">
-                      <ShieldCheck size={18} />
-                    </span>
-                    <h3 className="text-base font-semibold">{c.supportedTitle}</h3>
-                  </div>
-
-                  <ul className="mt-5 space-y-3">
-                    {c.supportedItems.map((item) => (
-                      <li key={item} className="flex gap-3 text-sm leading-6 text-[var(--color-ink-muted)]">
-                        <Check size={15} className="mt-1 shrink-0 text-[var(--color-accent)]" />
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
-                </article>
-
-                <article className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-paper-2)] p-5">
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-paper-3)] text-[var(--color-ink-muted)]">
-                      <KeyRound size={18} />
-                    </span>
-                    <h3 className="text-base font-semibold">{c.notClaimedTitle}</h3>
-                  </div>
-
-                  <ul className="mt-5 space-y-3">
-                    {c.notClaimedItems.map((item) => (
-                      <li key={item} className="flex gap-3 text-sm leading-6 text-[var(--color-ink-muted)]">
-                        <span className="mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-ink-muted)]" />
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
-                </article>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* VALUE */}
-        <section className="bg-[var(--color-paper-2)]">
-          <div className="mx-auto max-w-[1260px] px-5 py-12 md:px-8 md:py-16 lg:px-12">
-            <div className="overflow-hidden rounded-[24px] border border-[var(--color-border)] bg-[var(--color-paper)]">
-              <div className="grid grid-cols-1 gap-8 p-6 md:p-8 lg:grid-cols-[minmax(0,.42fr)_minmax(0,.58fr)] lg:gap-14 lg:p-10">
+              <div className="mt-10 grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,.52fr)_minmax(0,.48fr)] lg:gap-16">
                 <div>
-                  <div className="text-xs font-semibold tracking-[.16em] text-[var(--color-accent)]">
-                    {c.valueEyebrow}
+                  <h3 className="text-sm font-semibold text-[var(--color-accent)]">
+                    {c.supportedTitle}
+                  </h3>
+
+                  <div className="mt-4">
+                    {c.supportedItems.map((item) => (
+                      <div
+                        key={item}
+                        className="border-t border-[var(--color-border)] py-4 text-sm leading-6 text-[var(--color-ink-muted)]"
+                      >
+                        {item}
+                      </div>
+                    ))}
                   </div>
-                  <h2 className="mt-4 text-[28px] font-semibold leading-tight tracking-[-.035em] md:text-[36px]">
-                    {c.valueTitle}
-                  </h2>
-                  <p className="mt-4 text-base leading-7 text-[var(--color-ink-muted)]">
-                    {c.valueBody}
-                  </p>
                 </div>
 
-                <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {c.values.map((item) => (
-                    <li
-                      key={item}
-                      className="flex min-w-0 gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-paper-2)] p-4 text-sm leading-6 text-[var(--color-ink-muted)]"
-                    >
-                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--color-paper-3)] text-[var(--color-accent)]">
-                        <Check size={12} />
-                      </span>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
+                <div className="border-l border-[var(--color-border)] pl-0 lg:pl-10">
+                  <h3 className="text-sm font-semibold">
+                    {c.notClaimedTitle}
+                  </h3>
+
+                  <div className="mt-4">
+                    {c.notClaimedItems.map((item) => (
+                      <div
+                        key={item}
+                        className="border-t border-[var(--color-border)] py-4 text-sm leading-6 text-[var(--color-ink-muted)]"
+                      >
+                        {item}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        {/* CTA */}
-        <section className="bg-[var(--color-paper)]">
-          <div className="mx-auto grid max-w-[1120px] grid-cols-1 gap-6 px-5 py-10 md:px-8 md:py-12 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:px-12">
-            <div>
-              <h2 className="text-[26px] font-semibold leading-tight tracking-[-.03em] md:text-[32px]">
-                {c.finalTitle}
-              </h2>
-              <p className="mt-3 max-w-[680px] text-base leading-7 text-[var(--color-ink-muted)]">
-                {c.finalBody}
-              </p>
+          {/* VALUE / CTA */}
+          <section className="bg-[var(--color-paper-2)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-16 lg:px-10 lg:py-18 xl:px-12">
+              <div className="grid grid-cols-1 gap-12 border-y border-[var(--color-border)] py-10 lg:grid-cols-[minmax(0,.58fr)_minmax(0,.42fr)] lg:items-end lg:gap-16">
+                <div>
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--color-accent)]">
+                    {c.valueEyebrow}
+                  </div>
+
+                  <h2 className="mt-4 max-w-[18ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                    {c.valueTitle}
+                  </h2>
+
+                  <p className="mt-5 max-w-[640px] text-base leading-7 text-[var(--color-ink-muted)]">
+                    {c.valueBody}
+                  </p>
+
+                  <div className="mt-7 flex flex-wrap gap-x-8 gap-y-3 text-sm leading-6 text-[var(--color-ink-muted)]">
+                    {c.values.map((value) => (
+                      <span key={value}>
+                        {value}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="lg:text-right">
+                  <h2 className="text-[26px] font-semibold leading-tight tracking-[-.03em] md:text-[32px]">
+                    {c.finalTitle}
+                  </h2>
+
+                  <p className="mt-3 max-w-[620px] text-base leading-7 text-[var(--color-ink-muted)] lg:ml-auto">
+                    {c.finalBody}
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={demo}
+                    disabled={isLoading}
+                    className="psm-focus mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-accent)] px-6 text-sm font-bold text-[var(--color-accent-ink)] transition-colors hover:bg-[var(--color-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 size={15} className="animate-spin" />
+                        {themeCopy.demoLoading}
+                      </>
+                    ) : (
+                      <>
+                        {c.demo}
+                        <ArrowRight size={15} />
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </main>
+
+        <footer className="border-t border-[var(--color-border)] bg-[var(--color-paper-2)]">
+          <div className="mx-auto flex w-full max-w-[1560px] flex-col gap-3 px-5 py-6 text-sm text-[var(--color-ink-muted)] sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-10 xl:px-12">
+            <div className="flex items-center gap-3">
+              <img
+                src={logoImg}
+                alt="SAOLATEK"
+                className="h-7 w-auto"
+              />
+
+              <span>
+                {c.footer}
+              </span>
             </div>
 
-            <button
-              type="button"
-              onClick={demo}
-              disabled={isLoading}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[var(--color-accent)] px-6 text-sm font-bold text-[var(--color-accent-ink)] sm:w-auto"
-            >
-              {c.demo}
-              <ArrowRight size={16} />
-            </button>
+            <span>
+              © 2026 SAOLATEK
+            </span>
           </div>
-        </section>
-      </main>
-
-      <footer className="border-t border-[var(--color-border)] bg-[var(--color-paper-2)]">
-        <div className="mx-auto flex max-w-[1440px] flex-col gap-3 px-5 py-6 text-sm text-[var(--color-ink-muted)] sm:flex-row sm:items-center sm:justify-between md:px-8 lg:px-12">
-          <div className="flex items-center gap-3">
-            <img src={logoImg} alt="SAOLATEK" className="h-7 w-auto" />
-            <span>{c.footer}</span>
-          </div>
-          <span>© 2026 SAOLATEK</span>
-        </div>
-      </footer>
-    </div>
+        </footer>
+      </div>
+    </>
   );
 };
 

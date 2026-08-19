@@ -59,6 +59,7 @@ export const optionalAuth = (req: AuthRequest, res: Response, next: NextFunction
       // Ignore token decode errors for optional auth
     }
   }
+
   next();
 };
 
@@ -94,23 +95,21 @@ export const requireProjectRole = (requiredRole: 'OWNER' | 'EDITOR' | 'VIEWER') 
         return next();
       }
 
-      // Demo chính thức luôn yêu cầu entitlement thành viên, kể cả khi project
-      // vô tình được đánh dấu public. ID chỉ đến từ cấu hình backend.
-      const isConfiguredDemoProject = Boolean(process.env.DEMO_PROJECT_ID)
-        && project.id === process.env.DEMO_PROJECT_ID;
-
-      // Nếu dự án Công khai (isPublic = true), không phải Demo, và chỉ yêu cầu VIEWER
-      if (project.isPublic && !isConfiguredDemoProject && requiredRole === 'VIEWER') {
+      // Project công khai (Demo Showcase) được phép xem với quyền VIEWER.
+      if (project.isPublic && requiredRole === 'VIEWER') {
         return next();
       }
 
-      // Yêu cầu đăng nhập nếu dự án Riêng tư hoặc yêu cầu quyền sửa/xóa
+      // Yêu cầu đăng nhập nếu dự án riêng tư hoặc yêu cầu quyền sửa/xóa.
       if (!req.user) {
-        return res.status(401).json({ success: false, message: 'Vui lòng đăng nhập để truy cập dự án này.' });
+        return res.status(401).json({
+          success: false,
+          message: 'Vui lòng đăng nhập để truy cập dự án này.'
+        });
       }
 
-      // Cho phép sửa đổi/hiệu chỉnh nếu dự án chưa có chủ sở hữu (legacy hoặc global projects)
-      if (!project.createdById && !isConfiguredDemoProject) {
+      // Project legacy/global chưa có chủ sở hữu vẫn cho phép thao tác như logic cũ.
+      if (!project.createdById) {
         return next();
       }
 
@@ -123,23 +122,29 @@ export const requireProjectRole = (requiredRole: 'OWNER' | 'EDITOR' | 'VIEWER') 
       const member = project.members.find(m => m.userId === req.user?.id);
 
       if (!member) {
-        return res.status(403).json({ success: false, message: 'Bạn không có quyền truy cập vào dự án này.' });
+        return res.status(403).json({
+          success: false,
+          message: 'Bạn không có quyền truy cập vào dự án này.'
+        });
       }
 
       const userRoleLevel = ROLE_HIERARCHY[member.role] || 0;
       const requiredRoleLevel = ROLE_HIERARCHY[requiredRole] || 0;
 
       if (userRoleLevel < requiredRoleLevel) {
-        return res.status(403).json({ 
-          success: false, 
-          message: `Thao tác yêu cầu quyền tối thiểu là ${requiredRole}. Quyền hiện tại của bạn: ${member.role}.` 
+        return res.status(403).json({
+          success: false,
+          message: `Thao tác yêu cầu quyền tối thiểu là ${requiredRole}. Quyền hiện tại của bạn: ${member.role}.`
         });
       }
 
       next();
     } catch (err: any) {
       console.error('Lỗi khi kiểm tra phân quyền dự án:', err);
-      res.status(500).json({ success: false, message: 'Lỗi kiểm tra quyền hệ thống.' });
+      res.status(500).json({
+        success: false,
+        message: 'Lỗi kiểm tra quyền hệ thống.'
+      });
     }
   };
 };

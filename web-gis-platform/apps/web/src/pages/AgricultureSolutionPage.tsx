@@ -1,20 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   ArrowRight,
-  Box,
-  Check,
-  Cloud,
-  Image as ImageIcon,
-  Layers3,
-  MapPinned,
-  Mountain,
-  Ruler,
-  Share2,
-  Sprout,
-  SquareDashed,
-  Workflow,
+  Loader2,
 } from 'lucide-react';
 
 import logoImg from '../assets/logo.webp';
@@ -24,6 +13,47 @@ import agricultureOverviewImage from '../assets/agriculture-uav.jpg';
 import { SolutionLanguageSwitcher } from '../components/SolutionLanguageSwitcher';
 import { useLanguage, type Language } from '../hooks/useLanguage';
 import { useDemoNavigation } from '../hooks/useDemoNavigation';
+
+const THEME_STORAGE_KEY = 'saolatek_theme';
+
+const THEME_COPY: Record<
+  Language,
+  {
+    switchToLight: string;
+    switchToDark: string;
+    demoLoading: string;
+  }
+> = {
+  vi: {
+    switchToLight: 'Chuyển sang giao diện sáng',
+    switchToDark: 'Chuyển sang giao diện tối',
+    demoLoading: 'Đang kiểm tra Demo...',
+  },
+  en: {
+    switchToLight: 'Switch to light mode',
+    switchToDark: 'Switch to dark mode',
+    demoLoading: 'Checking Demo...',
+  },
+  zh: {
+    switchToLight: '切换到浅色模式',
+    switchToDark: '切换到深色模式',
+    demoLoading: '正在检查 Demo...',
+  },
+};
+
+const readInitialTheme = () => {
+  if (typeof window === 'undefined') return true;
+
+  const saved =
+    window.localStorage.getItem(
+      THEME_STORAGE_KEY
+    );
+
+  if (saved === 'light') return false;
+  if (saved === 'dark') return true;
+
+  return true;
+};
 
 type CardItem = {
   title: string;
@@ -114,7 +144,7 @@ const COPY: Record<Language, Copy> = {
       },
       {
         title: 'Chia sẻ project',
-        body: 'Phân quyền thành viên để cùng theo dõi dữ liệu trong đúng phạm vi dự án.',
+        body: 'Chia sẻ project theo phạm vi truy cập đã được thiết lập trong hệ thống.',
       },
     ],
 
@@ -217,7 +247,7 @@ const COPY: Record<Language, Copy> = {
       },
       {
         title: 'Share the project',
-        body: 'Assign member permissions so teams can access the correct project scope.',
+        body: 'Share the project according to the access scope configured in the system.',
       },
     ],
 
@@ -320,7 +350,7 @@ const COPY: Record<Language, Copy> = {
       },
       {
         title: '共享项目',
-        body: '根据项目范围为成员分配适当的访问权限。',
+        body: '根据系统中已配置的访问范围共享项目。',
       },
     ],
 
@@ -387,343 +417,712 @@ const COPY: Record<Language, Copy> = {
   },
 };
 
-const DATA_ICONS = [ImageIcon, Box, Cloud] as const;
-const MEASURE_ICONS = [SquareDashed, Ruler, Mountain] as const;
 
 export const AgricultureSolutionPage: React.FC = () => {
   const navigate = useNavigate();
-  const { currentLang, setCurrentLang } = useLanguage('vi');
-  const { openDemo, isDemoLoading } = useDemoNavigation();
+
+  const {
+    currentLang,
+    setCurrentLang,
+  } = useLanguage('vi');
+
+  const {
+    openDemo,
+    isDemoLoading,
+  } = useDemoNavigation();
+
+  const [
+    isDarkMode,
+    setIsDarkMode,
+  ] = useState(readInitialTheme);
+
   const c = COPY[currentLang];
+  const themeCopy = THEME_COPY[currentLang];
+
+  useEffect(() => {
+    const theme =
+      isDarkMode ? 'dark' : 'light';
+
+    window.localStorage.setItem(
+      THEME_STORAGE_KEY,
+      theme
+    );
+
+    document.documentElement.dataset.saolatekTheme =
+      theme;
+  }, [isDarkMode]);
+
+  useEffect(() => {
+    const handleStorage = (
+      event: StorageEvent
+    ) => {
+      if (
+        event.key !==
+        THEME_STORAGE_KEY
+      ) {
+        return;
+      }
+
+      if (event.newValue === 'dark') {
+        setIsDarkMode(true);
+      }
+
+      if (event.newValue === 'light') {
+        setIsDarkMode(false);
+      }
+    };
+
+    window.addEventListener(
+      'storage',
+      handleStorage
+    );
+
+    return () => {
+      window.removeEventListener(
+        'storage',
+        handleStorage
+      );
+    };
+  }, []);
+
+  const themeLabel =
+    isDarkMode
+      ? themeCopy.switchToLight
+      : themeCopy.switchToDark;
 
   return (
-    <div className="min-h-screen overflow-x-clip bg-[#050914] font-sans text-white selection:bg-emerald-400/30">
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#050914]/92 backdrop-blur-xl">
-        <div className="mx-auto flex h-[72px] max-w-[1440px] items-center justify-between gap-2 px-3 sm:px-5 md:px-8 lg:px-12">
-          <button
-            type="button"
-            onClick={() => navigate('/')}
-            className="shrink-0 border-0 bg-transparent p-0"
-            aria-label={c.home}
-          >
-            <img src={logoImg} alt="SAOLATEK" className="h-8 w-auto object-contain sm:h-9" />
-          </button>
+    <>
+      <style>{`
+        .agr-root {
+          --agr-bg: #050914;
+          --agr-bg-2: #07101c;
+          --agr-surface: #0b1523;
 
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 md:gap-3">
-            <div className="[&_button]:min-w-[44px]">
+          --agr-ink: #f8fafc;
+          --agr-muted: #94a3b8;
+          --agr-soft: #64748b;
+
+          --agr-border: rgba(255,255,255,.09);
+          --agr-border-strong: rgba(255,255,255,.16);
+
+          --agr-accent: #38bdf8;
+          --agr-accent-strong: #0ea5e9;
+          --agr-cta-ink: #03111d;
+
+          --agr-header: rgba(5,9,20,.88);
+          --agr-shadow: 0 26px 80px rgba(0,0,0,.34);
+
+          color-scheme: dark;
+        }
+
+        .agr-root.agr-light {
+          --agr-bg: #f8fafc;
+          --agr-bg-2: #eef4f8;
+          --agr-surface: #ffffff;
+
+          --agr-ink: #0f172a;
+          --agr-muted: #526174;
+          --agr-soft: #64748b;
+
+          --agr-border: rgba(15,23,42,.11);
+          --agr-border-strong: rgba(15,23,42,.20);
+
+          --agr-accent: #0369a1;
+          --agr-accent-strong: #0284c7;
+          --agr-cta-ink: #ffffff;
+
+          --agr-header: rgba(248,250,252,.90);
+          --agr-shadow: 0 24px 65px rgba(15,23,42,.14);
+
+          color-scheme: light;
+        }
+
+        .agr-root {
+          min-height: 100vh;
+          overflow-x: clip;
+          background: var(--agr-bg);
+          color: var(--agr-ink);
+          transition:
+            background-color .22s ease,
+            color .22s ease;
+        }
+
+        .agr-header {
+          background: var(--agr-header);
+        }
+
+        .agr-media {
+          box-shadow: var(--agr-shadow);
+        }
+
+        .agr-focus:focus-visible {
+          outline: none;
+          box-shadow:
+            0 0 0 2px var(--agr-bg),
+            0 0 0 4px var(--agr-accent);
+        }
+
+        .agr-theme-toggle {
+          position: relative;
+          width: 76px;
+          height: 32px;
+          flex-shrink: 0;
+          overflow: hidden;
+          display: flex;
+          align-items: center;
+          padding: 0;
+          cursor: pointer;
+          border-radius: 9999px;
+          border: 1px solid rgba(255,255,255,.20);
+          background:
+            linear-gradient(
+              180deg,
+              #2a80f1 0%,
+              #70a7ff 100%
+            );
+          box-shadow:
+            inset 0 2px 4px rgba(0,0,0,.10),
+            0 1px 2px rgba(255,255,255,.05);
+          transition:
+            background .4s cubic-bezier(.16,1,.3,1),
+            border-color .4s cubic-bezier(.16,1,.3,1);
+        }
+
+        .agr-theme-toggle:focus-visible {
+          outline: 2px solid var(--agr-accent);
+          outline-offset: 3px;
+        }
+
+        .agr-theme-toggle.is-dark {
+          background:
+            linear-gradient(
+              180deg,
+              #0b1022 0%,
+              #19213d 100%
+            );
+          border-color: rgba(255,255,255,.10);
+        }
+
+        .agr-theme-toggle__thumb {
+          position: absolute;
+          left: 4px;
+          top: 4px;
+          width: 24px;
+          height: 24px;
+          z-index: 3;
+          border-radius: 50%;
+          background: #ffd34e;
+          box-shadow:
+            0 0 10px rgba(255,211,78,.75);
+          transition:
+            transform .4s cubic-bezier(.16,1,.3,1),
+            background .4s cubic-bezier(.16,1,.3,1),
+            box-shadow .4s cubic-bezier(.16,1,.3,1);
+        }
+
+        .agr-theme-toggle.is-dark
+        .agr-theme-toggle__thumb {
+          transform: translateX(43px);
+          background: #eef2ff;
+          box-shadow:
+            inset -6px -2px 0 #c7d2fe,
+            0 0 9px rgba(224,231,255,.5);
+        }
+
+        .agr-theme-toggle__clouds,
+        .agr-theme-toggle__stars {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+        }
+
+        .agr-theme-toggle__clouds {
+          opacity: 1;
+          transition: opacity .35s ease;
+        }
+
+        .agr-theme-toggle.is-dark
+        .agr-theme-toggle__clouds {
+          opacity: 0;
+        }
+
+        .agr-theme-toggle__cloud {
+          position: absolute;
+          height: 8px;
+          border-radius: 999px;
+          background: rgba(255,255,255,.82);
+        }
+
+        .agr-theme-toggle__cloud-1 {
+          right: 8px;
+          bottom: 5px;
+          width: 22px;
+        }
+
+        .agr-theme-toggle__cloud-2 {
+          right: 22px;
+          bottom: 8px;
+          width: 14px;
+        }
+
+        .agr-theme-toggle__cloud-3 {
+          right: 4px;
+          bottom: 12px;
+          width: 12px;
+        }
+
+        .agr-theme-toggle__stars {
+          opacity: 0;
+          transition: opacity .35s ease;
+        }
+
+        .agr-theme-toggle.is-dark
+        .agr-theme-toggle__stars {
+          opacity: 1;
+        }
+
+        .agr-theme-toggle__star {
+          position: absolute;
+          width: 2px;
+          height: 2px;
+          border-radius: 50%;
+          background: #fff;
+          animation:
+            agr-star-pulse
+            2s infinite ease-in-out;
+        }
+
+        .agr-theme-toggle__star-1 {
+          top: 7px;
+          left: 13px;
+        }
+
+        .agr-theme-toggle__star-2 {
+          top: 17px;
+          left: 27px;
+          animation-delay: .5s;
+        }
+
+        .agr-theme-toggle__star-3 {
+          top: 8px;
+          left: 37px;
+          animation-delay: 1s;
+        }
+
+        @keyframes agr-star-pulse {
+          0%, 100% {
+            opacity: .35;
+            transform: scale(.85);
+          }
+
+          50% {
+            opacity: 1;
+            transform: scale(1.2);
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .agr-root *,
+          .agr-root *::before,
+          .agr-root *::after {
+            scroll-behavior: auto !important;
+            animation-duration: .01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: .01ms !important;
+          }
+        }
+      `}</style>
+
+      <div
+        lang={currentLang}
+        className={`agr-root ${
+          isDarkMode ? '' : 'agr-light'
+        }`}
+      >
+        <header className="agr-header sticky top-0 z-50 border-b border-[var(--agr-border)] backdrop-blur-xl">
+          <div className="mx-auto flex h-[68px] w-full max-w-[1560px] items-center justify-between gap-2 px-5 sm:px-8 lg:px-10 xl:px-12">
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="agr-focus shrink-0 rounded-lg border-0 bg-transparent p-1"
+              aria-label={c.home}
+            >
+              <img
+                src={logoImg}
+                alt="SAOLATEK"
+                className="h-8 w-auto object-contain sm:h-9"
+              />
+            </button>
+
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
               <SolutionLanguageSwitcher
                 currentLang={currentLang}
                 onChange={setCurrentLang}
                 ariaLabel={c.languageLabel}
               />
+
+              <button
+                type="button"
+                onClick={() =>
+                  setIsDarkMode(
+                    (current) => !current
+                  )
+                }
+                aria-label={themeLabel}
+                title={themeLabel}
+                aria-pressed={isDarkMode}
+                className={`agr-theme-toggle ${
+                  isDarkMode ? 'is-dark' : ''
+                }`}
+              >
+                <div className="agr-theme-toggle__clouds">
+                  <div className="agr-theme-toggle__cloud agr-theme-toggle__cloud-1" />
+                  <div className="agr-theme-toggle__cloud agr-theme-toggle__cloud-2" />
+                  <div className="agr-theme-toggle__cloud agr-theme-toggle__cloud-3" />
+                </div>
+
+                <div className="agr-theme-toggle__stars">
+                  <div className="agr-theme-toggle__star agr-theme-toggle__star-1" />
+                  <div className="agr-theme-toggle__star agr-theme-toggle__star-2" />
+                  <div className="agr-theme-toggle__star agr-theme-toggle__star-3" />
+                </div>
+
+                <div className="agr-theme-toggle__thumb" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/')}
+                className="agr-focus hidden h-10 items-center gap-2 rounded-lg border border-[var(--agr-border)] bg-transparent px-3.5 text-sm font-semibold text-[var(--agr-muted)] transition-colors hover:text-[var(--agr-ink)] sm:inline-flex"
+              >
+                <ArrowLeft size={15} />
+                {c.home}
+              </button>
+
+              <button
+                type="button"
+                onClick={openDemo}
+                disabled={isDemoLoading}
+                className="agr-focus inline-flex h-10 min-w-10 items-center justify-center gap-2 rounded-lg bg-[var(--agr-accent)] px-3.5 text-sm font-bold text-[var(--agr-cta-ink)] transition-colors hover:bg-[var(--agr-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label={c.demo}
+              >
+                <span className="hidden md:inline">
+                  {isDemoLoading
+                    ? themeCopy.demoLoading
+                    : c.demo}
+                </span>
+
+                {isDemoLoading ? (
+                  <Loader2
+                    size={15}
+                    className="animate-spin"
+                  />
+                ) : (
+                  <ArrowRight size={15} />
+                )}
+              </button>
             </div>
-
-            <button
-              type="button"
-              onClick={() => navigate('/')}
-              className="hidden h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-slate-300 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-white sm:inline-flex"
-            >
-              <ArrowLeft size={16} />
-              {c.home}
-            </button>
-
-            <button
-              type="button"
-              onClick={openDemo}
-              disabled={isDemoLoading}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-400 px-4 text-sm font-bold text-[#04110c] transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50 sm:h-10"
-            >
-              <span className="hidden sm:inline">{c.demo}</span>
-              <ArrowRight size={15} />
-            </button>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <main>
-        <section className="relative overflow-hidden border-b border-white/10">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(16,185,129,.12),transparent_34%),radial-gradient(circle_at_86%_70%,rgba(14,165,233,.08),transparent_30%)]" />
+        <main>
+          {/* HERO */}
+          <section className="border-b border-[var(--agr-border)] bg-[var(--agr-bg)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-16 lg:px-10 lg:py-20 xl:px-12">
+              <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(420px,.82fr)_minmax(0,1.18fr)] lg:items-center lg:gap-16">
+                <div className="min-w-0">
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--agr-accent)]">
+                    {c.eyebrow}
+                  </div>
 
-          <div className="relative mx-auto grid max-w-[1360px] grid-cols-1 gap-10 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,.44fr)_minmax(0,.56fr)] lg:items-center lg:gap-14 lg:px-12 lg:py-20">
-            <div className="min-w-0">
-              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1.5 text-[11px] font-bold tracking-[.14em] text-emerald-300">
-                <Sprout size={14} />
-                {c.eyebrow}
+                  <h1 className="mt-5 max-w-[13ch] text-[40px] font-semibold leading-[1.02] tracking-[-.045em] sm:text-[50px] lg:text-[62px] xl:text-[68px]">
+                    {c.heroTitle1}
+                    <span className="block text-[var(--agr-accent)]">
+                      {c.heroTitle2}
+                    </span>
+                  </h1>
+
+                  <p className="mt-6 max-w-[60ch] text-base leading-7 text-[var(--agr-muted)] sm:text-lg sm:leading-8">
+                    {c.heroBody}
+                  </p>
+
+                  <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={openDemo}
+                      disabled={isDemoLoading}
+                      className="agr-focus inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[var(--agr-accent)] px-6 text-sm font-bold text-[var(--agr-cta-ink)] transition-colors hover:bg-[var(--agr-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isDemoLoading ? (
+                        <>
+                          <Loader2
+                            size={15}
+                            className="animate-spin"
+                          />
+                          {themeCopy.demoLoading}
+                        </>
+                      ) : (
+                        <>
+                          {c.openDemo3D}
+                          <ArrowRight size={15} />
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        navigate('/platform/3d-gis')
+                      }
+                      className="agr-focus inline-flex h-12 items-center justify-center rounded-lg border border-[var(--agr-border)] bg-transparent px-6 text-sm font-semibold text-[var(--agr-ink)] transition-colors hover:border-[var(--agr-border-strong)]"
+                    >
+                      {c.platformLink}
+                    </button>
+                  </div>
+                </div>
+
+                <figure className="min-w-0">
+                  <div className="agr-media overflow-hidden rounded-xl border border-[var(--agr-border)] bg-black sm:rounded-2xl">
+                    <img
+                      src={agricultureHeroImage}
+                      alt={c.fieldCapture}
+                      className="aspect-[16/10] w-full object-cover"
+                      loading="eager"
+                    />
+                  </div>
+
+                  <figcaption className="mt-4 text-center text-xs leading-5 text-[var(--agr-muted)]">
+                    {c.heroCaption}
+                  </figcaption>
+                </figure>
+              </div>
+            </div>
+          </section>
+
+          {/* FIELD-TO-PROJECT JOURNEY */}
+          <section className="border-b border-[var(--agr-border)] bg-[var(--agr-bg-2)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-[72px] lg:px-10 lg:py-20 xl:px-12">
+              <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,.36fr)_minmax(0,.64fr)] lg:gap-16 xl:gap-20">
+                <div>
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--agr-accent)]">
+                    {c.flowEyebrow}
+                  </div>
+
+                  <h2 className="mt-4 max-w-[17ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                    {c.flowTitle}
+                  </h2>
+
+                  <p className="mt-5 max-w-[560px] text-base leading-7 text-[var(--agr-muted)]">
+                    {c.flowBody}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-x-10 lg:grid-cols-2">
+                  {c.flowItems.map((item) => (
+                    <article
+                      key={item.title}
+                      className="border-t border-[var(--agr-border)] py-6"
+                    >
+                      <h3 className="text-lg font-semibold">
+                        {item.title}
+                      </h3>
+
+                      <p className="mt-3 text-sm leading-7 text-[var(--agr-muted)]">
+                        {item.body}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* PROJECT DATA SHOWCASE */}
+          <section className="border-b border-[var(--agr-border)] bg-[var(--agr-bg)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-[72px] lg:px-10 lg:py-20 xl:px-12">
+              <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,.62fr)_minmax(0,.38fr)] lg:items-start lg:gap-16">
+                <figure className="min-w-0">
+                  <div className="agr-media overflow-hidden rounded-xl border border-[var(--agr-border)] bg-black sm:rounded-2xl">
+                    <img
+                      src={agricultureOverviewImage}
+                      alt={c.surveyContext}
+                      className="aspect-[4/3] w-full object-cover"
+                      loading="lazy"
+                    />
+                  </div>
+
+                  <figcaption className="mt-4 text-center text-xs leading-5 text-[var(--agr-muted)]">
+                    {c.overviewCaption}
+                  </figcaption>
+                </figure>
+
+                <div>
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--agr-accent)]">
+                    {c.dataEyebrow}
+                  </div>
+
+                  <h2 className="mt-4 max-w-[17ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                    {c.dataTitle}
+                  </h2>
+
+                  <p className="mt-5 max-w-[600px] text-base leading-7 text-[var(--agr-muted)]">
+                    {c.dataBody}
+                  </p>
+
+                  <div className="mt-8">
+                    {c.dataItems.map((item) => (
+                      <article
+                        key={item.title}
+                        className="border-t border-[var(--agr-border)] py-5"
+                      >
+                        <h3 className="text-base font-semibold">
+                          {item.title}
+                        </h3>
+
+                        <p className="mt-2 text-sm leading-7 text-[var(--agr-muted)]">
+                          {item.body}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* MEASUREMENT BAND */}
+          <section className="border-b border-[var(--agr-border)] bg-[var(--agr-bg-2)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-[72px] lg:px-10 lg:py-20 xl:px-12">
+              <div className="max-w-[980px]">
+                <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--agr-accent)]">
+                  {c.measureEyebrow}
+                </div>
+
+                <h2 className="mt-4 max-w-[22ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                  {c.measureTitle}
+                </h2>
+
+                <p className="mt-5 max-w-[760px] text-base leading-7 text-[var(--agr-muted)]">
+                  {c.measureBody}
+                </p>
               </div>
 
-              <h1 className="mt-5 max-w-[13ch] text-[40px] font-semibold leading-[1.03] tracking-[-.045em] sm:text-[50px] lg:text-[60px]">
-                {c.heroTitle1}
-                <span className="block text-emerald-400">{c.heroTitle2}</span>
-              </h1>
+              <div className="mt-10 grid grid-cols-1 border-y border-[var(--agr-border)] lg:grid-cols-3">
+                {c.measureItems.map((item) => (
+                  <article
+                    key={item.title}
+                    className="border-b border-[var(--agr-border)] py-6 lg:border-b-0 lg:border-r lg:px-8 lg:first:pl-0 lg:last:border-r-0 lg:last:pr-0"
+                  >
+                    <h3 className="text-lg font-semibold">
+                      {item.title}
+                    </h3>
 
-              <p className="mt-6 max-w-[60ch] text-base leading-7 text-slate-300 sm:text-lg sm:leading-8">
-                {c.heroBody}
-              </p>
+                    <p className="mt-2 text-sm leading-7 text-[var(--agr-muted)]">
+                      {item.body}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </section>
 
-              <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+          {/* PROJECT OPERATING VALUE */}
+          <section className="border-b border-[var(--agr-border)] bg-[var(--agr-bg)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-[72px] lg:px-10 lg:py-20 xl:px-12">
+              <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,.42fr)_minmax(0,.58fr)] lg:gap-16 xl:gap-20">
+                <div>
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--agr-accent)]">
+                    {c.valueEyebrow}
+                  </div>
+
+                  <h2 className="mt-4 max-w-[18ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                    {c.valueTitle}
+                  </h2>
+
+                  <p className="mt-5 max-w-[560px] text-base leading-7 text-[var(--agr-muted)]">
+                    {c.valueBody}
+                  </p>
+                </div>
+
+                <div className="border-y border-[var(--agr-border)]">
+                  {c.valueItems.map((item) => (
+                    <div
+                      key={item}
+                      className="border-b border-[var(--agr-border)] py-5 text-sm leading-7 text-[var(--agr-muted)] last:border-b-0"
+                    >
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* CTA */}
+          <section className="bg-[var(--agr-bg-2)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-16 lg:px-10 lg:py-[72px] xl:px-12">
+              <div className="grid grid-cols-1 gap-8 border-y border-[var(--agr-border)] py-10 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                <div>
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--agr-accent)]">
+                    {c.finalEyebrow}
+                  </div>
+
+                  <h2 className="mt-4 max-w-[24ch] text-[28px] font-semibold leading-[1.12] tracking-[-.035em] md:text-[36px]">
+                    {c.finalTitle}
+                  </h2>
+
+                  <p className="mt-4 max-w-[720px] text-base leading-7 text-[var(--agr-muted)]">
+                    {c.finalBody}
+                  </p>
+                </div>
+
                 <button
                   type="button"
                   onClick={openDemo}
                   disabled={isDemoLoading}
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-emerald-400 px-6 text-sm font-bold text-[#04110c] transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="agr-focus inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[var(--agr-accent)] px-6 text-sm font-bold text-[var(--agr-cta-ink)] transition-colors hover:bg-[var(--agr-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                 >
-                  {c.openDemo3D}
-                  <ArrowRight size={16} />
+                  {isDemoLoading ? (
+                    <>
+                      <Loader2
+                        size={15}
+                        className="animate-spin"
+                      />
+                      {themeCopy.demoLoading}
+                    </>
+                  ) : (
+                    <>
+                      {c.finalButton}
+                      <ArrowRight size={15} />
+                    </>
+                  )}
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => navigate('/platform/3d-gis')}
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-white/12 bg-white/[0.04] px-6 text-sm font-semibold text-white transition hover:bg-white/[0.07]"
-                >
-                  {c.platformLink}
-                </button>
-              </div>
-
-              <div className="mt-8 grid max-w-[620px] grid-cols-1 gap-2 sm:grid-cols-3">
-                {c.heroTags.map((item) => (
-                  <div
-                    key={item}
-                    className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3.5 py-3 text-xs font-semibold text-slate-300"
-                  >
-                    <Check size={14} className="shrink-0 text-emerald-400" />
-                    {item}
-                  </div>
-                ))}
               </div>
             </div>
+          </section>
+        </main>
 
-            <figure className="min-w-0">
-              <div className="group relative overflow-hidden rounded-[28px] border border-white/10 bg-black shadow-[0_26px_80px_rgba(0,0,0,.34)]">
-                <img
-                  src={agricultureHeroImage}
-                  alt={c.fieldCapture}
-                  className="aspect-[16/11] w-full object-cover transition duration-700 group-hover:scale-[1.015]"
-                  loading="eager"
-                />
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/15 to-transparent" />
+        <footer className="border-t border-[var(--agr-border)] bg-[var(--agr-bg-2)]">
+          <div className="mx-auto flex w-full max-w-[1560px] flex-col gap-3 px-5 py-6 text-sm text-[var(--agr-muted)] sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-10 xl:px-12">
+            <div className="flex items-center gap-3">
+              <img
+                src={logoImg}
+                alt="SAOLATEK"
+                className="h-7 w-auto"
+              />
 
-                <div className="absolute left-4 top-4 rounded-full border border-white/15 bg-black/45 px-3 py-1.5 text-[10px] font-bold tracking-[.12em] text-emerald-300 backdrop-blur">
-                  {c.fieldCapture}
-                </div>
+              <span>
+                {c.footer}
+              </span>
+            </div>
 
-                <figcaption className="absolute inset-x-0 bottom-0 p-5 sm:p-6">
-                  <div className="mb-2 flex items-center gap-2 text-[10px] font-bold tracking-[.14em] text-emerald-300">
-                    <MapPinned size={13} />
-                    {c.uavSurvey}
-                  </div>
-                  <p className="max-w-[520px] text-sm font-medium leading-6 text-white sm:text-base">
-                    {c.heroCaption}
-                  </p>
-                </figcaption>
-              </div>
-            </figure>
+            <span>
+              © 2026 SAOLATEK
+            </span>
           </div>
-        </section>
-
-        <section className="border-b border-white/10 bg-[#07101c]">
-          <div className="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16 lg:px-12">
-            <div className="max-w-[820px]">
-              <div className="text-xs font-bold tracking-[.16em] text-emerald-400">
-                {c.flowEyebrow}
-              </div>
-              <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[40px]">
-                {c.flowTitle}
-              </h2>
-              <p className="mt-4 text-base leading-7 text-slate-400">{c.flowBody}</p>
-            </div>
-
-            <div className="mt-9 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-              {c.flowItems.map((item, index) => (
-                <article
-                  key={item.title}
-                  className="rounded-2xl border border-white/10 bg-[#09131f] p-5 transition hover:-translate-y-0.5 hover:border-emerald-300/25"
-                >
-                  <div className="text-[11px] font-bold tracking-[.16em] text-emerald-400">
-                    0{index + 1}
-                  </div>
-                  <h3 className="mt-5 text-lg font-semibold">{item.title}</h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">{item.body}</p>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="border-b border-white/10 bg-[#050914]">
-          <div className="mx-auto grid max-w-[1320px] grid-cols-1 gap-10 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,.56fr)_minmax(0,.44fr)] lg:items-center lg:gap-14 lg:px-12 lg:py-20">
-            <figure className="min-w-0">
-              <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-black shadow-[0_22px_65px_rgba(0,0,0,.3)]">
-                <img
-                  src={agricultureOverviewImage}
-                  alt={c.surveyContext}
-                  className="aspect-[16/10] w-full object-cover"
-                  loading="lazy"
-                />
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-
-                <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-4">
-                  <div>
-                    <div className="text-[10px] font-bold tracking-[.14em] text-emerald-300">
-                      {c.surveyContext}
-                    </div>
-                    <p className="mt-1 text-sm font-medium text-white">
-                      {c.overviewCaption}
-                    </p>
-                  </div>
-                  <span className="hidden rounded-xl border border-white/15 bg-black/40 p-3 text-emerald-300 backdrop-blur sm:flex">
-                    <Layers3 size={18} />
-                  </span>
-                </div>
-              </div>
-            </figure>
-
-            <div>
-              <div className="text-xs font-bold tracking-[.16em] text-emerald-400">
-                {c.dataEyebrow}
-              </div>
-              <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[40px]">
-                {c.dataTitle}
-              </h2>
-              <p className="mt-4 text-base leading-7 text-slate-400">{c.dataBody}</p>
-
-              <div className="mt-7 space-y-3">
-                {c.dataItems.map((item, index) => {
-                  const Icon = DATA_ICONS[index];
-                  return (
-                    <article
-                      key={item.title}
-                      className="grid grid-cols-[42px_minmax(0,1fr)] gap-4 rounded-xl border border-white/10 bg-[#09131f] p-4"
-                    >
-                      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-400/10 text-emerald-300">
-                        <Icon size={18} />
-                      </span>
-                      <div>
-                        <h3 className="text-base font-semibold">{item.title}</h3>
-                        <p className="mt-1 text-sm leading-6 text-slate-400">{item.body}</p>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="border-b border-white/10 bg-[#07101c]">
-          <div className="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16 lg:px-12">
-            <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,.38fr)_minmax(0,.62fr)] lg:gap-14">
-              <div>
-                <div className="text-xs font-bold tracking-[.16em] text-sky-400">
-                  {c.measureEyebrow}
-                </div>
-                <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[40px]">
-                  {c.measureTitle}
-                </h2>
-                <p className="mt-4 text-base leading-7 text-slate-400">{c.measureBody}</p>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                {c.measureItems.map((item, index) => {
-                  const Icon = MEASURE_ICONS[index];
-                  return (
-                    <article
-                      key={item.title}
-                      className="rounded-2xl border border-white/10 bg-[#09131f] p-5 transition hover:border-emerald-300/25"
-                    >
-                      <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-300">
-                        <Icon size={19} />
-                      </span>
-                      <h3 className="mt-5 text-lg font-semibold">{item.title}</h3>
-                      <p className="mt-2 text-sm leading-6 text-slate-400">{item.body}</p>
-                    </article>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="border-b border-white/10 bg-[#050914]">
-          <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-10 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,.42fr)_minmax(0,.58fr)] lg:gap-14 lg:px-12">
-            <div>
-              <div className="text-xs font-bold tracking-[.16em] text-emerald-400">
-                {c.valueEyebrow}
-              </div>
-              <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[40px]">
-                {c.valueTitle}
-              </h2>
-              <p className="mt-4 text-base leading-7 text-slate-400">{c.valueBody}</p>
-            </div>
-
-            <div className="overflow-hidden rounded-[24px] border border-white/10 bg-[#09131f]">
-              <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-                <div className="flex items-center gap-2 text-sm font-semibold">
-                  <Workflow size={17} className="text-emerald-400" />
-                  {c.workflowLabel}
-                </div>
-                <span className="text-[10px] font-bold tracking-[.12em] text-slate-500">
-                  WEB GIS 3D
-                </span>
-              </div>
-
-              <ul className="grid grid-cols-1 gap-px bg-white/10 sm:grid-cols-2">
-                {c.valueItems.map((item) => (
-                  <li
-                    key={item}
-                    className="flex gap-3 bg-[#09131f] px-5 py-5 text-sm leading-6 text-slate-300"
-                  >
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-400/10 text-emerald-300">
-                      <Check size={12} />
-                    </span>
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </section>
-
-        <section className="relative overflow-hidden bg-[#07101c]">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_100%,rgba(16,185,129,.13),transparent_42%)]" />
-
-          <div className="relative mx-auto grid max-w-[1160px] grid-cols-1 gap-7 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:px-12">
-            <div>
-              <div className="flex items-center gap-2 text-xs font-bold tracking-[.14em] text-emerald-400">
-                <Share2 size={14} />
-                {c.finalEyebrow}
-              </div>
-              <h2 className="mt-4 max-w-[760px] text-[28px] font-semibold leading-tight tracking-[-.035em] md:text-[38px]">
-                {c.finalTitle}
-              </h2>
-              <p className="mt-4 max-w-[720px] text-base leading-7 text-slate-400">
-                {c.finalBody}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={openDemo}
-              disabled={isDemoLoading}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-400 px-6 text-sm font-bold text-[#04110c] transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-            >
-              {c.finalButton}
-              <ArrowRight size={16} />
-            </button>
-          </div>
-        </section>
-      </main>
-
-      <footer className="border-t border-white/10 bg-[#03060d]">
-        <div className="mx-auto flex max-w-[1440px] flex-col gap-4 px-5 py-7 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between md:px-8 lg:px-12">
-          <div className="flex items-center gap-3">
-            <img src={logoImg} alt="SAOLATEK" className="h-7 w-auto object-contain" />
-            <span>{c.footer}</span>
-          </div>
-          <span>© 2026 SAOLATEK</span>
-        </div>
-      </footer>
-    </div>
+        </footer>
+      </div>
+    </>
   );
 };
 

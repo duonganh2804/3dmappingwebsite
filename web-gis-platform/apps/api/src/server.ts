@@ -435,97 +435,105 @@ app.put('/api/projects/:id', authenticateToken, requireProjectRole('EDITOR'), as
 // API xóa dự án
 // ── 3. DEMO LEADS & CONTACT SALES ROUTES ──
 
-const getConfiguredDemoProject = async () => {
-  const demoProjectId = process.env.DEMO_PROJECT_ID?.trim();
-  if (!demoProjectId) return null;
-  return prisma.project.findUnique({ where: { id: demoProjectId } });
-};
-
 // Trạng thái Demo access của user hiện tại.
+// Flow mới:
+// - Demo Showcase là các project public.
+// - User đã gửi Book Demo ít nhất một lần => có Demo access.
+// - Không còn phụ thuộc DEMO_PROJECT_ID / ProjectMember.
 app.get('/api/demo-access', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const demoProject = await getConfiguredDemoProject();
-    if (!demoProject) {
-      return res.status(503).json({
-        success: false,
-        hasAccess: false,
-        message: 'Demo project chưa được cấu hình hoặc không tồn tại.'
-      });
+    if (req.user?.role === 'SUPERADMIN') {
+      return res.json({ success: true, hasAccess: true });
     }
 
-    if (req.user?.role === 'SUPERADMIN' || demoProject.createdById === req.user?.id) {
-      return res.json({ success: true, hasAccess: true, demoProjectId: demoProject.id });
-    }
+    const accountEmail = req.user!.email.trim().toLowerCase();
 
-    const membership = await prisma.projectMember.findUnique({
-      where: { projectId_userId: { projectId: demoProject.id, userId: req.user!.id } }
+    const existingLead = await prisma.demoLead.findFirst({
+      where: {
+        email: accountEmail
+      },
+      select: { id: true }
     });
 
     res.json({
       success: true,
-      hasAccess: Boolean(membership),
-      demoProjectId: membership ? demoProject.id : undefined
+      hasAccess: Boolean(existingLead)
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, hasAccess: false, message: error.message });
+    res.status(500).json({
+      success: false,
+      hasAccess: false,
+      message: error.message
+    });
   }
 });
 
-// Gửi yêu cầu Demo và cấp quyền VIEWER cho project Demo chính thức.
+// Gửi yêu cầu Demo.
+// Sau khi đăng ký thành công frontend sẽ chuyển về /dashboard,
+// nơi user tự chọn một trong các project Demo Showcase (isPublic = true).
 app.post('/api/demo-leads', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const { email, fullName, jobTitle, company, phone, message, source } = req.body;
+    const { fullName, jobTitle, company, phone, message, source } = req.body;
 
-    if (!email || !message) {
-      return res.status(400).json({ error: 'Vui lòng cung cấp Email và Nội dung yêu cầu' });
+    if (!message || !String(message).trim()) {
+      return res.status(400).json({
+        error: 'Vui lòng cung cấp Nội dung yêu cầu'
+      });
     }
 
-    const demoProject = await getConfiguredDemoProject();
-    if (!demoProject) {
-      return res.status(503).json({ error: 'Demo project chưa được cấu hình hoặc không tồn tại.' });
+    const accountEmail = req.user!.email.trim().toLowerCase();
+
+    // Nếu user đã đăng ký Demo trước đó thì không tạo lead trùng.
+    const existingLead = await prisma.demoLead.findFirst({
+      where: { email: accountEmail }
+    });
+
+    if (existingLead) {
+      return res.json({
+        success: true,
+        hasAccess: true,
+        message: 'Bạn đã đăng ký Demo trước đó.',
+        lead: existingLead
+      });
     }
 
-    const [lead] = await prisma.$transaction([
-      prisma.demoLead.create({
-        data: {
-          email,
-          fullName: fullName || null,
-          jobTitle: jobTitle || null,
-          company: company || null,
-          phone: phone || null,
-          message,
-          source: source || null,
-          status: 'NEW'
-        }
-      }),
-      prisma.projectMember.upsert({
-        where: { projectId_userId: { projectId: demoProject.id, userId: req.user!.id } },
-        update: {},
-        create: { projectId: demoProject.id, userId: req.user!.id, role: 'VIEWER' }
-      })
-    ]);
+    const lead = await prisma.demoLead.create({
+      data: {
+        email: accountEmail,
+        fullName: fullName || req.user?.fullName || null,
+        jobTitle: jobTitle || null,
+        company: company || null,
+        phone: phone || null,
+        message: String(message).trim(),
+        source: source || null,
+        status: 'NEW'
+      }
+    });
 
-    // 2. Gửi Email thông báo trực tiếp đến email công ty duongnguyen280403@gmail.com
+    // Gửi Email thông báo trực tiếp đến email công ty.
     sendLeadNotificationEmail({
-      email,
-      fullName,
+      email: accountEmail,
+      fullName: fullName || req.user?.fullName,
       jobTitle,
       company,
       phone,
-      message,
+      message: String(message).trim(),
       source
     }).catch(err => console.error('[Background Email Error]:', err));
 
     res.status(201).json({
       success: true,
       hasAccess: true,
-      demoProjectId: demoProject.id,
       message: 'Đăng ký Demo thành công.',
       lead
     });
   } catch (error: any) {
     console.error('Lỗi lưu Yêu cầu Demo:', error);
-    res.status(500).json({ error: error.message || 'Lỗi xử lý yêu cầu Demo' });
+    res.status(500).json({
+      success: false,
+      hasAccess: false,
+      error: error.message || 'Lỗi xử lý yêu cầu Demo'
+    });
   }
 });
 
@@ -586,4 +594,3 @@ app.delete('/api/admin/demo-leads/:id', authenticateToken, async (req: AuthReque
 app.listen(PORT, () => {
   console.log(`[API Server] Đang chạy tại http://localhost:${PORT}`);
 });
-

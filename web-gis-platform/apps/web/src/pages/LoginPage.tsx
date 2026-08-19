@@ -17,24 +17,19 @@ export const LoginPage: React.FC = () => {
     // vì vậy fetchDemoAccess() phía dưới có thể dùng token mới.
     setAuth(user, accessToken);
 
-    // Login bình thường: giữ behavior hiện tại.
+    // Login bình thường -> quay về trang chính.
     if (!cameFromDemo) {
-      navigate('/dashboard', { replace: true });
+      navigate('/', { replace: true });
       return;
     }
 
     // Login xuất phát từ nút Demo:
-    // - đã đăng ký Demo -> mở Demo luôn
+    // - đã đăng ký Demo -> vào Dashboard để tự chọn Demo Showcase
     // - chưa đăng ký    -> mở Book Demo
     const demoAccess = await fetchDemoAccess();
 
     if (demoAccess.success && demoAccess.hasAccess) {
-      navigate(
-        demoAccess.demoProjectId
-          ? `/viewer/${demoAccess.demoProjectId}`
-          : '/dashboard',
-        { replace: true }
-      );
+      navigate('/dashboard', { replace: true });
       return;
     }
 

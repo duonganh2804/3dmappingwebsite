@@ -1,29 +1,24 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   ArrowRight,
-  Box,
-  Check,
   ChevronDown,
   ChevronUp,
-  Cloud,
   Eye,
   EyeOff,
-  GripVertical,
-  Image as ImageIcon,
-  Layers3,
-  MousePointer2,
+  Loader2,
   RotateCcw,
-  ScanLine,
-  SlidersHorizontal,
 } from 'lucide-react';
 
 import logoImg from '../assets/logo.webp';
 import publicSurveyImage from '../assets/IMG_1074.jpg';
+
 import { SolutionLanguageSwitcher } from '../components/SolutionLanguageSwitcher';
 import { useLanguage, type Language } from '../hooks/useLanguage';
 import { useAuthStore } from '../store/useAuthStore';
+
+const THEME_STORAGE_KEY = 'saolatek_theme';
 
 type Item = {
   title: string;
@@ -42,14 +37,15 @@ type Copy = {
   languageLabel: string;
   home: string;
   demo: string;
+  demoLoading: string;
+  switchToLight: string;
+  switchToDark: string;
 
   eyebrow: string;
   heroTitle: string;
   heroBody: string;
-  heroNote: string;
   heroImageAlt: string;
   heroCaption: string;
-  heroBadge: string;
 
   layerEyebrow: string;
   layerTitle: string;
@@ -84,6 +80,7 @@ type Copy = {
   valueBody: string;
   values: string[];
 
+  finalEyebrow: string;
   finalTitle: string;
   finalBody: string;
   footer: string;
@@ -94,168 +91,188 @@ const COPY: Record<Language, Copy> = {
     languageLabel: 'Chọn ngôn ngữ',
     home: 'Trang chủ',
     demo: 'Đăng ký xem Demo',
+    demoLoading: 'Đang kiểm tra Demo...',
+    switchToLight: 'Chuyển sang giao diện sáng',
+    switchToDark: 'Chuyển sang giao diện tối',
 
     eyebrow: 'NỀN TẢNG · QUẢN LÝ LỚP DỮ LIỆU',
-    heroTitle: 'Quản lý nhiều lớp dữ liệu trong cùng một không gian 3D GIS',
+    heroTitle:
+      'Quản lý nhiều lớp dữ liệu trong cùng một project 3D GIS',
     heroBody:
-      'Tổ chức dữ liệu khảo sát theo từng lớp để người dùng có thể bật, tắt, điều chỉnh độ trong suốt và thay đổi thứ tự quan sát mà vẫn giữ nguyên bối cảnh không gian của dự án.',
-    heroNote:
-      'Ảnh minh họa sử dụng từ thư mục PUBLIC; phần điều khiển lớp bên dưới là mô phỏng tương tác front-end để minh họa luồng sử dụng.',
-    heroImageAlt: 'Đội khảo sát và thiết bị UAV trong quá trình thu thập dữ liệu hiện trường',
-    heroCaption: 'Thu thập dữ liệu hiện trường · UAV Survey',
-    heroBadge: 'PUBLIC DATA',
+      'Các lớp dữ liệu của project được tổ chức trong cùng một không gian để người dùng có thể bật, tắt, điều chỉnh độ trong suốt và thay đổi thứ tự hiển thị mà không rời khỏi khu vực đang quan sát.',
+    heroImageAlt:
+      'Đội khảo sát và thiết bị UAV trong quá trình thu thập dữ liệu hiện trường',
+    heroCaption:
+      'Thu thập dữ liệu hiện trường phục vụ project 3D Mapping',
 
     layerEyebrow: 'LỚP DỮ LIỆU',
-    layerTitle: 'Các lớp thường gặp trong một dự án 3D Mapping',
+    layerTitle:
+      'Các lớp có thể cùng tồn tại trong một project',
     layerBody:
-      'Tùy dữ liệu dự án, Viewer có thể tập trung nhiều lớp vào cùng một không gian để người dùng chuyển đổi góc nhìn mà không rời khỏi khu vực đang kiểm tra.',
+      'Tùy dữ liệu của từng project, Viewer có thể chứa Point Cloud, 3D Mesh và Orthophoto / DOM trong cùng một bối cảnh không gian.',
     layers: [
       {
         title: 'Point Cloud',
         description:
-          'Dữ liệu điểm 3D từ khảo sát LiDAR hoặc quy trình xử lý ảnh, phù hợp để kiểm tra cấu trúc không gian và cao độ.',
+          'Lớp dữ liệu điểm 3D dùng để quan sát cấu trúc không gian và vị trí của khu vực khảo sát.',
       },
       {
         title: '3D Mesh',
         description:
-          'Mô hình bề mặt có texture giúp quan sát hình dạng công trình, địa hình và hiện trạng trực quan hơn.',
+          'Khi project có dữ liệu Mesh, người dùng có thể quan sát mô hình bề mặt và hình dạng của khu vực.',
       },
       {
-        title: 'Ảnh DOM',
+        title: 'Orthophoto / DOM',
         description:
-          'Ảnh trực giao phục vụ đối chiếu mặt bằng, vị trí và ranh giới trong cùng bối cảnh dự án.',
+          'Khi project có ảnh trực giao, người dùng có thể đối chiếu vị trí và bố cục khu vực theo góc nhìn trên xuống.',
       },
     ],
 
-    interactiveEyebrow: 'MINH HỌA TƯƠNG TÁC',
-    interactiveTitle: 'Bật / tắt, điều chỉnh opacity và sắp xếp thứ tự lớp',
+    interactiveEyebrow: 'MINH HỌA ĐIỀU KHIỂN LỚP',
+    interactiveTitle:
+      'Bật / tắt, điều chỉnh opacity và thay đổi thứ tự hiển thị',
     interactiveBody:
-      'Thử trực tiếp panel bên phải. Mỗi thay đổi sẽ cập nhật phần minh họa ngay trên ảnh mà không tải lại trang.',
+      'Panel bên dưới mô phỏng cách người dùng thao tác với trạng thái hiển thị của từng lớp. Thay đổi được phản ánh ngay trong phần preview.',
     interactiveNote:
-      'Đây là mô phỏng giao diện quản lý lớp trên trang giới thiệu, không thay thế engine Cesium/Viewer thật. Khi tích hợp vào Viewer, cùng trạng thái này có thể được nối với visibility, alpha và layer order của dữ liệu thực.',
+      'Phần này là preview tương tác trên trang giới thiệu. Nó minh họa hành vi giao diện quản lý lớp, không phải Viewer dữ liệu thật.',
     panelTitle: 'Lớp dữ liệu',
     visibleLabel: 'Hiển thị',
-    opacityLabel: 'Độ trong suốt',
+    opacityLabel: 'Opacity',
     moveUpLabel: 'Đưa lớp lên trên',
     moveDownLabel: 'Đưa lớp xuống dưới',
     resetLabel: 'Đặt lại',
     layerNames: {
       pointCloud: 'Point Cloud',
       mesh: '3D Mesh',
-      dom: 'Ảnh DOM',
+      dom: 'Orthophoto / DOM',
     },
     layerMeta: {
-      pointCloud: 'Mô phỏng lớp điểm 3D',
-      mesh: 'Mô phỏng lớp bề mặt',
-      dom: 'Ảnh UAV / orthophoto',
+      pointCloud: 'Preview lớp điểm 3D',
+      mesh: 'Preview lớp bề mặt',
+      dom: 'Preview ảnh trực giao',
     },
 
     controlEyebrow: 'KIỂM SOÁT HIỂN THỊ',
-    controlTitle: 'Giữ quyền kiểm soát dữ liệu ngay trong Viewer',
+    controlTitle:
+      'Điều chỉnh lớp theo nội dung đang cần kiểm tra',
     controlBody:
-      'Thao tác lớp tập trung vào những việc người dùng thực sự cần khi kiểm tra dự án: nhìn đúng dữ liệu, đúng thứ tự và đúng mức độ hiển thị.',
+      'Thao tác lớp tập trung vào ba việc chính: chọn lớp cần quan sát, điều chỉnh mức hiển thị và thay đổi thứ tự giữa các lớp.',
     controls: [
       {
         title: 'Bật / tắt lớp',
         description:
-          'Tạm ẩn lớp không cần thiết để giảm nhiễu và tập trung vào nội dung đang kiểm tra.',
+          'Ẩn lớp không cần thiết để tập trung vào dữ liệu đang kiểm tra.',
       },
       {
         title: 'Điều chỉnh opacity',
         description:
-          'Giảm độ đậm của lớp phía trên để đối chiếu dữ liệu với lớp nằm bên dưới.',
+          'Giảm độ hiển thị của một lớp để quan sát lớp dữ liệu nằm phía dưới.',
       },
       {
-        title: 'Thay đổi thứ tự',
+        title: 'Thay đổi thứ tự lớp',
         description:
-          'Đưa lớp lên hoặc xuống để kiểm soát thứ tự hiển thị trong bối cảnh dự án.',
+          'Đưa lớp lên hoặc xuống để thay đổi thứ tự ưu tiên trong phần hiển thị.',
       },
     ],
 
     flowEyebrow: 'LUỒNG THAO TÁC',
-    flowTitle: 'Từ mở project đến lớp dữ liệu cần kiểm tra',
+    flowTitle:
+      'Từ project đến lớp dữ liệu cần quan sát',
     flowBody:
-      'Một luồng ngắn để người dùng nhanh chóng tập trung vào dữ liệu phù hợp với công việc hiện tại.',
+      'Người dùng giữ nguyên bối cảnh project trong khi thay đổi lớp dữ liệu phù hợp với nội dung đang kiểm tra.',
     flow: [
       {
         title: 'Mở project',
-        description: 'Truy cập đúng dự án và khu vực cần quan sát.',
+        description:
+          'Mở project và khu vực cần quan sát trong Viewer.',
       },
       {
-        title: 'Chọn lớp',
-        description: 'Xác định Point Cloud, 3D Mesh hoặc DOM cần sử dụng.',
+        title: 'Chọn lớp dữ liệu',
+        description:
+          'Chọn Point Cloud, 3D Mesh hoặc Orthophoto / DOM khi project có lớp tương ứng.',
       },
       {
         title: 'Tinh chỉnh hiển thị',
-        description: 'Bật/tắt, thay đổi opacity và thứ tự lớp theo mục tiêu kiểm tra.',
+        description:
+          'Bật / tắt lớp, thay đổi opacity và thứ tự hiển thị.',
       },
       {
         title: 'Đối chiếu dữ liệu',
-        description: 'Quan sát cùng một khu vực trong bối cảnh không gian không đổi.',
+        description:
+          'Quan sát cùng một khu vực mà không thay đổi bối cảnh không gian của project.',
       },
     ],
 
-    valueEyebrow: 'GIÁ TRỊ SỬ DỤNG',
-    valueTitle: 'Tập trung dữ liệu dự án trong một không gian quan sát',
+    valueEyebrow: 'TRONG WORKFLOW 3D GIS',
+    valueTitle:
+      'Giữ dữ liệu project trong cùng một bối cảnh quan sát',
     valueBody:
-      'Quản lý theo lớp giúp người dùng giảm nhiễu thị giác, đối chiếu dữ liệu nhanh hơn và duy trì đúng vị trí khi chuyển giữa các nguồn dữ liệu.',
+      'Quản lý theo lớp giúp người dùng thay đổi dữ liệu đang hiển thị mà vẫn giữ nguyên vị trí và góc quan sát của project.',
     values: [
-      'Tập trung đúng lớp dữ liệu cần kiểm tra',
-      'Giảm nhiễu khi nhiều lớp cùng tồn tại',
-      'Đối chiếu Point Cloud, 3D Mesh và DOM',
-      'Điều chỉnh mức hiển thị mà không đổi vị trí quan sát',
-      'Duy trì một workflow trực tiếp trên trình duyệt',
+      'Tập trung vào lớp dữ liệu cần kiểm tra',
+      'Giảm nhiễu khi nhiều lớp cùng được hiển thị',
+      'Đối chiếu Point Cloud, 3D Mesh và Orthophoto / DOM khi project có dữ liệu tương ứng',
+      'Điều chỉnh mức hiển thị mà không thay đổi khu vực đang quan sát',
+      'Thực hiện thao tác trực tiếp trong môi trường Web GIS',
     ],
 
-    finalTitle: 'Trải nghiệm quản lý lớp dữ liệu trong 3D GIS',
+    finalEyebrow: 'DATA LAYERS · 3D GIS',
+    finalTitle:
+      'Trải nghiệm quản lý lớp dữ liệu trong project 3D GIS',
     finalBody:
-      'Đăng ký Demo để xem cách SAOLATEK tổ chức, hiển thị và đối chiếu các lớp dữ liệu khảo sát trong một project thực tế.',
-    footer: 'UAV · LiDAR · Data Layers · 3D GIS',
+      'Đăng ký Demo để xem cách các lớp dữ liệu được tổ chức, bật / tắt và đối chiếu trong cùng một project.',
+    footer:
+      'Point Cloud · 3D Mesh · Orthophoto / DOM · Data Layers · 3D GIS',
   },
 
   en: {
     languageLabel: 'Select language',
     home: 'Home',
     demo: 'Request Demo Access',
+    demoLoading: 'Checking Demo...',
+    switchToLight: 'Switch to light mode',
+    switchToDark: 'Switch to dark mode',
 
     eyebrow: 'PLATFORM · DATA LAYER MANAGEMENT',
-    heroTitle: 'Manage multiple data layers in one 3D GIS workspace',
+    heroTitle:
+      'Manage multiple data layers inside one 3D GIS project',
     heroBody:
-      'Organize survey data by layer so users can show, hide, adjust opacity, and change visual order while preserving the spatial context of the project.',
-    heroNote:
-      'The image comes from the PUBLIC folder; the layer controls below are an interactive front-end simulation of the workflow.',
-    heroImageAlt: 'Survey team and UAV equipment during field data collection',
-    heroCaption: 'Field data collection · UAV Survey',
-    heroBadge: 'PUBLIC DATA',
+      'Project data layers stay in the same workspace so users can show, hide, adjust opacity, and change display order without leaving the area being inspected.',
+    heroImageAlt:
+      'Survey team and UAV equipment during field data collection',
+    heroCaption:
+      'Field data collection for a 3D Mapping project',
 
     layerEyebrow: 'DATA LAYERS',
-    layerTitle: 'Common layers in a 3D Mapping project',
+    layerTitle:
+      'Layers that can coexist inside one project',
     layerBody:
-      'Depending on project data, the Viewer can bring multiple layers into one workspace so users can change the view without leaving the area under inspection.',
+      'Depending on project data, the Viewer can contain Point Cloud, 3D Mesh, and Orthophoto / DOM layers in the same spatial context.',
     layers: [
       {
         title: 'Point Cloud',
         description:
-          '3D point data from LiDAR or photogrammetry workflows for reviewing spatial structure and elevation.',
+          'A 3D point layer used to review spatial structure and location across the surveyed area.',
       },
       {
         title: '3D Mesh',
         description:
-          'A textured surface model that makes structures, terrain, and current site conditions easier to interpret.',
+          'When Mesh data is available, users can inspect the surface model and the shape of the area.',
       },
       {
-        title: 'DOM Imagery',
+        title: 'Orthophoto / DOM',
         description:
-          'Orthophoto imagery for comparing plan view, location, and boundaries within the same project context.',
+          'When orthographic imagery is available, users can compare locations and site layout from a top-down view.',
       },
     ],
 
-    interactiveEyebrow: 'INTERACTIVE PREVIEW',
-    interactiveTitle: 'Toggle visibility, adjust opacity, and reorder layers',
+    interactiveEyebrow: 'LAYER CONTROL PREVIEW',
+    interactiveTitle:
+      'Toggle visibility, adjust opacity, and change display order',
     interactiveBody:
-      'Use the panel on the right. Each change updates the visualization immediately without reloading the page.',
+      'The panel below simulates how users change the display state of each layer. Changes are reflected immediately in the preview.',
     interactiveNote:
-      'This is a marketing-page simulation of layer controls, not the live Cesium/Viewer engine. In the Viewer, the same state can be connected to real visibility, alpha, and layer-order controls.',
+      'This is an interactive preview on the product page. It demonstrates layer-management interface behavior and is not the live project Viewer.',
     panelTitle: 'Data layers',
     visibleLabel: 'Visible',
     opacityLabel: 'Opacity',
@@ -265,116 +282,135 @@ const COPY: Record<Language, Copy> = {
     layerNames: {
       pointCloud: 'Point Cloud',
       mesh: '3D Mesh',
-      dom: 'DOM Imagery',
+      dom: 'Orthophoto / DOM',
     },
     layerMeta: {
-      pointCloud: '3D point overlay simulation',
-      mesh: 'Surface overlay simulation',
-      dom: 'UAV / orthophoto image',
+      pointCloud: '3D point-layer preview',
+      mesh: 'Surface-layer preview',
+      dom: 'Orthographic-image preview',
     },
 
-    controlEyebrow: 'VISIBILITY CONTROL',
-    controlTitle: 'Keep control of project data inside the Viewer',
+    controlEyebrow: 'DISPLAY CONTROL',
+    controlTitle:
+      'Adjust layers for the current inspection task',
     controlBody:
-      'Layer controls focus on practical inspection tasks: showing the right data, in the right order, with the right visual intensity.',
+      'Layer operations focus on three tasks: selecting the data to view, adjusting its display level, and changing the order between layers.',
     controls: [
       {
-        title: 'Show / hide layers',
+        title: 'Show / hide a layer',
         description:
-          'Temporarily hide unnecessary layers to reduce clutter and focus on the current inspection task.',
+          'Hide unnecessary data so the current layer remains easier to inspect.',
       },
       {
         title: 'Adjust opacity',
         description:
-          'Reduce the intensity of an upper layer so the data below can remain visible for comparison.',
+          'Reduce the visibility of one layer so data underneath remains visible.',
       },
       {
         title: 'Change layer order',
         description:
-          'Move a layer up or down to control its visual priority in the project context.',
+          'Move a layer up or down to change its display priority.',
       },
     ],
 
     flowEyebrow: 'WORKFLOW',
-    flowTitle: 'From opening a project to the layer you need',
+    flowTitle:
+      'From the project to the data layer you need',
     flowBody:
-      'A short workflow for quickly focusing on the data that matches the current inspection task.',
+      'Users preserve the project context while switching to the data layer that matches the current inspection task.',
     flow: [
       {
         title: 'Open the project',
-        description: 'Access the correct project and the area that needs inspection.',
+        description:
+          'Open the project and the area that needs inspection in the Viewer.',
       },
       {
-        title: 'Choose a layer',
-        description: 'Identify the Point Cloud, 3D Mesh, or DOM layer you need.',
+        title: 'Choose a data layer',
+        description:
+          'Select Point Cloud, 3D Mesh, or Orthophoto / DOM when the corresponding layer exists in the project.',
       },
       {
-        title: 'Tune visibility',
-        description: 'Toggle visibility, change opacity, and adjust layer order.',
+        title: 'Tune the display',
+        description:
+          'Toggle visibility, change opacity, and adjust display order.',
       },
       {
         title: 'Compare data',
-        description: 'Review the same area without losing its spatial context.',
+        description:
+          'Review the same area without changing the project spatial context.',
       },
     ],
 
-    valueEyebrow: 'PRACTICAL VALUE',
-    valueTitle: 'Keep project data together in one viewing workspace',
+    valueEyebrow: 'IN THE 3D GIS WORKFLOW',
+    valueTitle:
+      'Keep project data in one viewing context',
     valueBody:
-      'Layer-based management reduces visual clutter, speeds up comparison, and preserves location while switching between data sources.',
+      'Layer management lets users change the data being displayed while preserving the project location and camera context.',
     values: [
-      'Focus on the layer relevant to the current task',
-      'Reduce clutter when several layers exist',
-      'Compare Point Cloud, 3D Mesh, and DOM',
-      'Adjust visibility without changing camera context',
-      'Keep the workflow directly in the browser',
+      'Focus on the layer relevant to the inspection task',
+      'Reduce clutter when several layers are visible',
+      'Compare Point Cloud, 3D Mesh, and Orthophoto / DOM when corresponding project data exists',
+      'Adjust display level without changing the area being viewed',
+      'Work directly inside the Web GIS environment',
     ],
 
-    finalTitle: 'Explore data-layer management in 3D GIS',
+    finalEyebrow: 'DATA LAYERS · 3D GIS',
+    finalTitle:
+      'Explore data-layer management inside a 3D GIS project',
     finalBody:
-      'Request a Demo to see how SAOLATEK organizes, displays, and compares survey-data layers in a real project.',
-    footer: 'UAV · LiDAR · Data Layers · 3D GIS',
+      'Request Demo access to see how data layers are organized, shown, hidden, and compared inside the same project.',
+    footer:
+      'Point Cloud · 3D Mesh · Orthophoto / DOM · Data Layers · 3D GIS',
   },
 
   zh: {
     languageLabel: '选择语言',
     home: '首页',
     demo: '申请演示访问',
+    demoLoading: '正在检查 Demo...',
+    switchToLight: '切换到浅色模式',
+    switchToDark: '切换到深色模式',
 
     eyebrow: '平台 · 数据图层管理',
-    heroTitle: '在同一三维 GIS 空间中管理多个数据图层',
+    heroTitle:
+      '在同一个三维 GIS 项目中管理多个数据图层',
     heroBody:
-      '按图层组织测绘数据，使用户能够显示、隐藏、调整透明度和改变显示顺序，同时保持项目的空间背景。',
-    heroNote:
-      '页面使用 PUBLIC 文件夹中的图片；下方图层控制是用于说明工作流程的前端交互模拟。',
-    heroImageAlt: '外业数据采集过程中的测绘团队和 UAV 设备',
-    heroCaption: '外业数据采集 · UAV Survey',
-    heroBadge: 'PUBLIC DATA',
+      '项目数据图层保留在同一个工作空间中，用户可以显示、隐藏、调整透明度和改变显示顺序，同时保持当前查看区域不变。',
+    heroImageAlt:
+      '外业数据采集过程中的测绘团队和 UAV 设备',
+    heroCaption:
+      '三维建图项目的外业数据采集',
 
     layerEyebrow: '数据图层',
-    layerTitle: '三维建图项目中的常见数据图层',
+    layerTitle:
+      '可在同一个项目中同时存在的数据图层',
     layerBody:
-      '根据项目数据情况，Viewer 可将多个图层集中到同一空间中，使用户在检查区域时无需离开当前位置。',
+      '根据项目数据情况，Viewer 可在同一个空间背景中包含 Point Cloud、3D Mesh 和 Orthophoto / DOM。',
     layers: [
       {
         title: 'Point Cloud',
-        description: '来自 LiDAR 或摄影测量流程的三维点数据，用于检查空间结构和高程。',
+        description:
+          '用于查看测区空间结构和位置关系的三维点数据图层。',
       },
       {
         title: '3D Mesh',
-        description: '带纹理的表面模型，便于理解建筑、地形和现场现状。',
+        description:
+          '当项目具备 Mesh 数据时，可查看区域表面模型与形态。',
       },
       {
-        title: 'DOM 影像',
-        description: '用于对照平面、位置和边界关系的正射影像。',
+        title: 'Orthophoto / DOM',
+        description:
+          '当项目具备正射影像时，可从俯视角度对照位置与区域布局。',
       },
     ],
 
-    interactiveEyebrow: '交互预览',
-    interactiveTitle: '控制显示、透明度和图层顺序',
-    interactiveBody: '使用右侧面板。每次修改都会立即更新图像显示，无需重新加载页面。',
+    interactiveEyebrow: '图层控制预览',
+    interactiveTitle:
+      '控制显示、透明度和图层顺序',
+    interactiveBody:
+      '下方面板模拟用户如何调整各图层的显示状态，每次修改都会立即反映在预览中。',
     interactiveNote:
-      '这是官网页面中的图层控制模拟，并非实时 Cesium/Viewer 引擎。在实际 Viewer 中，可将同样的状态连接到真实图层的 visibility、alpha 和顺序。',
+      '这是产品页面上的交互预览，用于说明图层管理界面的行为，并非真实项目 Viewer。',
     panelTitle: '数据图层',
     visibleLabel: '显示',
     opacityLabel: '透明度',
@@ -384,622 +420,1307 @@ const COPY: Record<Language, Copy> = {
     layerNames: {
       pointCloud: 'Point Cloud',
       mesh: '3D Mesh',
-      dom: 'DOM 影像',
+      dom: 'Orthophoto / DOM',
     },
     layerMeta: {
-      pointCloud: '三维点覆盖模拟',
-      mesh: '表面覆盖模拟',
-      dom: 'UAV / 正射影像',
+      pointCloud: '三维点图层预览',
+      mesh: '表面图层预览',
+      dom: '正射影像预览',
     },
 
     controlEyebrow: '显示控制',
-    controlTitle: '直接在 Viewer 中控制项目数据',
+    controlTitle:
+      '根据当前检查任务调整数据图层',
     controlBody:
-      '图层控制围绕实际检查任务：显示正确的数据、正确的顺序以及合适的可视强度。',
+      '图层操作集中在三项任务：选择需要查看的数据、调整显示程度，以及改变图层之间的顺序。',
     controls: [
       {
         title: '显示 / 隐藏图层',
-        description: '暂时隐藏不需要的图层，减少视觉干扰并聚焦当前任务。',
+        description:
+          '隐藏不需要的数据，使当前检查内容更加清晰。',
       },
       {
         title: '调整透明度',
-        description: '降低上层数据的显示强度，以便同时查看下方数据进行对照。',
+        description:
+          '降低某一图层的显示程度，使下方数据保持可见。',
       },
       {
         title: '调整图层顺序',
-        description: '上移或下移图层，控制其在项目中的显示优先级。',
+        description:
+          '上移或下移图层，以改变其显示优先级。',
       },
     ],
 
     flowEyebrow: '操作流程',
-    flowTitle: '从打开项目到定位所需图层',
-    flowBody: '通过简短流程快速聚焦与当前检查任务匹配的数据。',
+    flowTitle:
+      '从项目进入需要查看的数据图层',
+    flowBody:
+      '用户在切换数据图层时保持项目空间背景不变。',
     flow: [
       {
         title: '打开项目',
-        description: '进入正确的项目和需要检查的区域。',
+        description:
+          '在 Viewer 中打开项目和需要检查的区域。',
       },
       {
-        title: '选择图层',
-        description: '选择需要使用的 Point Cloud、3D Mesh 或 DOM。',
+        title: '选择数据图层',
+        description:
+          '当项目具备相应数据时，选择 Point Cloud、3D Mesh 或 Orthophoto / DOM。',
       },
       {
         title: '调整显示',
-        description: '控制显示状态、透明度和图层顺序。',
+        description:
+          '控制图层显示状态、透明度和显示顺序。',
       },
       {
         title: '对照数据',
-        description: '在保持空间背景的情况下检查同一区域。',
+        description:
+          '在不改变项目空间背景的情况下查看同一区域。',
       },
     ],
 
-    valueEyebrow: '使用价值',
-    valueTitle: '在同一查看空间中集中项目数据',
+    valueEyebrow: '三维 GIS 工作流程',
+    valueTitle:
+      '在同一个查看背景中保留项目数据',
     valueBody:
-      '按图层管理可以减少视觉干扰、提高对照效率，并在切换数据源时保持当前位置。',
+      '图层管理使用户在改变当前显示数据时，仍可保持项目位置和相机背景。',
     values: [
-      '聚焦当前任务需要的数据图层',
-      '在多个图层存在时减少视觉干扰',
-      '对照 Point Cloud、3D Mesh 和 DOM',
-      '调整显示状态时保持相机位置',
-      '直接在浏览器中完成查看流程',
+      '聚焦当前检查任务需要的数据图层',
+      '在多个图层同时显示时减少视觉干扰',
+      '当项目具备相应数据时对照 Point Cloud、3D Mesh 和 Orthophoto / DOM',
+      '调整显示程度时保持当前查看区域',
+      '直接在 Web GIS 环境中完成操作',
     ],
 
-    finalTitle: '体验三维 GIS 数据图层管理',
-    finalBody: '申请演示访问，了解 SAOLATEK 如何在真实项目中组织、显示并对照测绘数据图层。',
-    footer: 'UAV · LiDAR · Data Layers · 三维 GIS',
+    finalEyebrow: 'DATA LAYERS · 3D GIS',
+    finalTitle:
+      '体验三维 GIS 项目中的数据图层管理',
+    finalBody:
+      '申请演示访问，了解数据图层如何在同一个项目中进行组织、显示、隐藏和对照。',
+    footer:
+      'Point Cloud · 3D Mesh · Orthophoto / DOM · Data Layers · 3D GIS',
   },
 };
 
-const LAYER_ICONS = [Cloud, Box, ImageIcon] as const;
-const CONTROL_ICONS = [Eye, SlidersHorizontal, Layers3] as const;
-const FLOW_ICONS = [MousePointer2, Layers3, SlidersHorizontal, ScanLine] as const;
-
 const INITIAL_LAYERS: DemoLayer[] = [
-  { id: 'pointCloud', visible: true, opacity: 78 },
-  { id: 'mesh', visible: true, opacity: 44 },
-  { id: 'dom', visible: true, opacity: 100 },
+  {
+    id: 'pointCloud',
+    visible: true,
+    opacity: 78,
+  },
+  {
+    id: 'mesh',
+    visible: true,
+    opacity: 44,
+  },
+  {
+    id: 'dom',
+    visible: true,
+    opacity: 100,
+  },
 ];
 
-const layerIcon = (id: LayerId) => {
-  if (id === 'pointCloud') return Cloud;
-  if (id === 'mesh') return Box;
-  return ImageIcon;
+const readInitialTheme = () => {
+  if (typeof window === 'undefined') {
+    return true;
+  }
+
+  const saved =
+    window.localStorage.getItem(
+      THEME_STORAGE_KEY
+    );
+
+  if (saved === 'light') return false;
+  if (saved === 'dark') return true;
+
+  return true;
 };
 
 export const DataLayerManagementPage: React.FC = () => {
   const navigate = useNavigate();
-  const { currentLang, setCurrentLang } = useLanguage('vi');
-  const { isAuthenticated, isLoading } = useAuthStore();
+
+  const {
+    currentLang,
+    setCurrentLang,
+  } = useLanguage('vi');
+
+  const {
+    isAuthenticated,
+    isLoading,
+  } = useAuthStore();
+
+  const [
+    isDarkMode,
+    setIsDarkMode,
+  ] = useState(readInitialTheme);
+
+  const [
+    demoLayers,
+    setDemoLayers,
+  ] = useState<DemoLayer[]>(
+    INITIAL_LAYERS
+  );
+
   const c = COPY[currentLang];
 
-  const [demoLayers, setDemoLayers] = React.useState<DemoLayer[]>(INITIAL_LAYERS);
+  useEffect(() => {
+    const theme =
+      isDarkMode ? 'dark' : 'light';
+
+    window.localStorage.setItem(
+      THEME_STORAGE_KEY,
+      theme
+    );
+
+    document.documentElement.dataset.saolatekTheme =
+      theme;
+  }, [isDarkMode]);
+
+  useEffect(() => {
+    const handleStorage = (
+      event: StorageEvent
+    ) => {
+      if (
+        event.key !==
+        THEME_STORAGE_KEY
+      ) {
+        return;
+      }
+
+      if (event.newValue === 'dark') {
+        setIsDarkMode(true);
+      }
+
+      if (event.newValue === 'light') {
+        setIsDarkMode(false);
+      }
+    };
+
+    window.addEventListener(
+      'storage',
+      handleStorage
+    );
+
+    return () => {
+      window.removeEventListener(
+        'storage',
+        handleStorage
+      );
+    };
+  }, []);
 
   const demo = () => {
     if (isLoading) return;
 
     if (!isAuthenticated) {
-      navigate('/login', { state: { returnTo: '/book-demo' } });
+      navigate('/login', {
+        state: {
+          returnTo: '/book-demo',
+        },
+      });
       return;
     }
 
     navigate('/book-demo');
   };
 
-  const toggleLayer = (id: LayerId) => {
+  const toggleLayer = (
+    id: LayerId
+  ) => {
     setDemoLayers((layers) =>
       layers.map((layer) =>
-        layer.id === id ? { ...layer, visible: !layer.visible } : layer,
-      ),
+        layer.id === id
+          ? {
+              ...layer,
+              visible:
+                !layer.visible,
+            }
+          : layer
+      )
     );
   };
 
-  const setLayerOpacity = (id: LayerId, opacity: number) => {
+  const setLayerOpacity = (
+    id: LayerId,
+    opacity: number
+  ) => {
     setDemoLayers((layers) =>
-      layers.map((layer) => (layer.id === id ? { ...layer, opacity } : layer)),
+      layers.map((layer) =>
+        layer.id === id
+          ? {
+              ...layer,
+              opacity,
+            }
+          : layer
+      )
     );
   };
 
-  const moveLayer = (index: number, direction: -1 | 1) => {
+  const moveLayer = (
+    index: number,
+    direction: -1 | 1
+  ) => {
     setDemoLayers((layers) => {
-      const nextIndex = index + direction;
-      if (nextIndex < 0 || nextIndex >= layers.length) return layers;
+      const nextIndex =
+        index + direction;
+
+      if (
+        nextIndex < 0 ||
+        nextIndex >=
+          layers.length
+      ) {
+        return layers;
+      }
 
       const next = [...layers];
-      const [current] = next.splice(index, 1);
-      next.splice(nextIndex, 0, current);
+
+      const [current] =
+        next.splice(index, 1);
+
+      next.splice(
+        nextIndex,
+        0,
+        current
+      );
+
       return next;
     });
   };
 
   const resetLayers = () => {
-    setDemoLayers(INITIAL_LAYERS);
+    setDemoLayers(
+      INITIAL_LAYERS
+    );
   };
 
-  const getLayer = (id: LayerId) =>
-    demoLayers.find((layer) => layer.id === id) ??
-    INITIAL_LAYERS.find((layer) => layer.id === id)!;
+  const getLayer = (
+    id: LayerId
+  ) =>
+    demoLayers.find(
+      (layer) =>
+        layer.id === id
+    ) ??
+    INITIAL_LAYERS.find(
+      (layer) =>
+        layer.id === id
+    )!;
 
-  const domLayer = getLayer('dom');
-  const meshLayer = getLayer('mesh');
-  const pointCloudLayer = getLayer('pointCloud');
+  const domLayer =
+    getLayer('dom');
+
+  const meshLayer =
+    getLayer('mesh');
+
+  const pointCloudLayer =
+    getLayer('pointCloud');
+
+  const themeLabel =
+    isDarkMode
+      ? c.switchToLight
+      : c.switchToDark;
 
   return (
-    <div
-      lang={currentLang}
-      className="min-h-screen overflow-x-clip bg-[var(--color-paper)] text-[var(--color-ink)] [--color-accent-ink:var(--color-paper)] [&_button]:transition-opacity [&_button:hover]:opacity-90 [&_button:active]:opacity-75 [&_button:disabled]:cursor-not-allowed [&_button:disabled]:opacity-50 [&_button:focus-visible]:outline-none [&_button:focus-visible]:ring-2 [&_button:focus-visible]:ring-[var(--color-accent)]"
-    >
-      <header className="sticky top-0 z-50 border-b border-[var(--color-border)] bg-[color-mix(in_oklch,var(--color-paper)_92%,transparent)] backdrop-blur-xl">
-        <div className="mx-auto flex h-[72px] max-w-[1440px] items-center justify-between gap-2 px-3 sm:px-5 md:px-8 lg:px-12">
-          <button
-            type="button"
-            onClick={() => navigate('/')}
-            className="shrink-0 border-0 bg-transparent p-0"
-            aria-label={c.home}
-          >
-            <img src={logoImg} alt="SAOLATEK" className="h-8 w-auto object-contain sm:h-9" />
-          </button>
+    <>
+      <style>{`
+        .dlm-root {
+          --dlm-bg: #050914;
+          --dlm-bg-2: #07101c;
+          --dlm-surface: #0b1523;
+          --dlm-surface-2: #0d1826;
 
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 md:gap-3">
-            <div className="[&_button]:min-w-[44px]">
+          --dlm-ink: #f8fafc;
+          --dlm-muted: #94a3b8;
+          --dlm-soft: #64748b;
+
+          --dlm-border:
+            rgba(255,255,255,.09);
+          --dlm-border-strong:
+            rgba(255,255,255,.16);
+
+          --dlm-accent: #38bdf8;
+          --dlm-accent-strong: #0ea5e9;
+          --dlm-cta-ink: #03111d;
+
+          --dlm-header:
+            rgba(5,9,20,.88);
+
+          --dlm-shadow:
+            0 26px 80px
+            rgba(0,0,0,.34);
+
+          color-scheme: dark;
+        }
+
+        .dlm-root.dlm-light {
+          --dlm-bg: #f8fafc;
+          --dlm-bg-2: #eef4f8;
+          --dlm-surface: #ffffff;
+          --dlm-surface-2: #f3f7fa;
+
+          --dlm-ink: #0f172a;
+          --dlm-muted: #526174;
+          --dlm-soft: #64748b;
+
+          --dlm-border:
+            rgba(15,23,42,.11);
+          --dlm-border-strong:
+            rgba(15,23,42,.20);
+
+          --dlm-accent: #0369a1;
+          --dlm-accent-strong: #0284c7;
+          --dlm-cta-ink: #ffffff;
+
+          --dlm-header:
+            rgba(248,250,252,.90);
+
+          --dlm-shadow:
+            0 24px 65px
+            rgba(15,23,42,.14);
+
+          color-scheme: light;
+        }
+
+        .dlm-root {
+          min-height: 100vh;
+          overflow-x: clip;
+
+          background:
+            var(--dlm-bg);
+
+          color:
+            var(--dlm-ink);
+
+          transition:
+            background-color .22s ease,
+            color .22s ease;
+        }
+
+        .dlm-header {
+          background:
+            var(--dlm-header);
+        }
+
+        .dlm-focus:focus-visible {
+          outline: none;
+
+          box-shadow:
+            0 0 0 2px var(--dlm-bg),
+            0 0 0 4px var(--dlm-accent);
+        }
+
+        .dlm-media {
+          box-shadow:
+            var(--dlm-shadow);
+        }
+
+        .dlm-theme-toggle {
+          position: relative;
+
+          width: 76px;
+          height: 32px;
+
+          flex-shrink: 0;
+          overflow: hidden;
+
+          display: flex;
+          align-items: center;
+
+          padding: 0;
+          cursor: pointer;
+
+          border-radius: 9999px;
+
+          border:
+            1px solid
+            rgba(255,255,255,.20);
+
+          background:
+            linear-gradient(
+              180deg,
+              #2a80f1 0%,
+              #70a7ff 100%
+            );
+
+          box-shadow:
+            inset 0 2px 4px
+              rgba(0,0,0,.10),
+            0 1px 2px
+              rgba(255,255,255,.05);
+
+          transition:
+            background .4s
+              cubic-bezier(.16,1,.3,1),
+            border-color .4s
+              cubic-bezier(.16,1,.3,1);
+        }
+
+        .dlm-theme-toggle:focus-visible {
+          outline:
+            2px solid
+            var(--dlm-accent);
+
+          outline-offset: 3px;
+        }
+
+        .dlm-theme-toggle.is-dark {
+          background:
+            linear-gradient(
+              180deg,
+              #0b1022 0%,
+              #19213d 100%
+            );
+
+          border-color:
+            rgba(255,255,255,.10);
+        }
+
+        .dlm-theme-toggle__thumb {
+          position: absolute;
+
+          left: 4px;
+          top: 4px;
+
+          width: 24px;
+          height: 24px;
+
+          z-index: 3;
+
+          border-radius: 50%;
+
+          background: #ffd34e;
+
+          box-shadow:
+            0 0 10px
+            rgba(255,211,78,.75);
+
+          transition:
+            transform .4s
+              cubic-bezier(.16,1,.3,1),
+            background .4s
+              cubic-bezier(.16,1,.3,1),
+            box-shadow .4s
+              cubic-bezier(.16,1,.3,1);
+        }
+
+        .dlm-theme-toggle.is-dark
+        .dlm-theme-toggle__thumb {
+          transform:
+            translateX(43px);
+
+          background: #eef2ff;
+
+          box-shadow:
+            inset -6px -2px 0
+              #c7d2fe,
+            0 0 9px
+              rgba(224,231,255,.5);
+        }
+
+        .dlm-theme-toggle__clouds,
+        .dlm-theme-toggle__stars {
+          position: absolute;
+          inset: 0;
+
+          pointer-events: none;
+        }
+
+        .dlm-theme-toggle__clouds {
+          opacity: 1;
+
+          transition:
+            opacity .35s ease;
+        }
+
+        .dlm-theme-toggle.is-dark
+        .dlm-theme-toggle__clouds {
+          opacity: 0;
+        }
+
+        .dlm-theme-toggle__cloud {
+          position: absolute;
+
+          height: 8px;
+
+          border-radius: 999px;
+
+          background:
+            rgba(255,255,255,.82);
+        }
+
+        .dlm-theme-toggle__cloud-1 {
+          right: 8px;
+          bottom: 5px;
+          width: 22px;
+        }
+
+        .dlm-theme-toggle__cloud-2 {
+          right: 22px;
+          bottom: 8px;
+          width: 14px;
+        }
+
+        .dlm-theme-toggle__cloud-3 {
+          right: 4px;
+          bottom: 12px;
+          width: 12px;
+        }
+
+        .dlm-theme-toggle__stars {
+          opacity: 0;
+
+          transition:
+            opacity .35s ease;
+        }
+
+        .dlm-theme-toggle.is-dark
+        .dlm-theme-toggle__stars {
+          opacity: 1;
+        }
+
+        .dlm-theme-toggle__star {
+          position: absolute;
+
+          border-radius: 50%;
+
+          background: #fff;
+
+          animation:
+            dlm-star-pulse
+            2s infinite ease-in-out;
+        }
+
+        .dlm-theme-toggle__star-1 {
+          top: 7px;
+          left: 13px;
+
+          width: 2px;
+          height: 2px;
+        }
+
+        .dlm-theme-toggle__star-2 {
+          top: 17px;
+          left: 27px;
+
+          width: 2px;
+          height: 2px;
+
+          animation-delay: .5s;
+        }
+
+        .dlm-theme-toggle__star-3 {
+          top: 8px;
+          left: 37px;
+
+          width: 2px;
+          height: 2px;
+
+          animation-delay: 1s;
+        }
+
+        @keyframes dlm-star-pulse {
+          0%,
+          100% {
+            opacity: .35;
+            transform: scale(.85);
+          }
+
+          50% {
+            opacity: 1;
+            transform: scale(1.2);
+          }
+        }
+
+        @media (
+          prefers-reduced-motion: reduce
+        ) {
+          .dlm-root *,
+          .dlm-root *::before,
+          .dlm-root *::after {
+            scroll-behavior:
+              auto !important;
+            animation-duration:
+              .01ms !important;
+            animation-iteration-count:
+              1 !important;
+            transition-duration:
+              .01ms !important;
+          }
+        }
+      `}</style>
+
+      <div
+        lang={currentLang}
+        className={`dlm-root ${
+          isDarkMode
+            ? ''
+            : 'dlm-light'
+        }`}
+      >
+        <header className="dlm-header sticky top-0 z-50 border-b border-[var(--dlm-border)] backdrop-blur-xl">
+          <div className="mx-auto flex h-[68px] w-full max-w-[1560px] items-center justify-between gap-2 px-5 sm:px-8 lg:px-10 xl:px-12">
+            <button
+              type="button"
+              onClick={() =>
+                navigate('/')
+              }
+              className="dlm-focus shrink-0 rounded-lg border-0 bg-transparent p-1"
+              aria-label={c.home}
+            >
+              <img
+                src={logoImg}
+                alt="SAOLATEK"
+                className="h-8 w-auto object-contain sm:h-9"
+              />
+            </button>
+
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
               <SolutionLanguageSwitcher
                 currentLang={currentLang}
                 onChange={setCurrentLang}
-                ariaLabel={c.languageLabel}
+                ariaLabel={
+                  c.languageLabel
+                }
               />
-            </div>
 
-            <button
-              type="button"
-              onClick={() => navigate('/')}
-              className="hidden h-10 items-center gap-2 whitespace-nowrap rounded-xl border border-[var(--color-border)] bg-[var(--color-paper-2)] px-4 text-sm font-semibold text-[var(--color-ink-muted)] sm:inline-flex"
-            >
-              <ArrowLeft size={16} />
-              {c.home}
-            </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setIsDarkMode(
+                    (current) =>
+                      !current
+                  )
+                }
+                aria-label={
+                  themeLabel
+                }
+                title={
+                  themeLabel
+                }
+                aria-pressed={
+                  isDarkMode
+                }
+                className={`dlm-theme-toggle ${
+                  isDarkMode
+                    ? 'is-dark'
+                    : ''
+                }`}
+              >
+                <div className="dlm-theme-toggle__clouds">
+                  <div className="dlm-theme-toggle__cloud dlm-theme-toggle__cloud-1" />
+                  <div className="dlm-theme-toggle__cloud dlm-theme-toggle__cloud-2" />
+                  <div className="dlm-theme-toggle__cloud dlm-theme-toggle__cloud-3" />
+                </div>
 
-            <button
-              type="button"
-              onClick={demo}
-              disabled={isLoading}
-              className="inline-flex h-11 w-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[var(--color-accent)] text-sm font-bold text-[var(--color-accent-ink)] sm:h-10 md:w-auto md:px-4"
-              aria-label={c.demo}
-            >
-              <span className="hidden md:inline">{c.demo}</span>
-              <ArrowRight size={15} />
-            </button>
-          </div>
-        </div>
-      </header>
+                <div className="dlm-theme-toggle__stars">
+                  <div className="dlm-theme-toggle__star dlm-theme-toggle__star-1" />
+                  <div className="dlm-theme-toggle__star dlm-theme-toggle__star-2" />
+                  <div className="dlm-theme-toggle__star dlm-theme-toggle__star-3" />
+                </div>
 
-      <main>
-        <section className="border-b border-[var(--color-border)] bg-[var(--color-paper)]">
-          <div className="mx-auto grid max-w-[1340px] grid-cols-1 gap-10 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,.43fr)_minmax(0,.57fr)] lg:items-center lg:gap-14 lg:px-12 lg:py-20">
-            <div className="min-w-0">
-              <div className="text-xs font-semibold tracking-[.14em] text-[var(--color-accent)]">
-                {c.eyebrow}
-              </div>
+                <div className="dlm-theme-toggle__thumb" />
+              </button>
 
-              <h1 className="mt-5 max-w-[16ch] text-[38px] font-semibold leading-[1.04] tracking-[-.045em] sm:text-[48px] lg:text-[58px]">
-                {c.heroTitle}
-              </h1>
-
-              <p className="mt-6 max-w-[60ch] text-base leading-7 text-[var(--color-ink-muted)] sm:text-lg sm:leading-8">
-                {c.heroBody}
-              </p>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate('/')
+                }
+                className="dlm-focus hidden h-10 items-center gap-2 rounded-lg border border-[var(--dlm-border)] bg-transparent px-3.5 text-sm font-semibold text-[var(--dlm-muted)] transition-colors hover:border-[var(--dlm-border-strong)] hover:text-[var(--dlm-ink)] sm:inline-flex"
+              >
+                <ArrowLeft size={15} />
+                {c.home}
+              </button>
 
               <button
                 type="button"
                 onClick={demo}
                 disabled={isLoading}
-                className="mt-7 inline-flex h-12 w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[var(--color-accent)] px-6 text-sm font-bold text-[var(--color-accent-ink)] sm:w-auto"
+                className="dlm-focus inline-flex h-10 min-w-10 items-center justify-center gap-2 rounded-lg bg-[var(--dlm-accent)] px-3.5 text-sm font-bold text-[var(--dlm-cta-ink)] transition-colors hover:bg-[var(--dlm-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label={c.demo}
               >
-                {c.demo}
-                <ArrowRight size={16} />
+                <span className="hidden md:inline">
+                  {isLoading
+                    ? c.demoLoading
+                    : c.demo}
+                </span>
+
+                {isLoading ? (
+                  <Loader2
+                    size={15}
+                    className="animate-spin"
+                  />
+                ) : (
+                  <ArrowRight size={15} />
+                )}
               </button>
-
-              <p className="mt-4 flex max-w-[620px] gap-2 text-xs leading-5 text-[var(--color-ink-muted)]">
-                <MousePointer2 size={14} className="mt-0.5 shrink-0 text-[var(--color-accent)]" />
-                {c.heroNote}
-              </p>
             </div>
+          </div>
+        </header>
 
-            <figure className="min-w-0">
-              <div className="relative overflow-hidden rounded-2xl border border-[var(--color-border)] bg-black shadow-[0_24px_70px_rgba(0,0,0,.22)] lg:rounded-[28px]">
-                <img
-                  src={publicSurveyImage}
-                  alt={c.heroImageAlt}
-                  className="aspect-[16/10] w-full object-cover"
-                  loading="eager"
-                />
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
-                <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-4">
-                  <figcaption className="max-w-[72%] text-sm font-semibold leading-5 text-white">
+        <main>
+          {/* HERO */}
+          <section className="flex min-h-[calc(100svh-68px)] items-center border-b border-[var(--dlm-border)] bg-[var(--dlm-bg)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-10 sm:px-8 md:py-12 lg:px-10 lg:py-14 xl:px-12 xl:py-16">
+              <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(420px,.78fr)_minmax(0,1.22fr)] lg:items-center lg:gap-12 xl:gap-16">
+                <div className="min-w-0">
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--dlm-accent)]">
+                    {c.eyebrow}
+                  </div>
+
+                  <h1 className="mt-5 max-w-[12ch] text-[40px] font-semibold leading-[1.03] tracking-[-.045em] sm:text-[50px] lg:text-[60px] xl:text-[66px] 2xl:text-[70px]">
+                    {c.heroTitle}
+                  </h1>
+
+                  <p className="mt-6 max-w-[58ch] text-base leading-7 text-[var(--dlm-muted)] sm:text-lg sm:leading-8">
+                    {c.heroBody}
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={demo}
+                    disabled={isLoading}
+                    className="dlm-focus mt-7 inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[var(--dlm-accent)] px-6 text-sm font-bold text-[var(--dlm-cta-ink)] transition-colors hover:bg-[var(--dlm-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2
+                          size={15}
+                          className="animate-spin"
+                        />
+                        {c.demoLoading}
+                      </>
+                    ) : (
+                      <>
+                        {c.demo}
+                        <ArrowRight size={15} />
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <figure className="min-w-0">
+                  <div className="dlm-media overflow-hidden rounded-xl border border-[var(--dlm-border)] bg-black sm:rounded-2xl">
+                    <img
+                      src={publicSurveyImage}
+                      alt={c.heroImageAlt}
+                      className="aspect-[16/10] w-full object-cover lg:min-h-[500px] xl:min-h-[570px] 2xl:min-h-[610px]"
+                      loading="eager"
+                    />
+                  </div>
+
+                  <figcaption className="mt-4 text-center text-xs leading-5 text-[var(--dlm-muted)]">
                     {c.heroCaption}
                   </figcaption>
-                  <span className="rounded-full border border-white/20 bg-black/45 px-3 py-1.5 text-[11px] font-bold tracking-[.08em] text-white backdrop-blur">
-                    {c.heroBadge}
-                  </span>
+                </figure>
+              </div>
+            </div>
+          </section>
+
+          {/* DATA LAYERS */}
+          <section className="border-b border-[var(--dlm-border)] bg-[var(--dlm-bg-2)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-18 lg:px-10 lg:py-20 xl:px-12">
+              <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,.34fr)_minmax(0,.66fr)] lg:gap-16 xl:gap-20">
+                <div>
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--dlm-accent)]">
+                    {c.layerEyebrow}
+                  </div>
+
+                  <h2 className="mt-4 max-w-[14ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                    {c.layerTitle}
+                  </h2>
+
+                  <p className="mt-5 max-w-[520px] text-base leading-7 text-[var(--dlm-muted)]">
+                    {c.layerBody}
+                  </p>
+                </div>
+
+                <div className="border-t border-[var(--dlm-border)]">
+                  {c.layers.map((item) => (
+                    <article
+                      key={item.title}
+                      className="grid grid-cols-1 gap-2 border-b border-[var(--dlm-border)] py-6 sm:grid-cols-[180px_minmax(0,1fr)] sm:gap-8"
+                    >
+                      <h3 className="text-base font-semibold">
+                        {item.title}
+                      </h3>
+
+                      <p className="text-sm leading-6 text-[var(--dlm-muted)]">
+                        {item.description}
+                      </p>
+                    </article>
+                  ))}
                 </div>
               </div>
-            </figure>
-          </div>
-        </section>
+            </div>
+          </section>
 
-        <section className="bg-[var(--color-paper-2)]">
-          <div className="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16 lg:px-12">
-            <div className="max-w-[760px]">
-              <div className="text-xs font-semibold tracking-[.14em] text-[var(--color-accent)]">
-                {c.layerEyebrow}
+          {/* INTERACTIVE PREVIEW */}
+          <section className="border-b border-[var(--dlm-border)] bg-[var(--dlm-bg)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-18 lg:px-10 lg:py-20 xl:px-12 xl:py-22">
+              <div className="max-w-[920px]">
+                <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--dlm-accent)]">
+                  {c.interactiveEyebrow}
+                </div>
+
+                <h2 className="mt-4 max-w-[24ch] text-[30px] font-semibold leading-[1.1] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                  {c.interactiveTitle}
+                </h2>
+
+                <p className="mt-5 max-w-[760px] text-base leading-7 text-[var(--dlm-muted)]">
+                  {c.interactiveBody}
+                </p>
               </div>
-              <h2 className="mt-4 text-[28px] font-semibold leading-tight tracking-[-.03em] md:text-[36px]">
-                {c.layerTitle}
-              </h2>
-              <p className="mt-4 text-base leading-7 text-[var(--color-ink-muted)]">
-                {c.layerBody}
+
+              <div className="dlm-media mt-10 grid grid-cols-1 overflow-hidden rounded-xl border border-[var(--dlm-border)] bg-[var(--dlm-surface)] lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,.65fr)]">
+                <div className="relative min-h-[420px] overflow-hidden bg-black sm:min-h-[520px] lg:min-h-[620px]">
+                  <img
+                    src={publicSurveyImage}
+                    alt={c.heroImageAlt}
+                    className="absolute inset-0 h-full w-full object-cover"
+                    style={{
+                      opacity:
+                        domLayer.visible
+                          ? Math.max(
+                              domLayer.opacity / 100,
+                              0.08
+                            )
+                          : 0.08,
+                      filter:
+                        domLayer.visible
+                          ? 'none'
+                          : 'grayscale(1) brightness(.45)',
+                    }}
+                  />
+
+                  {meshLayer.visible && (
+                    <div
+                      className="pointer-events-none absolute inset-0"
+                      style={{
+                        opacity:
+                          meshLayer.opacity /
+                          100,
+                        backgroundImage:
+                          'linear-gradient(28deg, transparent 0 36%, rgba(0,229,255,.28) 36.5% 37%, transparent 37.5% 68%, rgba(0,229,255,.20) 68.5% 69%, transparent 69.5%), linear-gradient(152deg, transparent 0 42%, rgba(24,196,255,.22) 42.5% 43%, transparent 43.5% 74%, rgba(24,196,255,.18) 74.5% 75%, transparent 75.5%)',
+                        mixBlendMode:
+                          'screen',
+                      }}
+                    />
+                  )}
+
+                  {pointCloudLayer.visible && (
+                    <div
+                      className="pointer-events-none absolute inset-0"
+                      style={{
+                        opacity:
+                          pointCloudLayer.opacity /
+                          100,
+                        backgroundImage:
+                          'radial-gradient(circle, rgba(61,230,255,.95) 0 1.1px, transparent 1.35px)',
+                        backgroundSize:
+                          '17px 17px',
+                        mixBlendMode:
+                          'screen',
+                        WebkitMaskImage:
+                          'linear-gradient(to bottom right, transparent 0%, black 18%, black 82%, transparent 100%)',
+                        maskImage:
+                          'linear-gradient(to bottom right, transparent 0%, black 18%, black 82%, transparent 100%)',
+                      }}
+                    />
+                  )}
+
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-black/15" />
+
+                  <div className="absolute bottom-4 left-4 right-4 flex flex-wrap gap-x-4 gap-y-2 font-mono text-[10px] uppercase tracking-[.08em] text-white/80">
+                    {demoLayers
+                      .filter(
+                        (layer) =>
+                          layer.visible
+                      )
+                      .map((layer) => (
+                        <span
+                          key={layer.id}
+                        >
+                          {
+                            c.layerNames[
+                              layer.id
+                            ]
+                          }{' '}
+                          ·{' '}
+                          {
+                            layer.opacity
+                          }
+                          %
+                        </span>
+                      ))}
+                  </div>
+                </div>
+
+                <aside className="border-t border-[var(--dlm-border)] bg-[var(--dlm-surface)] p-4 sm:p-5 lg:border-l lg:border-t-0 lg:p-6">
+                  <div className="flex items-center justify-between gap-3 border-b border-[var(--dlm-border)] pb-5">
+                    <div>
+                      <div className="font-mono text-[10px] font-bold uppercase tracking-[.14em] text-[var(--dlm-accent)]">
+                        LAYERS
+                      </div>
+
+                      <h3 className="mt-1 text-xl font-semibold">
+                        {c.panelTitle}
+                      </h3>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={resetLayers}
+                      className="dlm-focus inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--dlm-border)] bg-transparent px-3 text-xs font-semibold text-[var(--dlm-muted)] transition-colors hover:border-[var(--dlm-border-strong)] hover:text-[var(--dlm-ink)]"
+                    >
+                      <RotateCcw
+                        size={14}
+                      />
+                      {c.resetLabel}
+                    </button>
+                  </div>
+
+                  <div className="divide-y divide-[var(--dlm-border)]">
+                    {demoLayers.map(
+                      (
+                        layer,
+                        index
+                      ) => (
+                        <article
+                          key={layer.id}
+                          className="py-5"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <h4 className="truncate text-sm font-semibold">
+                                {
+                                  c
+                                    .layerNames[
+                                    layer.id
+                                  ]
+                                }
+                              </h4>
+
+                              <p className="mt-1 text-xs leading-5 text-[var(--dlm-muted)]">
+                                {
+                                  c
+                                    .layerMeta[
+                                    layer.id
+                                  ]
+                                }
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                toggleLayer(
+                                  layer.id
+                                )
+                              }
+                              aria-pressed={
+                                layer.visible
+                              }
+                              aria-label={`${c.visibleLabel}: ${c.layerNames[layer.id]}`}
+                              className={`dlm-focus flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                                layer.visible
+                                  ? 'border-[var(--dlm-accent)] text-[var(--dlm-accent)]'
+                                  : 'border-[var(--dlm-border)] text-[var(--dlm-muted)]'
+                              }`}
+                            >
+                              {layer.visible ? (
+                                <Eye
+                                  size={
+                                    17
+                                  }
+                                />
+                              ) : (
+                                <EyeOff
+                                  size={
+                                    17
+                                  }
+                                />
+                              )}
+                            </button>
+                          </div>
+
+                          <div className="mt-4">
+                            <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+                              <span className="text-[var(--dlm-muted)]">
+                                {
+                                  c.opacityLabel
+                                }
+                              </span>
+
+                              <span className="font-semibold">
+                                {
+                                  layer.opacity
+                                }
+                                %
+                              </span>
+                            </div>
+
+                            <input
+                              type="range"
+                              min={0}
+                              max={100}
+                              value={
+                                layer.opacity
+                              }
+                              disabled={
+                                !layer.visible
+                              }
+                              onChange={(
+                                event
+                              ) =>
+                                setLayerOpacity(
+                                  layer.id,
+                                  Number(
+                                    event
+                                      .target
+                                      .value
+                                  )
+                                )
+                              }
+                              className="w-full accent-[var(--dlm-accent)] disabled:opacity-35"
+                              aria-label={`${c.opacityLabel}: ${c.layerNames[layer.id]}`}
+                            />
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                moveLayer(
+                                  index,
+                                  -1
+                                )
+                              }
+                              disabled={
+                                index === 0
+                              }
+                              className="dlm-focus inline-flex h-9 items-center justify-center rounded-lg border border-[var(--dlm-border)] bg-transparent text-[var(--dlm-muted)] transition-colors hover:border-[var(--dlm-border-strong)] hover:text-[var(--dlm-ink)] disabled:opacity-30"
+                              aria-label={`${c.moveUpLabel}: ${c.layerNames[layer.id]}`}
+                            >
+                              <ChevronUp
+                                size={15}
+                              />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                moveLayer(
+                                  index,
+                                  1
+                                )
+                              }
+                              disabled={
+                                index ===
+                                demoLayers.length -
+                                  1
+                              }
+                              className="dlm-focus inline-flex h-9 items-center justify-center rounded-lg border border-[var(--dlm-border)] bg-transparent text-[var(--dlm-muted)] transition-colors hover:border-[var(--dlm-border-strong)] hover:text-[var(--dlm-ink)] disabled:opacity-30"
+                              aria-label={`${c.moveDownLabel}: ${c.layerNames[layer.id]}`}
+                            >
+                              <ChevronDown
+                                size={15}
+                              />
+                            </button>
+                          </div>
+                        </article>
+                      )
+                    )}
+                  </div>
+                </aside>
+              </div>
+
+              <p className="mt-4 max-w-[900px] text-xs leading-5 text-[var(--dlm-soft)]">
+                {c.interactiveNote}
               </p>
             </div>
+          </section>
 
-            <div className="mt-9 grid grid-cols-1 gap-px overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-border)] md:grid-cols-3">
-              {c.layers.map((item, index) => {
-                const Icon = LAYER_ICONS[index];
-                return (
-                  <article key={item.title} className="bg-[var(--color-paper)] p-6 md:p-7">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--color-paper-3)] text-[var(--color-accent)]">
-                      <Icon size={20} />
-                    </div>
-                    <h3 className="mt-5 text-lg font-semibold">{item.title}</h3>
-                    <p className="mt-3 text-sm leading-6 text-[var(--color-ink-muted)]">
-                      {item.description}
+          {/* DISPLAY CONTROL */}
+          <section className="border-b border-[var(--dlm-border)] bg-[var(--dlm-bg-2)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-18 lg:px-10 lg:py-20 xl:px-12">
+              <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(320px,.36fr)_minmax(0,.64fr)] lg:gap-16 xl:gap-20">
+                <div className="lg:sticky lg:top-[108px] lg:self-start">
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--dlm-accent)]">
+                    {c.controlEyebrow}
+                  </div>
+
+                  <h2 className="mt-4 max-w-[15ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                    {c.controlTitle}
+                  </h2>
+
+                  <p className="mt-5 max-w-[520px] text-base leading-7 text-[var(--dlm-muted)]">
+                    {c.controlBody}
+                  </p>
+                </div>
+
+                <div className="space-y-8">
+                  {c.controls.map((item) => (
+                    <article
+                      key={item.title}
+                      className="border-t border-[var(--dlm-border)] pt-6"
+                    >
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[220px_minmax(0,1fr)] sm:gap-8">
+                        <h3 className="text-lg font-semibold">
+                          {item.title}
+                        </h3>
+
+                        <p className="text-sm leading-7 text-[var(--dlm-muted)]">
+                          {item.description}
+                        </p>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* WORKFLOW */}
+          <section className="border-b border-[var(--dlm-border)] bg-[var(--dlm-bg)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-18 lg:px-10 lg:py-20 xl:px-12">
+              <div className="max-w-[920px]">
+                <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--dlm-accent)]">
+                  {c.flowEyebrow}
+                </div>
+
+                <h2 className="mt-4 max-w-[22ch] text-[30px] font-semibold leading-[1.1] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                  {c.flowTitle}
+                </h2>
+
+                <p className="mt-5 max-w-[760px] text-base leading-7 text-[var(--dlm-muted)]">
+                  {c.flowBody}
+                </p>
+              </div>
+
+              <div className="mt-10 overflow-x-auto border-y border-[var(--dlm-border)]">
+                <div className="grid min-w-[900px] grid-cols-4">
+                  {c.flow.map((item) => (
+                    <article
+                      key={item.title}
+                      className="min-h-[180px] border-r border-[var(--dlm-border)] px-6 py-7 first:pl-0 last:border-r-0 last:pr-0"
+                    >
+                      <h3 className="text-base font-semibold">
+                        {item.title}
+                      </h3>
+
+                      <p className="mt-3 text-sm leading-6 text-[var(--dlm-muted)]">
+                        {item.description}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* VALUE */}
+          <section className="border-b border-[var(--dlm-border)] bg-[var(--dlm-bg-2)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-18 lg:px-10 lg:py-20 xl:px-12">
+              <div className="max-w-[1100px]">
+                <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--dlm-accent)]">
+                  {c.valueEyebrow}
+                </div>
+
+                <h2 className="mt-4 max-w-[20ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                  {c.valueTitle}
+                </h2>
+
+                <p className="mt-5 max-w-[760px] text-base leading-7 text-[var(--dlm-muted)]">
+                  {c.valueBody}
+                </p>
+              </div>
+
+              <div className="mt-10 border-t border-[var(--dlm-border)]">
+                {c.values.map((value) => (
+                  <div
+                    key={value}
+                    className="border-b border-[var(--dlm-border)] py-5 sm:py-6"
+                  >
+                    <p className="max-w-[980px] text-[15px] leading-7 text-[var(--dlm-muted)]">
+                      {value}
                     </p>
-                  </article>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-
-        <section className="border-y border-[var(--color-border)] bg-[var(--color-paper)]">
-          <div className="mx-auto max-w-[1340px] px-5 py-12 md:px-8 md:py-16 lg:px-12 lg:py-20">
-            <div className="max-w-[820px]">
-              <div className="text-xs font-semibold tracking-[.14em] text-[var(--color-accent)]">
-                {c.interactiveEyebrow}
+                  </div>
+                ))}
               </div>
-              <h2 className="mt-4 text-[28px] font-semibold leading-tight tracking-[-.03em] md:text-[36px]">
-                {c.interactiveTitle}
-              </h2>
-              <p className="mt-4 text-base leading-7 text-[var(--color-ink-muted)]">
-                {c.interactiveBody}
-              </p>
             </div>
+          </section>
 
-            <div className="mt-9 grid grid-cols-1 overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-paper-2)] shadow-[0_20px_60px_rgba(0,0,0,.12)] lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,.65fr)]">
-              <div className="relative min-h-[420px] overflow-hidden bg-black sm:min-h-[500px]">
-                <img
-                  src={publicSurveyImage}
-                  alt={c.heroImageAlt}
-                  className="absolute inset-0 h-full w-full object-cover"
-                  style={{
-                    opacity: domLayer.visible ? Math.max(domLayer.opacity / 100, 0.08) : 0.08,
-                    filter: domLayer.visible ? 'none' : 'grayscale(1) brightness(.45)',
-                  }}
-                />
-
-                {meshLayer.visible && (
-                  <div
-                    className="pointer-events-none absolute inset-0"
-                    style={{
-                      opacity: meshLayer.opacity / 100,
-                      backgroundImage:
-                        'linear-gradient(28deg, transparent 0 36%, rgba(0,229,255,.28) 36.5% 37%, transparent 37.5% 68%, rgba(0,229,255,.20) 68.5% 69%, transparent 69.5%), linear-gradient(152deg, transparent 0 42%, rgba(24,196,255,.22) 42.5% 43%, transparent 43.5% 74%, rgba(24,196,255,.18) 74.5% 75%, transparent 75.5%)',
-                      mixBlendMode: 'screen',
-                    }}
-                  />
-                )}
-
-                {pointCloudLayer.visible && (
-                  <div
-                    className="pointer-events-none absolute inset-0"
-                    style={{
-                      opacity: pointCloudLayer.opacity / 100,
-                      backgroundImage:
-                        'radial-gradient(circle, rgba(61,230,255,.95) 0 1.1px, transparent 1.35px)',
-                      backgroundSize: '17px 17px',
-                      mixBlendMode: 'screen',
-                      WebkitMaskImage:
-                        'linear-gradient(to bottom right, transparent 0%, black 18%, black 82%, transparent 100%)',
-                      maskImage:
-                        'linear-gradient(to bottom right, transparent 0%, black 18%, black 82%, transparent 100%)',
-                    }}
-                  />
-                )}
-
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-black/15" />
-
-                <div className="absolute left-4 top-4 flex flex-wrap gap-2">
-                  {demoLayers
-                    .filter((layer) => layer.visible)
-                    .map((layer) => (
-                      <span
-                        key={layer.id}
-                        className="rounded-full border border-white/15 bg-black/50 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur"
-                      >
-                        {c.layerNames[layer.id]} · {layer.opacity}%
-                      </span>
-                    ))}
-                </div>
-
-                <div className="absolute bottom-4 left-4 rounded-xl border border-white/15 bg-black/55 px-4 py-3 text-xs leading-5 text-white/90 backdrop-blur">
-                  UAV · 3D GIS · Layer preview
-                </div>
-              </div>
-
-              <aside className="border-t border-[var(--color-border)] bg-[var(--color-paper)] p-4 sm:p-5 lg:border-l lg:border-t-0 lg:p-6">
-                <div className="flex items-center justify-between gap-3">
+          {/* CTA */}
+          <section className="bg-[var(--dlm-bg)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-16 lg:px-10 lg:py-18 xl:px-12">
+              <div className="border-y border-[var(--dlm-border)] py-9 sm:py-11">
+                <div className="grid grid-cols-1 gap-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
                   <div>
-                    <div className="text-xs font-semibold tracking-[.12em] text-[var(--color-accent)]">
-                      LAYERS
+                    <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--dlm-accent)]">
+                      {c.finalEyebrow}
                     </div>
-                    <h3 className="mt-1 text-xl font-semibold">{c.panelTitle}</h3>
+
+                    <h2 className="mt-3 max-w-[25ch] text-[28px] font-semibold leading-[1.12] tracking-[-.035em] md:text-[34px]">
+                      {c.finalTitle}
+                    </h2>
+
+                    <p className="mt-4 max-w-[720px] text-base leading-7 text-[var(--dlm-muted)]">
+                      {c.finalBody}
+                    </p>
                   </div>
 
                   <button
                     type="button"
-                    onClick={resetLayers}
-                    className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-paper-2)] px-3 text-xs font-semibold text-[var(--color-ink-muted)]"
+                    onClick={demo}
+                    disabled={isLoading}
+                    className="dlm-focus inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[var(--dlm-accent)] px-6 text-sm font-bold text-[var(--dlm-cta-ink)] transition-colors hover:bg-[var(--dlm-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                   >
-                    <RotateCcw size={14} />
-                    {c.resetLabel}
+                    {isLoading ? (
+                      <>
+                        <Loader2
+                          size={15}
+                          className="animate-spin"
+                        />
+                        {c.demoLoading}
+                      </>
+                    ) : (
+                      <>
+                        {c.demo}
+                        <ArrowRight size={15} />
+                      </>
+                    )}
                   </button>
                 </div>
-
-                <div className="mt-5 space-y-3">
-                  {demoLayers.map((layer, index) => {
-                    const Icon = layerIcon(layer.id);
-
-                    return (
-                      <article
-                        key={layer.id}
-                        className="rounded-xl border border-[var(--color-border)] bg-[var(--color-paper-2)] p-4"
-                      >
-                        <div className="flex items-start gap-3">
-                          <GripVertical
-                            size={16}
-                            className="mt-2 shrink-0 text-[var(--color-ink-muted)]"
-                            aria-hidden="true"
-                          />
-
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--color-paper-3)] text-[var(--color-accent)]">
-                            <Icon size={17} />
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <h4 className="truncate text-sm font-semibold">
-                                  {c.layerNames[layer.id]}
-                                </h4>
-                                <p className="mt-1 text-xs leading-5 text-[var(--color-ink-muted)]">
-                                  {c.layerMeta[layer.id]}
-                                </p>
-                              </div>
-
-                              <button
-                                type="button"
-                                onClick={() => toggleLayer(layer.id)}
-                                aria-pressed={layer.visible}
-                                aria-label={`${c.visibleLabel}: ${c.layerNames[layer.id]}`}
-                                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${
-                                  layer.visible
-                                    ? 'border-[var(--color-accent)] bg-[var(--color-paper-3)] text-[var(--color-accent)]'
-                                    : 'border-[var(--color-border)] text-[var(--color-ink-muted)]'
-                                }`}
-                              >
-                                {layer.visible ? <Eye size={17} /> : <EyeOff size={17} />}
-                              </button>
-                            </div>
-
-                            <div className="mt-4">
-                              <div className="mb-2 flex items-center justify-between gap-3 text-xs">
-                                <span className="text-[var(--color-ink-muted)]">
-                                  {c.opacityLabel}
-                                </span>
-                                <span className="font-semibold">{layer.opacity}%</span>
-                              </div>
-
-                              <input
-                                type="range"
-                                min={0}
-                                max={100}
-                                value={layer.opacity}
-                                disabled={!layer.visible}
-                                onChange={(event) =>
-                                  setLayerOpacity(layer.id, Number(event.target.value))
-                                }
-                                className="w-full accent-[var(--color-accent)] disabled:opacity-35"
-                                aria-label={`${c.opacityLabel}: ${c.layerNames[layer.id]}`}
-                              />
-                            </div>
-
-                            <div className="mt-3 flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => moveLayer(index, -1)}
-                                disabled={index === 0}
-                                className="inline-flex h-9 flex-1 items-center justify-center gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-paper)] text-xs font-semibold text-[var(--color-ink-muted)]"
-                                aria-label={`${c.moveUpLabel}: ${c.layerNames[layer.id]}`}
-                              >
-                                <ChevronUp size={15} />
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => moveLayer(index, 1)}
-                                disabled={index === demoLayers.length - 1}
-                                className="inline-flex h-9 flex-1 items-center justify-center gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-paper)] text-xs font-semibold text-[var(--color-ink-muted)]"
-                                aria-label={`${c.moveDownLabel}: ${c.layerNames[layer.id]}`}
-                              >
-                                <ChevronDown size={15} />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              </aside>
-            </div>
-
-            <p className="mt-4 max-w-[900px] text-xs leading-5 text-[var(--color-ink-muted)]">
-              {c.interactiveNote}
-            </p>
-          </div>
-        </section>
-
-        <section className="bg-[var(--color-paper-2)]">
-          <div className="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16 lg:px-12">
-            <div className="max-w-[760px]">
-              <div className="text-xs font-semibold tracking-[.14em] text-[var(--color-accent)]">
-                {c.controlEyebrow}
               </div>
-              <h2 className="mt-4 text-[28px] font-semibold leading-tight tracking-[-.03em] md:text-[36px]">
-                {c.controlTitle}
-              </h2>
-              <p className="mt-4 text-base leading-7 text-[var(--color-ink-muted)]">
-                {c.controlBody}
-              </p>
+            </div>
+          </section>
+        </main>
+
+        <footer className="border-t border-[var(--dlm-border)] bg-[var(--dlm-bg-2)]">
+          <div className="mx-auto flex w-full max-w-[1560px] flex-col gap-3 px-5 py-6 text-sm text-[var(--dlm-muted)] sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-10 xl:px-12">
+            <div className="flex items-center gap-3">
+              <img
+                src={logoImg}
+                alt="SAOLATEK"
+                className="h-7 w-auto"
+              />
+
+              <span>
+                {c.footer}
+              </span>
             </div>
 
-            <div className="mt-9 grid grid-cols-1 gap-6 md:grid-cols-3">
-              {c.controls.map((item, index) => {
-                const Icon = CONTROL_ICONS[index];
-
-                return (
-                  <article
-                    key={item.title}
-                    className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-paper)] p-6"
-                  >
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-paper-3)] text-[var(--color-accent)]">
-                      <Icon size={18} />
-                    </div>
-                    <h3 className="mt-5 text-lg font-semibold">{item.title}</h3>
-                    <p className="mt-3 text-sm leading-6 text-[var(--color-ink-muted)]">
-                      {item.description}
-                    </p>
-                  </article>
-                );
-              })}
-            </div>
+            <span>
+              © 2026 SAOLATEK
+            </span>
           </div>
-        </section>
-
-        <section className="bg-[var(--color-paper)]">
-          <div className="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16 lg:px-12">
-            <div className="max-w-[780px]">
-              <div className="text-xs font-semibold tracking-[.14em] text-[var(--color-accent)]">
-                {c.flowEyebrow}
-              </div>
-              <h2 className="mt-4 text-[28px] font-semibold leading-tight tracking-[-.03em] md:text-[36px]">
-                {c.flowTitle}
-              </h2>
-              <p className="mt-4 text-base leading-7 text-[var(--color-ink-muted)]">
-                {c.flowBody}
-              </p>
-            </div>
-
-            <div className="mt-9 grid grid-cols-1 gap-px overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-border)] md:grid-cols-4">
-              {c.flow.map((item, index) => {
-                const Icon = FLOW_ICONS[index];
-
-                return (
-                  <article key={item.title} className="bg-[var(--color-paper-2)] p-6">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-paper-3)] text-[var(--color-accent)]">
-                        <Icon size={18} />
-                      </div>
-                      <span className="text-xs font-semibold text-[var(--color-ink-muted)]">
-                        0{index + 1}
-                      </span>
-                    </div>
-
-                    <h3 className="mt-5 text-base font-semibold">{item.title}</h3>
-                    <p className="mt-3 text-sm leading-6 text-[var(--color-ink-muted)]">
-                      {item.description}
-                    </p>
-                  </article>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-
-        <section className="border-t border-[var(--color-border)] bg-[var(--color-paper)]">
-          <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-8 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,.43fr)_minmax(0,.57fr)] lg:gap-16 lg:px-12">
-            <div>
-              <div className="text-xs font-semibold tracking-[.14em] text-[var(--color-accent)]">
-                {c.valueEyebrow}
-              </div>
-              <h2 className="mt-4 text-[28px] font-semibold leading-tight tracking-[-.03em] md:text-[36px]">
-                {c.valueTitle}
-              </h2>
-              <p className="mt-5 text-base leading-7 text-[var(--color-ink-muted)]">
-                {c.valueBody}
-              </p>
-            </div>
-
-            <ul className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2">
-              {c.values.map((item) => (
-                <li
-                  key={item}
-                  className="flex min-w-0 gap-3 text-sm leading-6 text-[var(--color-ink-muted)]"
-                >
-                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--color-paper-3)] text-[var(--color-accent)]">
-                    <Check size={12} />
-                  </span>
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
-
-        <section className="bg-[var(--color-paper-2)]">
-          <div className="mx-auto grid max-w-[1180px] grid-cols-1 gap-6 px-5 py-10 md:px-8 md:py-12 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:px-12">
-            <div>
-              <h2 className="text-[26px] font-semibold leading-tight tracking-[-.03em] md:text-[32px]">
-                {c.finalTitle}
-              </h2>
-              <p className="mt-3 max-w-[700px] text-base leading-7 text-[var(--color-ink-muted)]">
-                {c.finalBody}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={demo}
-              disabled={isLoading}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[var(--color-accent)] px-6 text-sm font-bold text-[var(--color-accent-ink)] sm:w-auto"
-            >
-              {c.demo}
-              <ArrowRight size={16} />
-            </button>
-          </div>
-        </section>
-      </main>
-
-      <footer className="border-t border-[var(--color-border)] bg-[var(--color-paper-2)]">
-        <div className="mx-auto flex max-w-[1440px] flex-col gap-3 px-5 py-6 text-sm text-[var(--color-ink-muted)] sm:flex-row sm:items-center sm:justify-between md:px-8 lg:px-12">
-          <div className="flex items-center gap-3">
-            <img src={logoImg} alt="SAOLATEK" className="h-7 w-auto" />
-            <span>{c.footer}</span>
-          </div>
-          <span>© 2026 SAOLATEK</span>
-        </div>
-      </footer>
-    </div>
+        </footer>
+      </div>
+    </>
   );
 };
 
-export const LayerManagementPage = DataLayerManagementPage;
+export const LayerManagementPage =
+  DataLayerManagementPage;
+
 export default DataLayerManagementPage;

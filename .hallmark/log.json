@@ -1,5 +1,35 @@
 [
   {
+    "date": "2026-08-17",
+    "scope": "app",
+    "macrostructure": "Production media-led editorial family",
+    "theme": "SAOLATEK dark technical",
+    "enrichment": "Native player with verified SAOLATEK SHTP video",
+    "brief": "Production hardening for three Platform pages with contextual media, complete capability content, workflow value, CTA, footer and localization"
+  },
+  {
+    "date": "2026-08-17",
+    "scope": "app",
+    "macrostructure": "Media-led editorial family",
+    "theme": "SAOLATEK dark technical",
+    "enrichment": "Real SAOLATEK SHTP video",
+    "brief": "Three Platform pages revised to remove simulated marketing visuals and use verified company media"
+  },
+  {
+    "date": "2026-08-17",
+    "macrostructure": "Split Studio",
+    "theme": "SAOLATEK dark technical",
+    "enrichment": "Tier-A real SAOLATEK SHTP video",
+    "brief": "Dedicated 3D measurement and analysis product page grounded in Distance, Height and Area tools"
+  },
+  {
+    "date": "2026-08-17",
+    "macrostructure": "Flow-led / Split Workbench",
+    "theme": "SAOLATEK dark technical",
+    "enrichment": "Tier-B Point Cloud SVG",
+    "brief": "Dedicated Point Cloud and LiDAR product page with interactive capability preview"
+  },
+  {
     "date": "2026-08-11",
     "macrostructure": "Workbench",
     "theme": "studied-DNA (source: image)",

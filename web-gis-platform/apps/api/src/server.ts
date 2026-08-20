@@ -13,6 +13,7 @@ import { parseAndUnifyCoordinates } from './utils/coordinateConverter';
 import { uploadProjectFilesToR2 } from './r2Service';
 import { sendLeadNotificationEmail } from './utils/emailService';
 import { spawn } from 'child_process';
+import { randomUUID } from 'crypto';
 import { PrismaClient } from './generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
@@ -36,6 +37,16 @@ const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 phút
   max: 20, // Tối đa 20 yêu cầu / IP trong 15 phút
   message: { success: false, message: 'Thao tác quá nhiều lần. Vui lòng thử lại sau 15 phút.' }
+});
+
+// Rate limiter riêng cho form tư vấn công khai để hạn chế spam.
+const consultationRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: {
+    success: false,
+    message: 'Bạn đã gửi quá nhiều yêu cầu. Vui lòng thử lại sau.'
+  }
 });
 
 // ── 1. AUTHENTICATION ROUTES ──
@@ -435,97 +446,105 @@ app.put('/api/projects/:id', authenticateToken, requireProjectRole('EDITOR'), as
 // API xóa dự án
 // ── 3. DEMO LEADS & CONTACT SALES ROUTES ──
 
-const getConfiguredDemoProject = async () => {
-  const demoProjectId = process.env.DEMO_PROJECT_ID?.trim();
-  if (!demoProjectId) return null;
-  return prisma.project.findUnique({ where: { id: demoProjectId } });
-};
-
 // Trạng thái Demo access của user hiện tại.
+// Flow mới:
+// - Demo Showcase là các project public.
+// - User đã gửi Book Demo ít nhất một lần => có Demo access.
+// - Không còn phụ thuộc DEMO_PROJECT_ID / ProjectMember.
 app.get('/api/demo-access', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const demoProject = await getConfiguredDemoProject();
-    if (!demoProject) {
-      return res.status(503).json({
-        success: false,
-        hasAccess: false,
-        message: 'Demo project chưa được cấu hình hoặc không tồn tại.'
-      });
+    if (req.user?.role === 'SUPERADMIN') {
+      return res.json({ success: true, hasAccess: true });
     }
 
-    if (req.user?.role === 'SUPERADMIN' || demoProject.createdById === req.user?.id) {
-      return res.json({ success: true, hasAccess: true, demoProjectId: demoProject.id });
-    }
+    const accountEmail = req.user!.email.trim().toLowerCase();
 
-    const membership = await prisma.projectMember.findUnique({
-      where: { projectId_userId: { projectId: demoProject.id, userId: req.user!.id } }
+    const existingLead = await prisma.demoLead.findFirst({
+      where: {
+        email: accountEmail
+      },
+      select: { id: true }
     });
 
     res.json({
       success: true,
-      hasAccess: Boolean(membership),
-      demoProjectId: membership ? demoProject.id : undefined
+      hasAccess: Boolean(existingLead)
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, hasAccess: false, message: error.message });
+    res.status(500).json({
+      success: false,
+      hasAccess: false,
+      message: error.message
+    });
   }
 });
 
-// Gửi yêu cầu Demo và cấp quyền VIEWER cho project Demo chính thức.
+// Gửi yêu cầu Demo.
+// Sau khi đăng ký thành công frontend sẽ chuyển về /dashboard,
+// nơi user tự chọn một trong các project Demo Showcase (isPublic = true).
 app.post('/api/demo-leads', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const { email, fullName, jobTitle, company, phone, message, source } = req.body;
+    const { fullName, jobTitle, company, phone, message, source } = req.body;
 
-    if (!email || !message) {
-      return res.status(400).json({ error: 'Vui lòng cung cấp Email và Nội dung yêu cầu' });
+    if (!message || !String(message).trim()) {
+      return res.status(400).json({
+        error: 'Vui lòng cung cấp Nội dung yêu cầu'
+      });
     }
 
-    const demoProject = await getConfiguredDemoProject();
-    if (!demoProject) {
-      return res.status(503).json({ error: 'Demo project chưa được cấu hình hoặc không tồn tại.' });
+    const accountEmail = req.user!.email.trim().toLowerCase();
+
+    // Nếu user đã đăng ký Demo trước đó thì không tạo lead trùng.
+    const existingLead = await prisma.demoLead.findFirst({
+      where: { email: accountEmail }
+    });
+
+    if (existingLead) {
+      return res.json({
+        success: true,
+        hasAccess: true,
+        message: 'Bạn đã đăng ký Demo trước đó.',
+        lead: existingLead
+      });
     }
 
-    const [lead] = await prisma.$transaction([
-      prisma.demoLead.create({
-        data: {
-          email,
-          fullName: fullName || null,
-          jobTitle: jobTitle || null,
-          company: company || null,
-          phone: phone || null,
-          message,
-          source: source || null,
-          status: 'NEW'
-        }
-      }),
-      prisma.projectMember.upsert({
-        where: { projectId_userId: { projectId: demoProject.id, userId: req.user!.id } },
-        update: {},
-        create: { projectId: demoProject.id, userId: req.user!.id, role: 'VIEWER' }
-      })
-    ]);
+    const lead = await prisma.demoLead.create({
+      data: {
+        email: accountEmail,
+        fullName: fullName || req.user?.fullName || null,
+        jobTitle: jobTitle || null,
+        company: company || null,
+        phone: phone || null,
+        message: String(message).trim(),
+        source: source || null,
+        status: 'NEW'
+      }
+    });
 
-    // 2. Gửi Email thông báo trực tiếp đến email công ty duongnguyen280403@gmail.com
+    // Gửi Email thông báo trực tiếp đến email công ty.
     sendLeadNotificationEmail({
-      email,
-      fullName,
+      email: accountEmail,
+      fullName: fullName || req.user?.fullName,
       jobTitle,
       company,
       phone,
-      message,
+      message: String(message).trim(),
       source
     }).catch(err => console.error('[Background Email Error]:', err));
 
     res.status(201).json({
       success: true,
       hasAccess: true,
-      demoProjectId: demoProject.id,
       message: 'Đăng ký Demo thành công.',
       lead
     });
   } catch (error: any) {
     console.error('Lỗi lưu Yêu cầu Demo:', error);
-    res.status(500).json({ error: error.message || 'Lỗi xử lý yêu cầu Demo' });
+    res.status(500).json({
+      success: false,
+      hasAccess: false,
+      error: error.message || 'Lỗi xử lý yêu cầu Demo'
+    });
   }
 });
 
@@ -583,7 +602,363 @@ app.delete('/api/admin/demo-leads/:id', authenticateToken, async (req: AuthReque
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`[API Server] Đang chạy tại http://localhost:${PORT}`);
-});
+// ── 4. CUSTOMER MANAGEMENT & CONSULTATION ROUTES ──────────────────────────
 
+// Repo hiện tại đã có dữ liệu User / Project / DemoLead trên DB production.
+// Chỉ tạo bổ sung bảng ConsultationLead nếu chưa tồn tại;
+// không reset hoặc xóa dữ liệu hiện có.
+const ensureCustomerManagementTables = async () => {
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_type
+        WHERE typname = 'LeadStatus'
+      ) THEN
+        CREATE TYPE "LeadStatus" AS ENUM (
+          'NEW',
+          'CONTACTED',
+          'CLOSED'
+        );
+      END IF;
+    END
+    $$;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "ConsultationLead" (
+      "id" TEXT NOT NULL,
+      "email" TEXT NOT NULL,
+      "fullName" TEXT NOT NULL,
+      "jobTitle" TEXT,
+      "company" TEXT,
+      "phone" TEXT,
+      "topic" TEXT NOT NULL,
+      "message" TEXT NOT NULL,
+      "status" "LeadStatus" NOT NULL DEFAULT 'NEW',
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "ConsultationLead_pkey" PRIMARY KEY ("id")
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS
+      "ConsultationLead_email_idx"
+    ON "ConsultationLead" ("email");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS
+      "ConsultationLead_createdAt_idx"
+    ON "ConsultationLead" ("createdAt");
+  `);
+};
+
+// PUBLIC — gửi yêu cầu tư vấn, không yêu cầu đăng nhập.
+app.post(
+  '/api/consultation-leads',
+  consultationRateLimiter,
+  async (req, res) => {
+    try {
+      const {
+        email,
+        fullName,
+        jobTitle,
+        company,
+        phone,
+        topic,
+        message
+      } = req.body ?? {};
+
+      const normalizedEmail = String(email || '')
+        .trim()
+        .toLowerCase();
+      const normalizedFullName = String(fullName || '').trim();
+      const normalizedTopic = String(topic || '').trim();
+      const normalizedMessage = String(message || '').trim();
+
+      if (
+        !normalizedEmail ||
+        !normalizedFullName ||
+        !normalizedTopic ||
+        !normalizedMessage
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            'Vui lòng nhập đầy đủ Email, Họ tên, nội dung cần tư vấn và mô tả nhu cầu.'
+        });
+      }
+
+      if (
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+          normalizedEmail
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email chưa hợp lệ.'
+        });
+      }
+
+      const id = randomUUID();
+
+      const rows = await prisma.$queryRawUnsafe<any[]>(
+        `
+          INSERT INTO "ConsultationLead" (
+            "id",
+            "email",
+            "fullName",
+            "jobTitle",
+            "company",
+            "phone",
+            "topic",
+            "message",
+            "status",
+            "createdAt",
+            "updatedAt"
+          )
+          VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8,
+            'NEW', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          )
+          RETURNING *
+        `,
+        id,
+        normalizedEmail,
+        normalizedFullName,
+        String(jobTitle || '').trim() || null,
+        String(company || '').trim() || null,
+        String(phone || '').trim() || null,
+        normalizedTopic,
+        normalizedMessage
+      );
+
+      return res.status(201).json({
+        success: true,
+        message:
+          'Thông tin tư vấn đã được gửi thành công.',
+        lead: rows[0]
+      });
+    } catch (error: any) {
+      console.error(
+        '[consultation-leads] create error:',
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          'Hệ thống chưa thể lưu yêu cầu tư vấn. Vui lòng thử lại.'
+      });
+    }
+  }
+);
+
+// ADMIN — danh sách tài khoản khách hàng.
+// Không trả password, reset token hoặc googleId cho frontend.
+app.get(
+  '/api/admin/users',
+  authenticateToken,
+  async (req: AuthRequest, res) => {
+    try {
+      if (req.user?.role !== 'SUPERADMIN') {
+        return res.status(403).json({
+          error:
+            'Chỉ Quản trị viên mới có quyền xem danh sách tài khoản'
+        });
+      }
+
+      const users = await prisma.user.findMany({
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          role: true,
+          avatarUrl: true,
+          googleId: true,
+          createdAt: true,
+          updatedAt: true
+        },
+        orderBy: {
+          createdAt: 'desc'
+        }
+      });
+
+      return res.json(
+        users
+          .filter(
+            (user) => user.role !== 'SUPERADMIN'
+          )
+          .map(({ googleId, ...user }) => ({
+            ...user,
+            authProvider: googleId
+              ? 'GOOGLE'
+              : 'PASSWORD'
+          }))
+      );
+    } catch (error: any) {
+      return res.status(500).json({
+        error: error.message
+      });
+    }
+  }
+);
+
+// ADMIN — lấy danh sách yêu cầu tư vấn.
+app.get(
+  '/api/admin/consultation-leads',
+  authenticateToken,
+  async (req: AuthRequest, res) => {
+    try {
+      if (req.user?.role !== 'SUPERADMIN') {
+        return res.status(403).json({
+          error:
+            'Chỉ Quản trị viên mới có quyền xem yêu cầu tư vấn'
+        });
+      }
+
+      const rows = await prisma.$queryRawUnsafe<any[]>(`
+        SELECT
+          "id",
+          "email",
+          "fullName",
+          "jobTitle",
+          "company",
+          "phone",
+          "topic",
+          "message",
+          "status",
+          "createdAt",
+          "updatedAt"
+        FROM "ConsultationLead"
+        ORDER BY "createdAt" DESC
+      `);
+
+      return res.json(rows);
+    } catch (error: any) {
+      return res.status(500).json({
+        error: error.message
+      });
+    }
+  }
+);
+
+// ADMIN — cập nhật trạng thái yêu cầu tư vấn.
+app.patch(
+  '/api/admin/consultation-leads/:id',
+  authenticateToken,
+  async (req: AuthRequest, res) => {
+    try {
+      if (req.user?.role !== 'SUPERADMIN') {
+        return res.status(403).json({
+          error:
+            'Chỉ Quản trị viên mới có quyền cập nhật'
+        });
+      }
+
+      const id = String(req.params.id);
+      const status = String(req.body?.status || '');
+
+      if (
+        !['NEW', 'CONTACTED', 'CLOSED'].includes(
+          status
+        )
+      ) {
+        return res.status(400).json({
+          error: 'Trạng thái không hợp lệ'
+        });
+      }
+
+      const rows = await prisma.$queryRawUnsafe<any[]>(
+        `
+          UPDATE "ConsultationLead"
+          SET
+            "status" = $1::"LeadStatus",
+            "updatedAt" = CURRENT_TIMESTAMP
+          WHERE "id" = $2
+          RETURNING *
+        `,
+        status,
+        id
+      );
+
+      if (!rows[0]) {
+        return res.status(404).json({
+          error: 'Không tìm thấy yêu cầu tư vấn'
+        });
+      }
+
+      return res.json(rows[0]);
+    } catch (error: any) {
+      return res.status(400).json({
+        error: error.message
+      });
+    }
+  }
+);
+
+// ADMIN — xóa yêu cầu tư vấn.
+app.delete(
+  '/api/admin/consultation-leads/:id',
+  authenticateToken,
+  async (req: AuthRequest, res) => {
+    try {
+      if (req.user?.role !== 'SUPERADMIN') {
+        return res.status(403).json({
+          error:
+            'Chỉ Quản trị viên mới có quyền xóa'
+        });
+      }
+
+      const id = String(req.params.id);
+
+      const deleted = await prisma.$queryRawUnsafe<any[]>(
+        `
+          DELETE FROM "ConsultationLead"
+          WHERE "id" = $1
+          RETURNING "id"
+        `,
+        id
+      );
+
+      if (!deleted[0]) {
+        return res.status(404).json({
+          error: 'Không tìm thấy yêu cầu tư vấn'
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: 'Đã xóa yêu cầu tư vấn'
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        error: error.message
+      });
+    }
+  }
+);
+
+// Khởi động API sau khi đảm bảo bảng bổ sung đã tồn tại.
+const startServer = async () => {
+  try {
+    await ensureCustomerManagementTables();
+
+    app.listen(PORT, () => {
+      console.log(
+        `[API Server] Đang chạy tại http://localhost:${PORT}`
+      );
+    });
+  } catch (error) {
+    console.error(
+      '[API Server] Không thể khởi tạo customer-management tables:',
+      error
+    );
+    process.exit(1);
+  }
+};
+
+startServer();

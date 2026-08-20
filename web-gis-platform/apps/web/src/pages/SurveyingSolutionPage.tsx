@@ -1,21 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   ArrowRight,
-  Box,
-  Check,
-  Crosshair,
-  Image as ImageIcon,
-  Layers3,
-  MapPinned,
-  Plane,
-  Ruler,
-  ScanLine,
-  Share2,
-  SquareDashed,
-  Users,
-  Workflow,
+  Loader2,
 } from 'lucide-react';
 
 import logoImg from '../assets/logo.webp';
@@ -26,6 +14,48 @@ import surveyingVideo from '../assets/videos/surveying-shtp.mp4';
 import { SolutionLanguageSwitcher } from '../components/SolutionLanguageSwitcher';
 import { useLanguage, type Language } from '../hooks/useLanguage';
 import { useDemoNavigation } from '../hooks/useDemoNavigation';
+
+const THEME_STORAGE_KEY = 'saolatek_theme';
+
+const THEME_COPY: Record<
+  Language,
+  {
+    switchToLight: string;
+    switchToDark: string;
+    demoLoading: string;
+  }
+> = {
+  vi: {
+    switchToLight: 'Chuyển sang giao diện sáng',
+    switchToDark: 'Chuyển sang giao diện tối',
+    demoLoading: 'Đang kiểm tra Demo...',
+  },
+  en: {
+    switchToLight: 'Switch to light mode',
+    switchToDark: 'Switch to dark mode',
+    demoLoading: 'Checking Demo...',
+  },
+  zh: {
+    switchToLight: '切换到浅色模式',
+    switchToDark: '切换到深色模式',
+    demoLoading: '正在检查 Demo...',
+  },
+};
+
+const readInitialTheme = () => {
+  if (typeof window === 'undefined') return true;
+
+  const saved =
+    window.localStorage.getItem(
+      THEME_STORAGE_KEY
+    );
+
+  if (saved === 'light') return false;
+  if (saved === 'dark') return true;
+
+  return true;
+};
+
 
 type CardItem = {
   title: string;
@@ -463,407 +493,863 @@ const COPY: Record<Language, Copy> = {
   },
 };
 
-const WORKFLOW_ICONS = [Plane, ScanLine, Layers3, Ruler] as const;
-const OUTPUT_ICONS = [ImageIcon, Box, Layers3] as const;
-const MEASURE_ICONS = [Ruler, SquareDashed, Crosshair] as const;
 
 export const SurveyingSolutionPage: React.FC = () => {
   const navigate = useNavigate();
-  const { currentLang, setCurrentLang } = useLanguage('vi');
-  const { openDemo, isDemoLoading } = useDemoNavigation();
+
+  const {
+    currentLang,
+    setCurrentLang,
+  } = useLanguage('vi');
+
+  const {
+    openDemo,
+    isDemoLoading,
+  } = useDemoNavigation();
+
+  const [
+    isDarkMode,
+    setIsDarkMode,
+  ] = useState(readInitialTheme);
+
   const c = COPY[currentLang];
+  const themeCopy = THEME_COPY[currentLang];
+
+  useEffect(() => {
+    const theme =
+      isDarkMode ? 'dark' : 'light';
+
+    window.localStorage.setItem(
+      THEME_STORAGE_KEY,
+      theme
+    );
+
+    document.documentElement.dataset.saolatekTheme =
+      theme;
+  }, [isDarkMode]);
+
+  useEffect(() => {
+    const handleStorage = (
+      event: StorageEvent
+    ) => {
+      if (
+        event.key !==
+        THEME_STORAGE_KEY
+      ) {
+        return;
+      }
+
+      if (event.newValue === 'dark') {
+        setIsDarkMode(true);
+      }
+
+      if (event.newValue === 'light') {
+        setIsDarkMode(false);
+      }
+    };
+
+    window.addEventListener(
+      'storage',
+      handleStorage
+    );
+
+    return () => {
+      window.removeEventListener(
+        'storage',
+        handleStorage
+      );
+    };
+  }, []);
+
+  const themeLabel =
+    isDarkMode
+      ? themeCopy.switchToLight
+      : themeCopy.switchToDark;
 
   return (
-    <div className="min-h-screen overflow-x-clip bg-[#050914] text-white selection:bg-sky-400/30">
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#050914]/92 backdrop-blur-xl">
-        <div className="mx-auto flex h-[72px] max-w-[1440px] items-center justify-between gap-2 px-3 sm:px-5 md:px-8 lg:px-12">
-          <button
-            type="button"
-            onClick={() => navigate('/')}
-            className="shrink-0 border-0 bg-transparent p-0"
-            aria-label={c.home}
-          >
-            <img src={logoImg} alt="SAOLATEK" className="h-8 w-auto object-contain sm:h-9" />
-          </button>
+    <>
+      <style>{`
+        .survey-root {
+          --survey-bg: #050914;
+          --survey-bg-2: #07101c;
+          --survey-surface: #0b1523;
 
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 md:gap-3">
-            <div className="[&_button]:min-w-[44px]">
+          --survey-ink: #f8fafc;
+          --survey-muted: #94a3b8;
+          --survey-soft: #64748b;
+
+          --survey-border:
+            rgba(255,255,255,.09);
+          --survey-border-strong:
+            rgba(255,255,255,.16);
+
+          --survey-accent: #38bdf8;
+          --survey-accent-strong: #0ea5e9;
+          --survey-cta-ink: #03111d;
+
+          --survey-header:
+            rgba(5,9,20,.88);
+
+          --survey-shadow:
+            0 26px 80px
+            rgba(0,0,0,.34);
+
+          color-scheme: dark;
+        }
+
+        .survey-root.survey-light {
+          --survey-bg: #f8fafc;
+          --survey-bg-2: #eef4f8;
+          --survey-surface: #ffffff;
+
+          --survey-ink: #0f172a;
+          --survey-muted: #526174;
+          --survey-soft: #64748b;
+
+          --survey-border:
+            rgba(15,23,42,.11);
+          --survey-border-strong:
+            rgba(15,23,42,.20);
+
+          --survey-accent: #0369a1;
+          --survey-accent-strong: #0284c7;
+          --survey-cta-ink: #ffffff;
+
+          --survey-header:
+            rgba(248,250,252,.90);
+
+          --survey-shadow:
+            0 24px 65px
+            rgba(15,23,42,.14);
+
+          color-scheme: light;
+        }
+
+        .survey-root {
+          min-height: 100vh;
+          overflow-x: clip;
+
+          background:
+            var(--survey-bg);
+
+          color:
+            var(--survey-ink);
+
+          transition:
+            background-color .22s ease,
+            color .22s ease;
+        }
+
+        .survey-header {
+          background:
+            var(--survey-header);
+        }
+
+        .survey-focus:focus-visible {
+          outline: none;
+
+          box-shadow:
+            0 0 0 2px var(--survey-bg),
+            0 0 0 4px var(--survey-accent);
+        }
+
+        .survey-media {
+          box-shadow:
+            var(--survey-shadow);
+        }
+
+        .survey-theme-toggle {
+          position: relative;
+
+          width: 76px;
+          height: 32px;
+
+          flex-shrink: 0;
+          overflow: hidden;
+
+          display: flex;
+          align-items: center;
+
+          padding: 0;
+          cursor: pointer;
+
+          border-radius: 9999px;
+
+          border:
+            1px solid
+            rgba(255,255,255,.20);
+
+          background:
+            linear-gradient(
+              180deg,
+              #2a80f1 0%,
+              #70a7ff 100%
+            );
+
+          box-shadow:
+            inset 0 2px 4px
+              rgba(0,0,0,.10),
+            0 1px 2px
+              rgba(255,255,255,.05);
+
+          transition:
+            background .4s
+              cubic-bezier(.16,1,.3,1),
+            border-color .4s
+              cubic-bezier(.16,1,.3,1);
+        }
+
+        .survey-theme-toggle:focus-visible {
+          outline:
+            2px solid
+            var(--survey-accent);
+
+          outline-offset: 3px;
+        }
+
+        .survey-theme-toggle.is-dark {
+          background:
+            linear-gradient(
+              180deg,
+              #0b1022 0%,
+              #19213d 100%
+            );
+
+          border-color:
+            rgba(255,255,255,.10);
+        }
+
+        .survey-theme-toggle__thumb {
+          position: absolute;
+
+          left: 4px;
+          top: 4px;
+
+          width: 24px;
+          height: 24px;
+
+          z-index: 3;
+
+          border-radius: 50%;
+          background: #ffd34e;
+
+          box-shadow:
+            0 0 10px
+            rgba(255,211,78,.75);
+
+          transition:
+            transform .4s
+              cubic-bezier(.16,1,.3,1),
+            background .4s
+              cubic-bezier(.16,1,.3,1),
+            box-shadow .4s
+              cubic-bezier(.16,1,.3,1);
+        }
+
+        .survey-theme-toggle.is-dark
+        .survey-theme-toggle__thumb {
+          transform:
+            translateX(43px);
+
+          background: #eef2ff;
+
+          box-shadow:
+            inset -6px -2px 0
+              #c7d2fe,
+            0 0 9px
+              rgba(224,231,255,.5);
+        }
+
+        .survey-theme-toggle__clouds,
+        .survey-theme-toggle__stars {
+          position: absolute;
+          inset: 0;
+
+          pointer-events: none;
+        }
+
+        .survey-theme-toggle__clouds {
+          opacity: 1;
+          transition:
+            opacity .35s ease;
+        }
+
+        .survey-theme-toggle.is-dark
+        .survey-theme-toggle__clouds {
+          opacity: 0;
+        }
+
+        .survey-theme-toggle__cloud {
+          position: absolute;
+
+          height: 8px;
+          border-radius: 999px;
+
+          background:
+            rgba(255,255,255,.82);
+        }
+
+        .survey-theme-toggle__cloud-1 {
+          right: 8px;
+          bottom: 5px;
+          width: 22px;
+        }
+
+        .survey-theme-toggle__cloud-2 {
+          right: 22px;
+          bottom: 8px;
+          width: 14px;
+        }
+
+        .survey-theme-toggle__cloud-3 {
+          right: 4px;
+          bottom: 12px;
+          width: 12px;
+        }
+
+        .survey-theme-toggle__stars {
+          opacity: 0;
+          transition:
+            opacity .35s ease;
+        }
+
+        .survey-theme-toggle.is-dark
+        .survey-theme-toggle__stars {
+          opacity: 1;
+        }
+
+        .survey-theme-toggle__star {
+          position: absolute;
+
+          width: 2px;
+          height: 2px;
+
+          border-radius: 50%;
+          background: #fff;
+
+          animation:
+            survey-star-pulse
+            2s infinite ease-in-out;
+        }
+
+        .survey-theme-toggle__star-1 {
+          top: 7px;
+          left: 13px;
+        }
+
+        .survey-theme-toggle__star-2 {
+          top: 17px;
+          left: 27px;
+          animation-delay: .5s;
+        }
+
+        .survey-theme-toggle__star-3 {
+          top: 8px;
+          left: 37px;
+          animation-delay: 1s;
+        }
+
+        @keyframes survey-star-pulse {
+          0%,
+          100% {
+            opacity: .35;
+            transform: scale(.85);
+          }
+
+          50% {
+            opacity: 1;
+            transform: scale(1.2);
+          }
+        }
+
+        @media (
+          prefers-reduced-motion: reduce
+        ) {
+          .survey-root *,
+          .survey-root *::before,
+          .survey-root *::after {
+            scroll-behavior:
+              auto !important;
+            animation-duration:
+              .01ms !important;
+            animation-iteration-count:
+              1 !important;
+            transition-duration:
+              .01ms !important;
+          }
+        }
+      `}</style>
+
+      <div
+        lang={currentLang}
+        className={`survey-root ${
+          isDarkMode
+            ? ''
+            : 'survey-light'
+        }`}
+      >
+        <header className="survey-header sticky top-0 z-50 border-b border-[var(--survey-border)] backdrop-blur-xl">
+          <div className="mx-auto flex h-[68px] w-full max-w-[1560px] items-center justify-between gap-2 px-5 sm:px-8 lg:px-10 xl:px-12">
+            <button
+              type="button"
+              onClick={() =>
+                navigate('/')
+              }
+              className="survey-focus shrink-0 rounded-lg border-0 bg-transparent p-1"
+              aria-label={c.home}
+            >
+              <img
+                src={logoImg}
+                alt="SAOLATEK"
+                className="h-8 w-auto object-contain sm:h-9"
+              />
+            </button>
+
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
               <SolutionLanguageSwitcher
                 currentLang={currentLang}
                 onChange={setCurrentLang}
-                ariaLabel={c.languageLabel}
+                ariaLabel={
+                  c.languageLabel
+                }
               />
-            </div>
 
-            <button
-              type="button"
-              onClick={() => navigate('/')}
-              className="hidden h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-slate-300 transition hover:border-white/20 hover:bg-white/[0.07] hover:text-white sm:inline-flex"
-            >
-              <ArrowLeft size={16} />
-              {c.home}
-            </button>
-
-            <button
-              type="button"
-              onClick={openDemo}
-              disabled={isDemoLoading}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-sky-400 px-4 text-sm font-bold text-[#04101a] transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50 sm:h-10"
-            >
-              <span className="hidden sm:inline">{c.demo}</span>
-              <ArrowRight size={15} />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main>
-        <section className="relative overflow-hidden border-b border-white/10">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_16%_18%,rgba(14,165,233,.13),transparent_34%),radial-gradient(circle_at_84%_70%,rgba(34,211,238,.07),transparent_30%)]" />
-
-          <div className="relative mx-auto grid max-w-[1360px] grid-cols-1 gap-10 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,.43fr)_minmax(0,.57fr)] lg:items-center lg:gap-14 lg:px-12 lg:py-20">
-            <div className="min-w-0">
-              <div className="inline-flex items-center gap-2 rounded-full border border-sky-300/20 bg-sky-300/10 px-3 py-1.5 text-[11px] font-bold tracking-[.14em] text-sky-300">
-                <Crosshair size={14} />
-                {c.eyebrow}
-              </div>
-
-              <h1 className="mt-5 max-w-[13ch] text-[40px] font-semibold leading-[1.03] tracking-[-.045em] sm:text-[50px] lg:text-[60px]">
-                {c.heroTitle1}
-                <span className="block text-sky-400">{c.heroTitle2}</span>
-              </h1>
-
-              <p className="mt-6 max-w-[60ch] text-base leading-7 text-slate-300 sm:text-lg sm:leading-8">
-                {c.heroBody}
-              </p>
-
-              <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={openDemo}
-                  disabled={isDemoLoading}
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-sky-400 px-6 text-sm font-bold text-[#04101a] transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {c.openDemo3D}
-                  <ArrowRight size={16} />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => navigate('/platform/measurement-analysis')}
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-white/12 bg-white/[0.04] px-6 text-sm font-semibold text-white transition hover:bg-white/[0.07]"
-                >
-                  {c.measurementLink}
-                </button>
-              </div>
-
-              <div className="mt-8 grid max-w-[620px] grid-cols-1 gap-2 sm:grid-cols-3">
-                {c.heroTags.map((item) => (
-                  <div
-                    key={item}
-                    className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3.5 py-3 text-xs font-semibold text-slate-300"
-                  >
-                    <Check size={14} className="shrink-0 text-sky-400" />
-                    {item}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <figure className="min-w-0">
-              <div className="group relative overflow-hidden rounded-[28px] border border-white/10 bg-black shadow-[0_26px_80px_rgba(0,0,0,.34)]">
-                <img
-                  src={surveyingFieldImage}
-                  alt={c.fieldSurvey}
-                  className="aspect-[16/11] w-full object-cover transition duration-700 group-hover:scale-[1.015]"
-                  loading="eager"
-                />
-
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/88 via-black/12 to-transparent" />
-
-                <div className="absolute left-4 top-4 flex flex-wrap gap-2">
-                  <span className="rounded-full border border-white/15 bg-black/45 px-3 py-1.5 text-[10px] font-bold tracking-[.12em] text-sky-300 backdrop-blur">
-                    {c.fieldSurvey}
-                  </span>
-                  <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1.5 text-[10px] font-bold tracking-[.12em] text-cyan-300 backdrop-blur">
-                    {c.uavMapping}
-                  </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setIsDarkMode(
+                    (current) =>
+                      !current
+                  )
+                }
+                aria-label={
+                  themeLabel
+                }
+                title={themeLabel}
+                aria-pressed={
+                  isDarkMode
+                }
+                className={`survey-theme-toggle ${
+                  isDarkMode
+                    ? 'is-dark'
+                    : ''
+                }`}
+              >
+                <div className="survey-theme-toggle__clouds">
+                  <div className="survey-theme-toggle__cloud survey-theme-toggle__cloud-1" />
+                  <div className="survey-theme-toggle__cloud survey-theme-toggle__cloud-2" />
+                  <div className="survey-theme-toggle__cloud survey-theme-toggle__cloud-3" />
                 </div>
 
-                <figcaption className="absolute inset-x-0 bottom-0 p-5 sm:p-6">
-                  <div className="mb-2 flex items-center gap-2 text-[10px] font-bold tracking-[.14em] text-sky-300">
-                    <MapPinned size={13} />
-                    {c.fieldOperations}
-                  </div>
-                  <p className="max-w-[540px] text-sm font-medium leading-6 text-white sm:text-base">
-                    {c.heroCaption}
-                  </p>
-                </figcaption>
-              </div>
-            </figure>
-          </div>
-        </section>
-
-        <section className="border-b border-white/10 bg-[#07101c]">
-          <div className="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16 lg:px-12">
-            <div className="max-w-[840px]">
-              <div className="text-xs font-bold tracking-[.16em] text-sky-400">{c.workflowEyebrow}</div>
-              <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[40px]">
-                {c.workflowTitle}
-              </h2>
-              <p className="mt-4 text-base leading-7 text-slate-400">{c.workflowBody}</p>
-            </div>
-
-            <div className="mt-9 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-              {c.workflowItems.map((item, index) => {
-                const Icon = WORKFLOW_ICONS[index];
-                return (
-                  <article
-                    key={item.title}
-                    className="rounded-2xl border border-white/10 bg-[#09131f] p-5 transition hover:-translate-y-0.5 hover:border-sky-300/25"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-400/10 text-sky-300">
-                        <Icon size={19} />
-                      </span>
-                      <span className="text-[10px] font-bold tracking-[.16em] text-slate-600">
-                        0{index + 1}
-                      </span>
-                    </div>
-                    <h3 className="mt-5 text-lg font-semibold">{item.title}</h3>
-                    <p className="mt-2 text-sm leading-6 text-slate-400">{item.body}</p>
-                  </article>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-
-        <section className="border-b border-white/10 bg-[#050914]">
-          <div className="mx-auto grid max-w-[1320px] grid-cols-1 gap-10 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,.57fr)_minmax(0,.43fr)] lg:items-center lg:gap-14 lg:px-12 lg:py-20">
-            <figure className="min-w-0">
-              <div className="relative overflow-hidden rounded-[26px] border border-white/10 bg-black shadow-[0_22px_65px_rgba(0,0,0,.3)]">
-                <img
-                  src={surveyingFlightPlanImage}
-                  alt={c.missionPlanning}
-                  className="aspect-[16/10] w-full object-cover"
-                  loading="lazy"
-                />
-
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/82 via-transparent to-transparent" />
-
-                <div className="absolute bottom-4 left-4 right-4">
-                  <div className="text-[10px] font-bold tracking-[.14em] text-cyan-300">{c.missionPlanning}</div>
-                  <p className="mt-1 text-sm font-medium text-white">{c.missionCaption}</p>
+                <div className="survey-theme-toggle__stars">
+                  <div className="survey-theme-toggle__star survey-theme-toggle__star-1" />
+                  <div className="survey-theme-toggle__star survey-theme-toggle__star-2" />
+                  <div className="survey-theme-toggle__star survey-theme-toggle__star-3" />
                 </div>
-              </div>
-            </figure>
 
-            <div>
-              <div className="text-xs font-bold tracking-[.16em] text-cyan-300">{c.fieldEyebrow}</div>
-              <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[40px]">
-                {c.fieldTitle}
-              </h2>
-              <p className="mt-4 text-base leading-7 text-slate-400">{c.fieldBody}</p>
+                <div className="survey-theme-toggle__thumb" />
+              </button>
 
-              <div className="mt-7 space-y-3">
-                {c.fieldItems.map((item, index) => (
-                  <article
-                    key={item.title}
-                    className="grid grid-cols-[36px_minmax(0,1fr)] gap-4 rounded-xl border border-white/10 bg-[#09131f] p-4"
-                  >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-400/10 text-xs font-bold text-cyan-300">
-                      0{index + 1}
+              <button
+                type="button"
+                onClick={() =>
+                  navigate('/')
+                }
+                className="survey-focus hidden h-10 items-center gap-2 rounded-lg border border-[var(--survey-border)] bg-transparent px-3.5 text-sm font-semibold text-[var(--survey-muted)] transition-colors hover:text-[var(--survey-ink)] sm:inline-flex"
+              >
+                <ArrowLeft size={15} />
+                {c.home}
+              </button>
+
+              <button
+                type="button"
+                onClick={openDemo}
+                disabled={isDemoLoading}
+                className="survey-focus inline-flex h-10 min-w-10 items-center justify-center gap-2 rounded-lg bg-[var(--survey-accent)] px-3.5 text-sm font-bold text-[var(--survey-cta-ink)] transition-colors hover:bg-[var(--survey-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label={c.demo}
+              >
+                <span className="hidden md:inline">
+                  {isDemoLoading
+                    ? themeCopy.demoLoading
+                    : c.demo}
+                </span>
+
+                {isDemoLoading ? (
+                  <Loader2
+                    size={15}
+                    className="animate-spin"
+                  />
+                ) : (
+                  <ArrowRight size={15} />
+                )}
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <main>
+          {/* HERO */}
+          <section className="border-b border-[var(--survey-border)] bg-[var(--survey-bg)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-16 lg:px-10 lg:py-20 xl:px-12">
+              <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(420px,.82fr)_minmax(0,1.18fr)] lg:items-center lg:gap-16">
+                <div className="min-w-0">
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--survey-accent)]">
+                    {c.eyebrow}
+                  </div>
+
+                  <h1 className="mt-5 max-w-[13ch] text-[40px] font-semibold leading-[1.02] tracking-[-.045em] sm:text-[50px] lg:text-[62px] xl:text-[68px]">
+                    {c.heroTitle1}
+                    <span className="block text-[var(--survey-accent)]">
+                      {c.heroTitle2}
                     </span>
-                    <div>
-                      <h3 className="text-base font-semibold">{item.title}</h3>
-                      <p className="mt-1 text-sm leading-6 text-slate-400">{item.body}</p>
-                    </div>
-                  </article>
-                ))}
+                  </h1>
+
+                  <p className="mt-6 max-w-[60ch] text-base leading-7 text-[var(--survey-muted)] sm:text-lg sm:leading-8">
+                    {c.heroBody}
+                  </p>
+
+                  <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={openDemo}
+                      disabled={isDemoLoading}
+                      className="survey-focus inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[var(--survey-accent)] px-6 text-sm font-bold text-[var(--survey-cta-ink)] transition-colors hover:bg-[var(--survey-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isDemoLoading ? (
+                        <>
+                          <Loader2
+                            size={15}
+                            className="animate-spin"
+                          />
+                          {themeCopy.demoLoading}
+                        </>
+                      ) : (
+                        <>
+                          {c.openDemo3D}
+                          <ArrowRight size={15} />
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        navigate(
+                          '/platform/measurement-analysis'
+                        )
+                      }
+                      className="survey-focus inline-flex h-12 items-center justify-center rounded-lg border border-[var(--survey-border)] bg-transparent px-6 text-sm font-semibold text-[var(--survey-ink)] transition-colors hover:border-[var(--survey-border-strong)]"
+                    >
+                      {c.measurementLink}
+                    </button>
+                  </div>
+                </div>
+
+                <figure className="min-w-0">
+                  <div className="survey-media overflow-hidden rounded-xl border border-[var(--survey-border)] bg-black sm:rounded-2xl">
+                    <img
+                      src={surveyingFieldImage}
+                      alt={c.fieldSurvey}
+                      className="aspect-[16/10] w-full object-cover"
+                      loading="eager"
+                    />
+                  </div>
+
+                  <figcaption className="mt-4 text-center text-xs leading-5 text-[var(--survey-muted)]">
+                    {c.heroCaption}
+                  </figcaption>
+                </figure>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <section className="border-b border-white/10 bg-[#07101c]">
-          <div className="mx-auto grid max-w-[1320px] grid-cols-1 gap-10 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,.43fr)_minmax(0,.57fr)] lg:items-center lg:gap-14 lg:px-12 lg:py-20">
-            <div>
-              <div className="text-xs font-bold tracking-[.16em] text-sky-400">{c.outputEyebrow}</div>
-              <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[40px]">
-                {c.outputTitle}
-              </h2>
-              <p className="mt-4 text-base leading-7 text-slate-400">{c.outputBody}</p>
+          {/* WORKFLOW RIBBON */}
+          <section className="border-b border-[var(--survey-border)] bg-[var(--survey-bg-2)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-18 lg:px-10 lg:py-20 xl:px-12">
+              <div className="max-w-[960px]">
+                <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--survey-accent)]">
+                  {c.workflowEyebrow}
+                </div>
 
-              <div className="mt-7 space-y-3">
-                {c.outputItems.map((item, index) => {
-                  const Icon = OUTPUT_ICONS[index];
-                  return (
+                <h2 className="mt-4 max-w-[22ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                  {c.workflowTitle}
+                </h2>
+
+                <p className="mt-5 max-w-[760px] text-base leading-7 text-[var(--survey-muted)]">
+                  {c.workflowBody}
+                </p>
+              </div>
+
+              <div className="mt-10 overflow-x-auto border-y border-[var(--survey-border)]">
+                <div className="grid min-w-[980px] grid-cols-4">
+                  {c.workflowItems.map((item) => (
                     <article
                       key={item.title}
-                      className="grid grid-cols-[42px_minmax(0,1fr)] gap-4 rounded-xl border border-white/10 bg-[#09131f] p-4"
+                      className="min-h-[190px] border-r border-[var(--survey-border)] px-6 py-7 first:pl-0 last:border-r-0 last:pr-0"
                     >
-                      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-sky-400/10 text-sky-300">
-                        <Icon size={18} />
-                      </span>
-                      <div>
-                        <h3 className="text-base font-semibold">{item.title}</h3>
-                        <p className="mt-1 text-sm leading-6 text-slate-400">{item.body}</p>
-                      </div>
+                      <h3 className="text-lg font-semibold">
+                        {item.title}
+                      </h3>
+
+                      <p className="mt-3 text-sm leading-7 text-[var(--survey-muted)]">
+                        {item.body}
+                      </p>
                     </article>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
             </div>
+          </section>
 
-            <div className="min-w-0">
-              <div className="overflow-hidden rounded-[26px] border border-white/10 bg-black shadow-[0_22px_65px_rgba(0,0,0,.3)]">
-                <div className="flex items-center justify-between border-b border-white/10 bg-[#09111f] px-4 py-3">
-                  <div>
-                    <div className="text-[10px] font-bold tracking-[.14em] text-sky-300">{c.projectView}</div>
-                    <div className="mt-1 text-sm font-semibold">{c.projectName}</div>
+          {/* FIELD OPERATIONS */}
+          <section className="border-b border-[var(--survey-border)] bg-[var(--survey-bg)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-18 lg:px-10 lg:py-20 xl:px-12">
+              <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,.62fr)_minmax(0,.38fr)] lg:items-center lg:gap-16">
+                <figure className="min-w-0">
+                  <div className="survey-media overflow-hidden rounded-xl border border-[var(--survey-border)] bg-black sm:rounded-2xl">
+                    <img
+                      src={surveyingFlightPlanImage}
+                      alt={c.missionPlanning}
+                      className="aspect-[16/10] w-full object-cover"
+                      loading="lazy"
+                    />
                   </div>
-                  <Layers3 size={18} className="text-sky-300" />
-                </div>
 
-                <div className="relative aspect-[16/10] bg-black">
-                  <video
-                    className="h-full w-full object-cover"
-                    src={surveyingVideo}
-                    muted
-                    loop
-                    autoPlay
-                    playsInline
-                    controls
-                    preload="metadata"
-                  />
+                  <figcaption className="mt-4 text-center text-xs leading-5 text-[var(--survey-muted)]">
+                    {c.missionCaption}
+                  </figcaption>
+                </figure>
 
-                  <div className="pointer-events-none absolute bottom-4 left-4 flex flex-wrap gap-2">
-                    {['DOM', '3D MESH', 'POINT CLOUD'].map((label) => (
-                      <span
-                        key={label}
-                        className="rounded-lg border border-white/15 bg-black/60 px-2.5 py-1 text-[10px] font-bold text-white backdrop-blur"
+                <div>
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--survey-accent)]">
+                    {c.fieldEyebrow}
+                  </div>
+
+                  <h2 className="mt-4 max-w-[17ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                    {c.fieldTitle}
+                  </h2>
+
+                  <p className="mt-5 max-w-[620px] text-base leading-7 text-[var(--survey-muted)]">
+                    {c.fieldBody}
+                  </p>
+
+                  <div className="mt-8 space-y-6">
+                    {c.fieldItems.map((item) => (
+                      <article
+                        key={item.title}
+                        className="border-t border-[var(--survey-border)] pt-5"
                       >
-                        {label}
-                      </span>
+                        <h3 className="text-base font-semibold">
+                          {item.title}
+                        </h3>
+
+                        <p className="mt-2 text-sm leading-7 text-[var(--survey-muted)]">
+                          {item.body}
+                        </p>
+                      </article>
                     ))}
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <section className="border-b border-white/10 bg-[#050914]">
-          <div className="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16 lg:px-12">
-            <div className="grid grid-cols-1 gap-9 lg:grid-cols-[minmax(0,.38fr)_minmax(0,.62fr)] lg:gap-14">
-              <div>
-                <div className="text-xs font-bold tracking-[.16em] text-emerald-400">{c.measureEyebrow}</div>
-                <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[40px]">
+          {/* OUTPUT SHOWCASE */}
+          <section className="border-b border-[var(--survey-border)] bg-[var(--survey-bg-2)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-18 lg:px-10 lg:py-20 xl:px-12">
+              <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,.42fr)_minmax(0,.58fr)] lg:items-start lg:gap-16">
+                <div>
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--survey-accent)]">
+                    {c.outputEyebrow}
+                  </div>
+
+                  <h2 className="mt-4 max-w-[18ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                    {c.outputTitle}
+                  </h2>
+
+                  <p className="mt-5 max-w-[560px] text-base leading-7 text-[var(--survey-muted)]">
+                    {c.outputBody}
+                  </p>
+
+                  <div className="mt-9 border-y border-[var(--survey-border)]">
+                    {c.outputItems.map((item) => (
+                      <article
+                        key={item.title}
+                        className="grid grid-cols-1 gap-2 border-b border-[var(--survey-border)] py-5 last:border-b-0 sm:grid-cols-[170px_minmax(0,1fr)] sm:gap-6"
+                      >
+                        <h3 className="text-base font-semibold">
+                          {item.title}
+                        </h3>
+
+                        <p className="text-sm leading-6 text-[var(--survey-muted)]">
+                          {item.body}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="min-w-0 lg:sticky lg:top-[96px]">
+                  <div className="survey-media overflow-hidden rounded-xl border border-[var(--survey-border)] bg-black sm:rounded-2xl">
+                    <div className="border-b border-[var(--survey-border)] bg-[var(--survey-surface)] px-4 py-3">
+                      <div className="font-mono text-[10px] font-bold tracking-[.14em] text-[var(--survey-accent)]">
+                        {c.projectView}
+                      </div>
+
+                      <div className="mt-1 text-sm font-semibold">
+                        {c.projectName}
+                      </div>
+                    </div>
+
+                    <video
+                      className="aspect-[16/10] w-full bg-black object-cover"
+                      src={surveyingVideo}
+                      muted
+                      loop
+                      autoPlay
+                      playsInline
+                      controls
+                      preload="metadata"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* MEASUREMENT BAND */}
+          <section className="border-b border-[var(--survey-border)] bg-[var(--survey-bg)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-18 lg:px-10 lg:py-20 xl:px-12">
+              <div className="max-w-[960px]">
+                <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--survey-accent)]">
+                  {c.measureEyebrow}
+                </div>
+
+                <h2 className="mt-4 max-w-[22ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
                   {c.measureTitle}
                 </h2>
-                <p className="mt-4 text-base leading-7 text-slate-400">{c.measureBody}</p>
+
+                <p className="mt-5 max-w-[760px] text-base leading-7 text-[var(--survey-muted)]">
+                  {c.measureBody}
+                </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                {c.measureItems.map((item, index) => {
-                  const Icon = MEASURE_ICONS[index];
-                  return (
-                    <article
-                      key={item.title}
-                      className="rounded-2xl border border-white/10 bg-[#09131f] p-5"
-                    >
-                      <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-300">
-                        <Icon size={19} />
-                      </span>
-                      <h3 className="mt-5 text-lg font-semibold">{item.title}</h3>
-                      <p className="mt-2 text-sm leading-6 text-slate-400">{item.body}</p>
-                    </article>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="border-b border-white/10 bg-[#07101c]">
-          <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-10 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,.42fr)_minmax(0,.58fr)] lg:gap-14 lg:px-12">
-            <div>
-              <div className="text-xs font-bold tracking-[.16em] text-sky-400">{c.valueEyebrow}</div>
-              <h2 className="mt-4 text-[30px] font-semibold leading-tight tracking-[-.035em] md:text-[40px]">
-                {c.valueTitle}
-              </h2>
-              <p className="mt-4 text-base leading-7 text-slate-400">{c.valueBody}</p>
-            </div>
-
-            <div className="overflow-hidden rounded-[24px] border border-white/10 bg-[#09131f]">
-              <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-                <div className="flex items-center gap-2 text-sm font-semibold">
-                  <Workflow size={17} className="text-sky-400" />
-                  {c.surveyWorkflow}
-                </div>
-                <Users size={17} className="text-emerald-400" />
-              </div>
-
-              <ul className="grid grid-cols-1 gap-px bg-white/10 sm:grid-cols-2">
-                {c.valueItems.map((item) => (
-                  <li
-                    key={item}
-                    className="flex gap-3 bg-[#09131f] px-5 py-5 text-sm leading-6 text-slate-300"
+              <div className="mt-10 grid grid-cols-1 border-y border-[var(--survey-border)] lg:grid-cols-3">
+                {c.measureItems.map((item) => (
+                  <article
+                    key={item.title}
+                    className="border-b border-[var(--survey-border)] py-6 lg:border-b-0 lg:border-r lg:px-8 lg:first:pl-0 lg:last:border-r-0 lg:last:pr-0"
                   >
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-400/10 text-sky-300">
-                      <Check size={12} />
-                    </span>
-                    {item}
-                  </li>
+                    <h3 className="text-lg font-semibold">
+                      {item.title}
+                    </h3>
+
+                    <p className="mt-2 text-sm leading-7 text-[var(--survey-muted)]">
+                      {item.body}
+                    </p>
+                  </article>
                 ))}
-              </ul>
-            </div>
-          </div>
-        </section>
-
-        <section className="relative overflow-hidden bg-[#050914]">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_100%,rgba(14,165,233,.15),transparent_42%)]" />
-
-          <div className="relative mx-auto grid max-w-[1160px] grid-cols-1 gap-7 px-5 py-12 md:px-8 md:py-16 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:px-12">
-            <div>
-              <div className="flex items-center gap-2 text-xs font-bold tracking-[.14em] text-sky-400">
-                <Share2 size={14} />
-                {c.finalEyebrow}
               </div>
+            </div>
+          </section>
 
-              <h2 className="mt-4 max-w-[760px] text-[28px] font-semibold leading-tight tracking-[-.035em] md:text-[38px]">
-                {c.finalTitle}
-              </h2>
+          {/* PROJECT VALUE */}
+          <section className="border-b border-[var(--survey-border)] bg-[var(--survey-bg-2)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-18 lg:px-10 lg:py-20 xl:px-12">
+              <div className="grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,.54fr)_minmax(0,.46fr)] lg:gap-16">
+                <div>
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--survey-accent)]">
+                    {c.valueEyebrow}
+                  </div>
 
-              <p className="mt-4 max-w-[720px] text-base leading-7 text-slate-400">
-                {c.finalBody}
-              </p>
+                  <h2 className="mt-4 max-w-[18ch] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] md:text-[38px] lg:text-[42px]">
+                    {c.valueTitle}
+                  </h2>
+
+                  <p className="mt-5 max-w-[640px] text-base leading-7 text-[var(--survey-muted)]">
+                    {c.valueBody}
+                  </p>
+                </div>
+
+                <div className="border-y border-[var(--survey-border)]">
+                  {c.valueItems.map((item) => (
+                    <div
+                      key={item}
+                      className="border-b border-[var(--survey-border)] py-5 text-sm leading-7 text-[var(--survey-muted)] last:border-b-0"
+                    >
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* CTA */}
+          <section className="bg-[var(--survey-bg)]">
+            <div className="mx-auto w-full max-w-[1560px] px-5 py-14 sm:px-8 md:py-16 lg:px-10 lg:py-18 xl:px-12">
+              <div className="grid grid-cols-1 gap-8 border-y border-[var(--survey-border)] py-10 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                <div>
+                  <div className="font-mono text-[11px] font-bold uppercase tracking-[.16em] text-[var(--survey-accent)]">
+                    {c.finalEyebrow}
+                  </div>
+
+                  <h2 className="mt-4 max-w-[24ch] text-[28px] font-semibold leading-[1.12] tracking-[-.035em] md:text-[36px]">
+                    {c.finalTitle}
+                  </h2>
+
+                  <p className="mt-4 max-w-[720px] text-base leading-7 text-[var(--survey-muted)]">
+                    {c.finalBody}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={openDemo}
+                  disabled={isDemoLoading}
+                  className="survey-focus inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[var(--survey-accent)] px-6 text-sm font-bold text-[var(--survey-cta-ink)] transition-colors hover:bg-[var(--survey-accent-strong)] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                >
+                  {isDemoLoading ? (
+                    <>
+                      <Loader2
+                        size={15}
+                        className="animate-spin"
+                      />
+                      {themeCopy.demoLoading}
+                    </>
+                  ) : (
+                    <>
+                      {c.finalButton}
+                      <ArrowRight size={15} />
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </section>
+        </main>
+
+        <footer className="border-t border-[var(--survey-border)] bg-[var(--survey-bg-2)]">
+          <div className="mx-auto flex w-full max-w-[1560px] flex-col gap-3 px-5 py-6 text-sm text-[var(--survey-muted)] sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-10 xl:px-12">
+            <div className="flex items-center gap-3">
+              <img
+                src={logoImg}
+                alt="SAOLATEK"
+                className="h-7 w-auto"
+              />
+
+              <span>
+                {c.footer}
+              </span>
             </div>
 
-            <button
-              type="button"
-              onClick={openDemo}
-              disabled={isDemoLoading}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-sky-400 px-6 text-sm font-bold text-[#04101a] transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-            >
-              {c.finalButton}
-              <ArrowRight size={16} />
-            </button>
+            <span>
+              © 2026 SAOLATEK
+            </span>
           </div>
-        </section>
-      </main>
-
-      <footer className="border-t border-white/10 bg-[#03060d]">
-        <div className="mx-auto flex max-w-[1440px] flex-col gap-4 px-5 py-7 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between md:px-8 lg:px-12">
-          <div className="flex items-center gap-3">
-            <img src={logoImg} alt="SAOLATEK" className="h-7 w-auto object-contain" />
-            <span>{c.footer}</span>
-          </div>
-          <span>© 2026 SAOLATEK</span>
-        </div>
-      </footer>
-    </div>
+        </footer>
+      </div>
+    </>
   );
 };
 

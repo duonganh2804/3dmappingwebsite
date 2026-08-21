@@ -3,7 +3,7 @@
  * contrast: pass (46–50)
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import logoImg from '../assets/logo.webp';
 import {
   Plus, MapPin, HardDrive, ArrowRight, Trash2, Users, LogOut, LogIn,
@@ -71,6 +71,7 @@ const DASHBOARD_TRANSLATIONS = {
     btnUpgrade: "Upgrade Now",
     menuMain: "Main Menu",
     menuManageProjects: "Manage Projects",
+    menuCustomerData: "Customer Information",
     menuBookDemo: "Book Demo",
     menuAdditional: "Additional Links",
     menuAcademy: "3D GIS Academy",
@@ -138,6 +139,7 @@ const DASHBOARD_TRANSLATIONS = {
     btnUpgrade: "Nâng cấp ngay",
     menuMain: "Danh mục chính",
     menuManageProjects: "Quản lý Dự án",
+    menuCustomerData: "Quản lý thông tin",
     menuBookDemo: "Đăng ký Demo",
     menuAdditional: "Liên kết bổ sung",
     menuAcademy: "Học viện 3D GIS",
@@ -205,6 +207,7 @@ const DASHBOARD_TRANSLATIONS = {
     btnUpgrade: "立即升级",
     menuMain: "主菜单",
     menuManageProjects: "项目管理",
+    menuCustomerData: "客户信息管理",
     menuBookDemo: "预约演示",
     menuAdditional: "附加链接",
     menuAcademy: "3D GIS 学院",
@@ -349,14 +352,33 @@ const DataBadge: React.FC<{ icon: React.ReactNode; label: string; active: boolea
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { projects, setProjects, isLoading, setLoading } = useProjectStore();
   const { user, isAuthenticated, logout } = useAuthStore();
 
   const isAdmin = user?.role === 'SUPERADMIN';
+  const isCustomerView =
+    new URLSearchParams(location.search).get('view') ===
+    'customers';
 
   // Tabs: 'all' | 'assigned' | 'public'
-  const [activeTab, setActiveTab] = useState<'all' | 'assigned' | 'public'>('all');
+  // ?tab=demo => luôn mở thẳng Demo Showcase khi đi từ Book Demo.
+  const requestedTab = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState<'all' | 'assigned' | 'public'>(() =>
+    requestedTab === 'demo' ? 'public' : 'all'
+  );
   const [searchQuery, setSearchQuery] = useState('');
+
+  const handleTabChange = (tab: 'all' | 'assigned' | 'public') => {
+    setActiveTab(tab);
+
+    if (tab === 'public') {
+      setSearchParams({ tab: 'demo' }, { replace: true });
+    } else {
+      setSearchParams({}, { replace: true });
+    }
+  };
 
   // UI layout and view state
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -376,11 +398,60 @@ export const DashboardPage: React.FC = () => {
 
   useEffect(() => {
     localStorage.setItem('lp_lang', currentLang);
+    localStorage.setItem('saolatek_language', currentLang);
+
+    window.dispatchEvent(
+      new CustomEvent('saolatek-language-change', {
+        detail: currentLang,
+      })
+    );
   }, [currentLang]);
 
   // Translate helper function
   const t = (key: keyof typeof DASHBOARD_TRANSLATIONS.vi) => {
     return DASHBOARD_TRANSLATIONS[currentLang][key] || DASHBOARD_TRANSLATIONS.vi[key] || '';
+  };
+
+  const getLocalizedProjectDescription = (
+    description?: string | null
+  ) => {
+    const normalized = description?.trim();
+
+    if (!normalized) {
+      return t('noDesc');
+    }
+
+    const systemDescriptions: Record<
+      string,
+      Record<'vi' | 'en' | 'zh', string>
+    > = {
+      'Được khôi phục tự động từ R2': {
+        vi: 'Được khôi phục tự động từ R2',
+        en: 'Automatically restored from R2',
+        zh: '已从 R2 自动恢复',
+      },
+      'Duoc khoi phuc tu dong tu R2': {
+        vi: 'Được khôi phục tự động từ R2',
+        en: 'Automatically restored from R2',
+        zh: '已从 R2 自动恢复',
+      },
+      'Automatically restored from R2': {
+        vi: 'Được khôi phục tự động từ R2',
+        en: 'Automatically restored from R2',
+        zh: '已从 R2 自动恢复',
+      },
+      '已从 R2 自动恢复': {
+        vi: 'Được khôi phục tự động từ R2',
+        en: 'Automatically restored from R2',
+        zh: '已从 R2 自动恢复',
+      },
+    };
+
+    return (
+      systemDescriptions[normalized]?.[
+        currentLang
+      ] ?? normalized
+    );
   };
 
   // Modals state
@@ -404,23 +475,33 @@ export const DashboardPage: React.FC = () => {
 
   useEffect(() => { loadProjects(); }, [loadProjects, isAuthenticated]);
 
-  // Set default tab on load/login
+  // Set default tab on load/login.
+  // Nếu URL có ?tab=demo thì luôn ưu tiên Demo Showcase.
   useEffect(() => {
-    if (user) {
-      if (isAdmin) {
-        setActiveTab('all');
-      } else {
-        const assignedCount = projects.filter(p =>
-          p.createdById === user.id || p.members?.some(m => m.userId === user.id)
-        ).length;
-        if (assignedCount > 0) {
-          setActiveTab('assigned');
-        } else {
-          setActiveTab('public');
-        }
-      }
+    if (!user) return;
+
+    if (requestedTab === 'demo') {
+      setActiveTab('public');
+      return;
     }
-  }, [user, isAdmin, projects.length]);
+
+    if (isAdmin) {
+      setActiveTab('all');
+      return;
+    }
+
+    const assignedCount = projects.filter(
+      (project) =>
+        project.createdById === user.id ||
+        project.members?.some((member) => member.userId === user.id)
+    ).length;
+
+    if (assignedCount > 0) {
+      setActiveTab('assigned');
+    } else {
+      setActiveTab('public');
+    }
+  }, [user, isAdmin, projects.length, requestedTab]);
 
   // Handle mobile responsive sidebar defaults
   useEffect(() => {
@@ -631,11 +712,31 @@ export const DashboardPage: React.FC = () => {
               <div className="space-y-0.5">
                 <button
                   onClick={() => navigate('/dashboard')}
-                  className="w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                  className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                    !isCustomerView
+                      ? 'text-blue-600 bg-blue-50'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                  }`}
                 >
                   <Layers size={15} />
                   <span>{t('menuManageProjects')}</span>
                 </button>
+
+                {isAdmin && (
+                  <button
+                    onClick={() =>
+                      navigate('/dashboard?view=customers')
+                    }
+                    className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                      isCustomerView
+                        ? 'text-blue-600 bg-blue-50'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Users size={15} />
+                    <span>{t('menuCustomerData')}</span>
+                  </button>
+                )}
                 <button
                   onClick={() => navigate('/book-demo')}
                   className="w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
@@ -753,9 +854,18 @@ export const DashboardPage: React.FC = () => {
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-450" />
             <input
               type="text"
-              placeholder={t('searchPlaceholder')}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={
+                isCustomerView
+                  ? t('menuCustomerData')
+                  : t('searchPlaceholder')
+              }
+              value={isCustomerView ? '' : searchQuery}
+              onChange={(e) => {
+                if (!isCustomerView) {
+                  setSearchQuery(e.target.value);
+                }
+              }}
+              disabled={isCustomerView}
               className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors font-sans"
             />
           </div>
@@ -884,6 +994,13 @@ export const DashboardPage: React.FC = () => {
 
         {/* ── Content Canvas Container ─────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto bg-slate-50/70 p-6 flex flex-col">
+          {isCustomerView && isAdmin ? (
+            <AdminLeadsModal
+              isOpen
+              presentation="page"
+              onClose={() => navigate('/dashboard')}
+            />
+          ) : (
           <div className="max-w-7xl w-full mx-auto flex-1 flex flex-col">
 
             {/* ── Control Options & Action Buttons Bar ───────────────────── */}
@@ -893,7 +1010,7 @@ export const DashboardPage: React.FC = () => {
               <div className="flex border-b border-slate-200 -mb-px">
                 {isAdmin && (
                   <button
-                    onClick={() => setActiveTab('all')}
+                    onClick={() => handleTabChange('all')}
                     className={`pb-2.5 px-3.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'all'
                         ? 'border-blue-600 text-blue-600'
                         : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
@@ -907,7 +1024,7 @@ export const DashboardPage: React.FC = () => {
                 )}
 
                 <button
-                  onClick={() => setActiveTab('assigned')}
+                  onClick={() => handleTabChange('assigned')}
                   className={`pb-2.5 px-3.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'assigned'
                       ? 'border-blue-600 text-blue-600'
                       : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
@@ -920,7 +1037,7 @@ export const DashboardPage: React.FC = () => {
                 </button>
 
                 <button
-                  onClick={() => setActiveTab('public')}
+                  onClick={() => handleTabChange('public')}
                   className={`pb-2.5 px-3.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'public'
                       ? 'border-blue-600 text-blue-600'
                       : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
@@ -1165,7 +1282,7 @@ export const DashboardPage: React.FC = () => {
                         </div>
 
                         <p className="text-xs text-slate-500 line-clamp-2 mt-1.5 min-h-[32px] leading-relaxed select-text">
-                          {project.description || t('noDesc')}
+                          {getLocalizedProjectDescription(project.description)}
                         </p>
 
                         {/* Coordinates */}
@@ -1273,7 +1390,7 @@ export const DashboardPage: React.FC = () => {
                                   >
                                     {project.name}
                                   </span>
-                                  <span className="text-[11px] text-slate-400 block truncate max-w-xs">{project.description || t('noDesc')}</span>
+                                  <span className="text-[11px] text-slate-400 block truncate max-w-xs">{getLocalizedProjectDescription(project.description)}</span>
                                 </div>
                               </div>
                             </td>
@@ -1407,10 +1524,12 @@ export const DashboardPage: React.FC = () => {
               </div>
             )}
           </div>
+          )}
         </div>
 
         {/* ── Modals & Overlay Dialogs ─────────────────────────────────── */}
         <ProjectFormModal
+        language={currentLang}
           isOpen={isModalOpen || !!editingProject}
           onClose={() => {
             setIsModalOpen(false);
@@ -1429,7 +1548,7 @@ export const DashboardPage: React.FC = () => {
         )}
 
         <AdminLeadsModal
-          isOpen={isLeadsModalOpen}
+          isOpen={isLeadsModalOpen && !isCustomerView}
           onClose={() => setIsLeadsModalOpen(false)}
         />
 

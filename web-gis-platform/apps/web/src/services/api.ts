@@ -575,3 +575,39 @@ export const deleteConsultationLead = async (
     return false;
   }
 };
+
+// ── Customer Accounts API Services ────────────────────────────────────────
+export interface CustomerAccountData {
+  id: string;
+  email: string;
+  fullName: string;
+  role: 'SUPERADMIN' | 'USER';
+  avatarUrl?: string | null;
+  authProvider?: 'GOOGLE' | 'PASSWORD';
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export const fetchCustomerAccounts = async (): Promise<
+  CustomerAccountData[]
+> => {
+  const response = await fetch(
+    `${API_BASE_URL}/admin/users`,
+    {
+      headers: getAuthHeaders(),
+      credentials: 'include'
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch customer accounts (${response.status})`
+    );
+  }
+
+  const data = await response.json();
+
+  return Array.isArray(data)
+    ? (data as CustomerAccountData[])
+    : [];
+};

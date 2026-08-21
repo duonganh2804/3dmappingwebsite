@@ -287,6 +287,21 @@ export const BookDemoPage: React.FC = () => {
     useLanguage('vi');
   const c = COPY[currentLang];
 
+  const readTheme = () => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+
+    return (
+      window.localStorage.getItem(
+        'saolatek_theme'
+      ) === 'dark'
+    );
+  };
+
+  const [isDarkMode, setIsDarkMode] =
+    useState(readTheme);
+
   const [formData, setFormData] = useState({
     email: '',
     fullName: '',
@@ -317,12 +332,63 @@ export const BookDemoPage: React.FC = () => {
   }, [navigate]);
 
   useEffect(() => {
+    const syncTheme = () => {
+      setIsDarkMode(readTheme());
+    };
+
+    const syncCustomTheme = (
+      event: Event
+    ) => {
+      const detail = (
+        event as CustomEvent<
+          'light' | 'dark'
+        >
+      ).detail;
+
+      if (detail === 'dark') {
+        setIsDarkMode(true);
+      }
+
+      if (detail === 'light') {
+        setIsDarkMode(false);
+      }
+    };
+
+    window.addEventListener(
+      'storage',
+      syncTheme
+    );
+    window.addEventListener(
+      'saolatek-theme-change',
+      syncCustomTheme
+    );
+
+    return () => {
+      window.removeEventListener(
+        'storage',
+        syncTheme
+      );
+      window.removeEventListener(
+        'saolatek-theme-change',
+        syncCustomTheme
+      );
+    };
+  }, []);
+
+  useEffect(() => {
     if (isLoading) return;
 
     if (!isAuthenticated) {
       navigate('/login', {
         replace: true,
         state: { returnTo: '/book-demo' }
+      });
+      return;
+    }
+
+    if (user?.role === 'SUPERADMIN') {
+      navigate('/dashboard', {
+        replace: true
       });
       return;
     }
@@ -369,7 +435,8 @@ export const BookDemoPage: React.FC = () => {
     navigate,
     openGrantedDemo,
     user?.email,
-    user?.fullName
+    user?.fullName,
+    user?.role
   ]);
 
   const handleEnterPlatform = async () => {
@@ -386,6 +453,11 @@ export const BookDemoPage: React.FC = () => {
           returnTo: '/book-demo'
         }
       });
+      return;
+    }
+
+    if (user?.role === 'SUPERADMIN') {
+      navigate('/dashboard');
       return;
     }
 
@@ -447,6 +519,13 @@ export const BookDemoPage: React.FC = () => {
   ) => {
     e.preventDefault();
 
+    if (user?.role === 'SUPERADMIN') {
+      navigate('/dashboard', {
+        replace: true
+      });
+      return;
+    }
+
     if (!validate()) return;
 
     setIsSubmitting(true);
@@ -498,8 +577,20 @@ export const BookDemoPage: React.FC = () => {
     isCheckingAccess
   ) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#080c14] text-white">
-        <div className="flex items-center gap-3 text-sm text-slate-300">
+      <div
+        className={`flex min-h-screen items-center justify-center ${
+          isDarkMode
+            ? 'bg-[#080c14] text-white'
+            : 'bg-[#f3f6fa] text-slate-900'
+        }`}
+      >
+        <div
+          className={`flex items-center gap-3 text-sm ${
+            isDarkMode
+              ? 'text-slate-300'
+              : 'text-slate-600'
+          }`}
+        >
           <Loader2
             size={18}
             className="animate-spin text-blue-400"
@@ -511,12 +602,36 @@ export const BookDemoPage: React.FC = () => {
   }
 
   return (
-    <div className="relative flex min-h-screen flex-col overflow-x-hidden bg-[#080c14] font-sans text-white selection:bg-blue-600 selection:text-white">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_35%,rgba(37,99,235,0.18),transparent_50%),radial-gradient(circle_at_80%_80%,rgba(14,165,233,0.1),transparent_50%)]" />
+    <div
+      className={`relative flex min-h-screen flex-col overflow-x-hidden font-sans selection:bg-blue-600 selection:text-white ${
+        isDarkMode
+          ? 'bg-[#080c14] text-white'
+          : 'bg-[#f3f6fa] text-slate-900'
+      }`}
+    >
+      <div
+        className={`pointer-events-none absolute inset-0 ${
+          isDarkMode
+            ? 'bg-[radial-gradient(circle_at_20%_35%,rgba(37,99,235,0.18),transparent_50%),radial-gradient(circle_at_80%_80%,rgba(14,165,233,0.1),transparent_50%)]'
+            : 'bg-[radial-gradient(circle_at_18%_30%,rgba(2,132,199,0.10),transparent_44%),radial-gradient(circle_at_82%_78%,rgba(14,165,233,0.06),transparent_42%)]'
+        }`}
+      />
 
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:4rem_4rem] opacity-[0.15]" />
+      <div
+        className={`pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,currentColor_1px,transparent_1px),linear-gradient(to_bottom,currentColor_1px,transparent_1px)] bg-[size:4rem_4rem] ${
+          isDarkMode
+            ? 'text-slate-800 opacity-[0.15]'
+            : 'text-slate-300 opacity-[0.20]'
+        }`}
+      />
 
-      <header className="relative z-20 w-full border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-md">
+      <header
+        className={`relative z-20 w-full border-b backdrop-blur-md ${
+          isDarkMode
+            ? 'border-slate-800/80 bg-slate-950/70'
+            : 'border-slate-200/90 bg-white/90'
+        }`}
+      >
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6">
           <Link
             to="/"
@@ -529,31 +644,51 @@ export const BookDemoPage: React.FC = () => {
             />
           </Link>
 
-          <nav className="hidden items-center gap-8 text-sm font-medium text-slate-300 md:flex">
+          <nav className={`hidden items-center gap-8 text-sm font-medium md:flex ${
+              isDarkMode
+                ? 'text-slate-300'
+                : 'text-slate-600'
+            }`}>
             <Link
               to="/"
-              className="transition-colors hover:text-white"
+              className={`transition-colors ${
+                isDarkMode
+                  ? 'hover:text-white'
+                  : 'hover:text-slate-950'
+              }`}
             >
               {c.navPlatform}
             </Link>
 
             <Link
               to="/"
-              className="transition-colors hover:text-white"
+              className={`transition-colors ${
+                isDarkMode
+                  ? 'hover:text-white'
+                  : 'hover:text-slate-950'
+              }`}
             >
               {c.navSolutions}
             </Link>
 
             <Link
               to="/"
-              className="transition-colors hover:text-white"
+              className={`transition-colors ${
+                isDarkMode
+                  ? 'hover:text-white'
+                  : 'hover:text-slate-950'
+              }`}
             >
               {c.navResources}
             </Link>
 
             <Link
               to="/"
-              className="transition-colors hover:text-white"
+              className={`transition-colors ${
+                isDarkMode
+                  ? 'hover:text-white'
+                  : 'hover:text-slate-950'
+              }`}
             >
               {c.navConnect}
             </Link>
@@ -572,7 +707,11 @@ export const BookDemoPage: React.FC = () => {
                 onClick={() =>
                   navigate('/dashboard')
                 }
-                className="hidden items-center gap-1.5 text-xs font-medium text-slate-300 transition-colors hover:text-white sm:flex"
+                className={`hidden items-center gap-1.5 text-xs font-medium transition-colors sm:flex ${
+                  isDarkMode
+                    ? 'text-slate-300 hover:text-white'
+                    : 'text-slate-600 hover:text-slate-950'
+                }`}
               >
                 <span>
                   {c.dashboard}
@@ -588,7 +727,11 @@ export const BookDemoPage: React.FC = () => {
                 onClick={() =>
                   navigate('/login')
                 }
-                className="hidden text-xs text-slate-300 transition-colors hover:text-white sm:block"
+                className={`hidden text-xs transition-colors sm:block ${
+                  isDarkMode
+                    ? 'text-slate-300 hover:text-white'
+                    : 'text-slate-600 hover:text-slate-950'
+                }`}
               >
                 {c.login}
               </button>
@@ -612,20 +755,36 @@ export const BookDemoPage: React.FC = () => {
 
       <main className="relative z-10 mx-auto grid w-full max-w-7xl flex-grow grid-cols-1 items-start gap-12 px-5 py-8 sm:px-6 sm:py-12 lg:grid-cols-12">
         <div className="space-y-8 pt-4 lg:col-span-6">
-          <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-950/60 px-3 py-1 font-mono text-xs text-blue-400">
+          <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 font-mono text-xs ${
+            isDarkMode
+              ? 'border-blue-500/30 bg-blue-950/60 text-blue-400'
+              : 'border-sky-200 bg-sky-50 text-sky-700'
+          }`}>
             <span className="h-2 w-2 animate-ping rounded-full bg-blue-500" />
             <span>{c.eyebrow}</span>
           </div>
 
-          <h1 className="text-4xl font-extrabold leading-[1.1] tracking-tight text-white sm:text-5xl lg:text-6xl">
+          <h1 className={`text-4xl font-extrabold leading-[1.1] tracking-tight sm:text-5xl lg:text-6xl ${
+            isDarkMode
+              ? 'text-white'
+              : 'text-slate-950'
+          }`}>
             {c.title}
           </h1>
 
-          <p className="max-w-xl text-base leading-relaxed text-slate-300 sm:text-lg">
+          <p className={`max-w-xl text-base leading-relaxed sm:text-lg ${
+            isDarkMode
+              ? 'text-slate-300'
+              : 'text-slate-600'
+          }`}>
             {c.body}
           </p>
 
-          <div className="space-y-4 border-t border-slate-800/80 pt-6">
+          <div className={`space-y-4 border-t pt-6 ${
+            isDarkMode
+              ? 'border-slate-800/80'
+              : 'border-slate-200'
+          }`}>
             {[
               {
                 Icon: Sparkles,
@@ -648,16 +807,28 @@ export const BookDemoPage: React.FC = () => {
                   key={title}
                   className="flex items-start gap-3"
                 >
-                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-blue-500/40 bg-blue-950 text-blue-400">
+                  <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${
+                    isDarkMode
+                      ? 'border-blue-500/40 bg-blue-950 text-blue-400'
+                      : 'border-sky-200 bg-sky-50 text-sky-700'
+                  }`}>
                     <Icon size={16} />
                   </div>
 
                   <div>
-                    <h4 className="text-sm font-bold text-white">
+                    <h4 className={`text-sm font-bold ${
+                      isDarkMode
+                        ? 'text-white'
+                        : 'text-slate-900'
+                    }`}>
                       {title}
                     </h4>
 
-                    <p className="text-xs leading-5 text-slate-400">
+                    <p className={`text-xs leading-5 ${
+                      isDarkMode
+                        ? 'text-slate-400'
+                        : 'text-slate-500'
+                    }`}>
                       {body}
                     </p>
                   </div>
@@ -671,12 +842,20 @@ export const BookDemoPage: React.FC = () => {
           id="demo-form"
           className="scroll-mt-24 lg:col-span-6"
         >
-          <div className="relative rounded-3xl border border-slate-100 bg-white p-8 text-slate-900 shadow-2xl sm:p-10">
+          <div className={`relative rounded-3xl border p-8 shadow-2xl sm:p-10 ${
+            isDarkMode
+              ? 'border-slate-700/70 bg-slate-900/95 text-slate-100 shadow-black/30'
+              : 'border-slate-200 bg-white text-slate-900 shadow-slate-300/40'
+          }`}>
             <form
               onSubmit={handleSubmit}
               className="space-y-6"
             >
-              <h2 className="text-2xl font-bold tracking-tight text-slate-900">
+              <h2 className={`text-2xl font-bold tracking-tight ${
+                isDarkMode
+                  ? 'text-white'
+                  : 'text-slate-900'
+              }`}>
                 {c.formTitle}
               </h2>
 
@@ -708,7 +887,11 @@ export const BookDemoPage: React.FC = () => {
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <label className="block text-xs font-mono font-bold text-slate-700">
+                  <label className={`block text-xs font-mono font-bold ${
+                    isDarkMode
+                      ? 'text-slate-300'
+                      : 'text-slate-700'
+                  }`}>
                     {c.businessEmail}{' '}
                     <span className="text-red-500">
                       *
@@ -734,17 +917,25 @@ export const BookDemoPage: React.FC = () => {
                       email: e.target.value
                     })
                   }
-                  className={`w-full border-b bg-transparent py-2 text-sm text-slate-900 outline-none transition-colors ${
+                  className={`w-full border-b bg-transparent py-2 text-sm outline-none transition-colors ${
                     errors.email
-                      ? 'border-red-500 placeholder-red-300'
-                      : 'border-slate-300 focus:border-blue-600'
+                      ? isDarkMode
+                        ? 'border-red-500 text-red-100 placeholder:text-red-300/60'
+                        : 'border-red-500 text-slate-900 placeholder-red-300'
+                      : isDarkMode
+                        ? 'border-slate-700 text-slate-100 placeholder:text-slate-600 focus:border-sky-400'
+                        : 'border-slate-300 text-slate-900 focus:border-blue-600'
                   }`}
                 />
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-1">
-                  <label className="block text-xs font-mono font-bold text-slate-700">
+                  <label className={`block text-xs font-mono font-bold ${
+                    isDarkMode
+                      ? 'text-slate-300'
+                      : 'text-slate-700'
+                  }`}>
                     {c.fullName}
                   </label>
 
@@ -763,13 +954,21 @@ export const BookDemoPage: React.FC = () => {
                           e.target.value
                       })
                     }
-                    className="w-full border-b border-slate-300 bg-transparent py-2 text-sm text-slate-900 outline-none transition-colors focus:border-blue-600"
+                    className={`w-full border-b bg-transparent py-2 text-sm outline-none transition-colors ${
+                      isDarkMode
+                        ? 'border-slate-700 text-slate-100 placeholder:text-slate-600 focus:border-sky-400'
+                        : 'border-slate-300 text-slate-900 focus:border-blue-600'
+                    }`}
                   />
                 </div>
 
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <label className="block text-xs font-mono font-bold text-slate-700">
+                    <label className={`block text-xs font-mono font-bold ${
+                    isDarkMode
+                      ? 'text-slate-300'
+                      : 'text-slate-700'
+                  }`}>
                       {c.jobTitle}{' '}
                       <span className="text-red-500">
                         *
@@ -800,10 +999,14 @@ export const BookDemoPage: React.FC = () => {
                           e.target.value
                       })
                     }
-                    className={`w-full border-b bg-transparent py-2 text-sm text-slate-900 outline-none transition-colors ${
+                    className={`w-full border-b bg-transparent py-2 text-sm outline-none transition-colors ${
                       errors.jobTitle
-                        ? 'border-red-500'
-                        : 'border-slate-300 focus:border-blue-600'
+                        ? isDarkMode
+                          ? 'border-red-500 text-red-100'
+                          : 'border-red-500 text-slate-900'
+                        : isDarkMode
+                          ? 'border-slate-700 text-slate-100 placeholder:text-slate-600 focus:border-sky-400'
+                          : 'border-slate-300 text-slate-900 focus:border-blue-600'
                     }`}
                   />
                 </div>
@@ -811,7 +1014,11 @@ export const BookDemoPage: React.FC = () => {
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-1">
-                  <label className="block text-xs font-mono font-bold text-slate-700">
+                  <label className={`block text-xs font-mono font-bold ${
+                    isDarkMode
+                      ? 'text-slate-300'
+                      : 'text-slate-700'
+                  }`}>
                     {c.companyName}
                   </label>
 
@@ -828,12 +1035,20 @@ export const BookDemoPage: React.FC = () => {
                           e.target.value
                       })
                     }
-                    className="w-full border-b border-slate-300 bg-transparent py-2 text-sm text-slate-900 outline-none transition-colors focus:border-blue-600"
+                    className={`w-full border-b bg-transparent py-2 text-sm outline-none transition-colors ${
+                      isDarkMode
+                        ? 'border-slate-700 text-slate-100 placeholder:text-slate-600 focus:border-sky-400'
+                        : 'border-slate-300 text-slate-900 focus:border-blue-600'
+                    }`}
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="block text-xs font-mono font-bold text-slate-700">
+                  <label className={`block text-xs font-mono font-bold ${
+                    isDarkMode
+                      ? 'text-slate-300'
+                      : 'text-slate-700'
+                  }`}>
                     {c.phoneNumber}
                   </label>
 
@@ -850,14 +1065,22 @@ export const BookDemoPage: React.FC = () => {
                           e.target.value
                       })
                     }
-                    className="w-full border-b border-slate-300 bg-transparent py-2 text-sm text-slate-900 outline-none transition-colors focus:border-blue-600"
+                    className={`w-full border-b bg-transparent py-2 text-sm outline-none transition-colors ${
+                      isDarkMode
+                        ? 'border-slate-700 text-slate-100 placeholder:text-slate-600 focus:border-sky-400'
+                        : 'border-slate-300 text-slate-900 focus:border-blue-600'
+                    }`}
                   />
                 </div>
               </div>
 
               <div className="space-y-1 pt-2">
                 <div className="flex items-center justify-between">
-                  <label className="block text-xs font-mono font-bold text-slate-700">
+                  <label className={`block text-xs font-mono font-bold ${
+                    isDarkMode
+                      ? 'text-slate-300'
+                      : 'text-slate-700'
+                  }`}>
                     {c.message}{' '}
                     <span className="text-red-500">
                       *
@@ -884,17 +1107,25 @@ export const BookDemoPage: React.FC = () => {
                         e.target.value
                     })
                   }
-                  className={`w-full rounded-lg border p-3 text-sm text-slate-900 outline-none transition-colors ${
+                  className={`w-full rounded-lg border p-3 text-sm outline-none transition-colors ${
                     errors.message
-                      ? 'border-red-500 bg-red-50/50'
-                      : 'border-slate-200 bg-slate-50 focus:border-blue-600'
+                      ? isDarkMode
+                      ? 'border-red-500/70 bg-red-950/30 text-red-100 placeholder:text-red-300/60'
+                      : 'border-red-500 bg-red-50/50 text-slate-900'
+                      : isDarkMode
+                      ? 'border-slate-700 bg-slate-950/60 text-slate-100 placeholder:text-slate-600 focus:border-sky-400'
+                      : 'border-slate-200 bg-slate-50 text-slate-900 focus:border-blue-600'
                   }`}
                 />
               </div>
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <label className="block text-xs font-mono font-bold text-slate-700">
+                  <label className={`block text-xs font-mono font-bold ${
+                    isDarkMode
+                      ? 'text-slate-300'
+                      : 'text-slate-700'
+                  }`}>
                     {c.source}{' '}
                     <span className="text-red-500">
                       *
@@ -921,17 +1152,29 @@ export const BookDemoPage: React.FC = () => {
                         e.target.value
                     })
                   }
-                  className={`w-full rounded-lg border p-3 text-sm text-slate-900 outline-none transition-colors ${
+                  className={`w-full rounded-lg border p-3 text-sm outline-none transition-colors ${
                     errors.source
-                      ? 'border-red-500 bg-red-50/50'
-                      : 'border-slate-200 bg-slate-50 focus:border-blue-600'
+                      ? isDarkMode
+                      ? 'border-red-500/70 bg-red-950/30 text-red-100 placeholder:text-red-300/60'
+                      : 'border-red-500 bg-red-50/50 text-slate-900'
+                      : isDarkMode
+                      ? 'border-slate-700 bg-slate-950/60 text-slate-100 placeholder:text-slate-600 focus:border-sky-400'
+                      : 'border-slate-200 bg-slate-50 text-slate-900 focus:border-blue-600'
                   }`}
                 />
               </div>
 
-              <p className="pt-1 text-[11px] leading-normal text-slate-500">
+              <p className={`pt-1 text-[11px] leading-normal ${
+                isDarkMode
+                  ? 'text-slate-500'
+                  : 'text-slate-500'
+              }`}>
                 {c.privacyBefore}{' '}
-                <span className="cursor-pointer underline hover:text-slate-800">
+                <span className={`cursor-pointer underline ${
+                  isDarkMode
+                    ? 'hover:text-slate-200'
+                    : 'hover:text-slate-800'
+                }`}>
                   {c.privacyPolicy}
                 </span>{' '}
                 {c.privacyAfter}
@@ -972,7 +1215,11 @@ export const BookDemoPage: React.FC = () => {
         </div>
       </main>
 
-      <footer className="relative z-10 border-t border-slate-900 py-6 text-center text-xs font-mono text-slate-500">
+      <footer className={`relative z-10 border-t py-6 text-center text-xs font-mono ${
+        isDarkMode
+          ? 'border-slate-900 text-slate-500'
+          : 'border-slate-200 text-slate-500'
+      }`}>
         {c.footerRights}
       </footer>
     </div>

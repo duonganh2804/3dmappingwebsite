@@ -49,6 +49,9 @@ interface UnifiedToolbarProps {
   ) => void;
 
   onClear: () => void;
+
+  // Reserve the fixed top-right area occupied by Calibration Panel (Admin).
+  reserveAdminPanel?: boolean;
 }
 
 const toolbarStyle = `
@@ -81,6 +84,17 @@ const toolbarStyle = `
 
   .viewer-command-bar::-webkit-scrollbar {
     height: 0;
+  }
+
+  /*
+   * Keep the toolbar's LEFT EDGE stable.
+   * Previously it was centered with translateX(-50%), so adding Xóa/hint
+   * made the bar wider and pushed its left edge underneath "Bảng điều khiển".
+   */
+  @media (max-width: 1180px) {
+    .viewer-command-bar {
+      left: 328px !important;
+    }
   }
 
   .viewer-command-group {
@@ -293,6 +307,7 @@ export const UnifiedToolbar: React.FC<
   toolMode,
   onToolModeChange,
   onClear,
+  reserveAdminPanel = false,
 }) => {
   const { currentLang } =
     useLanguage('vi');
@@ -313,7 +328,13 @@ export const UnifiedToolbar: React.FC<
     <>
       <style>{toolbarStyle}</style>
 
-      <div className="viewer-command-bar fixed left-1/2 top-3 z-30 flex max-w-[calc(100vw-380px)] -translate-x-1/2 items-center overflow-x-auto rounded-2xl border border-[var(--bar-border)] bg-[var(--bar-bg)] p-1.5 shadow-[var(--bar-shadow)] backdrop-blur-xl select-none">
+      <div
+        className="viewer-command-bar fixed left-[468px] top-3 z-30 flex items-center overflow-x-auto rounded-2xl border border-[var(--bar-border)] bg-[var(--bar-bg)] p-1.5 shadow-[var(--bar-shadow)] backdrop-blur-xl select-none"
+        style={{
+          right: reserveAdminPanel ? '352px' : '16px',
+          maxWidth: 'none',
+        }}
+      >
         <div className="viewer-command-group">
           {LAYER_BUTTONS.map(
             ({

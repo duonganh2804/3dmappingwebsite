@@ -7,7 +7,6 @@ import {
   Box,
   ChevronLeft,
   ChevronRight,
-  Globe,
   Image as ImageIcon,
   Layers,
   Lock,
@@ -22,6 +21,7 @@ import {
 
 import type { ToolMode } from './CesiumViewer';
 import { useLanguage } from '../../hooks/useLanguage';
+import logoImg from '../../assets/logo.webp';
 
 type BgMode =
   | 'sky'
@@ -65,6 +65,12 @@ interface PotreeSidebarProps {
   currentMode: ToolMode;
   onModeChange: (mode: ToolMode) => void;
   onClear: () => void;
+  measurementManager?: React.ReactNode;
+  onClipTool?: (tool: 'box' | 'polygon' | 'plane' | 'clear') => void;
+  clipMode?: ClipMode;
+  onClipModeChange?: (mode: ClipMode) => void;
+  clipFilter?: ClipFilter;
+  onClipFilterChange?: (filter: ClipFilter) => void;
 
   showMeasurements?: boolean;
   onToggleShowMeasurements?: () => void;
@@ -73,6 +79,7 @@ interface PotreeSidebarProps {
   onSetCameraView?: (
     view: 'L' | 'R' | 'F' | 'B' | 'T' | 'D'
   ) => void;
+  onNavigationAction?: (action: 'earth' | 'fps' | 'orbit' | 'heli' | 'compass' | 'anim') => void;
 
   isOptimizerOpen: boolean;
   onToggleOptimizer: () => void;
@@ -91,6 +98,7 @@ interface PotreeSidebarProps {
   onFovChange: (v: number) => void;
 
   edlEnabled: boolean;
+  edlSupported?: boolean;
   onEdlToggle: (v: boolean) => void;
   edlRadius: number;
   onEdlRadiusChange: (v: number) => void;
@@ -512,15 +520,18 @@ function PtCheckbox({
   label,
   checked,
   onChange,
+  disabled = false,
 }: {
   label: string;
   checked: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
-    <label className="group flex cursor-pointer items-center gap-2.5 py-1">
+    <label className={`group flex items-center gap-2.5 py-1 ${disabled ? 'cursor-not-allowed opacity-45' : 'cursor-pointer'}`}>
       <button
         type="button"
+        disabled={disabled}
         onClick={() => onChange(!checked)}
         className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${
           checked
@@ -532,7 +543,7 @@ function PtCheckbox({
       </button>
 
       <span
-        onClick={() => onChange(!checked)}
+        onClick={() => { if (!disabled) onChange(!checked); }}
         className="viewer-check-label select-none text-[11px] transition"
       >
         {label}
@@ -807,11 +818,18 @@ export function PotreeSidebar({
   currentMode,
   onModeChange,
   onClear,
+  measurementManager,
+  onClipTool,
+  clipMode = 'highlight',
+  onClipModeChange,
+  clipFilter = 'any',
+  onClipFilterChange,
   showMeasurements = true,
   onToggleShowMeasurements,
   cameraSpeed = 130.6,
   onCameraSpeedChange,
   onSetCameraView,
+  onNavigationAction,
   onToggleOptimizer,
   isOptimizerOpen,
   showModel,
@@ -825,6 +843,7 @@ export function PotreeSidebar({
   fov,
   onFovChange,
   edlEnabled,
+  edlSupported = false,
   onEdlToggle,
   edlRadius,
   onEdlRadiusChange,
@@ -984,12 +1003,6 @@ export function PotreeSidebar({
     }));
   };
 
-  const [clipMode, setClipMode] =
-    useState<ClipMode>('highlight');
-
-  const [clipFilter, setClipFilter] =
-    useState<ClipFilter>('any');
-
   const backgroundOptions: {
     key: BgMode;
     label: string;
@@ -1074,7 +1087,7 @@ export function PotreeSidebar({
       title: 'Đo thể tích khối 3D (Volume)',
     },
     {
-      mode: 'distance',
+      mode: 'sphere',
       icon: getIconUrl('sphere.svg'),
       label: c.sphere,
       title:
@@ -1242,24 +1255,22 @@ export function PotreeSidebar({
         }`}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-[var(--vs-border)] bg-[var(--vs-bg-soft)] px-4 py-3.5">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-sky-500/25 bg-sky-500/10 text-sky-400">
-              <Globe size={15} />
-            </div>
+          <div className="flex min-w-0 flex-1 flex-col justify-center pr-2">
+            <img
+              src={logoImg}
+              alt="SAOLATEK"
+              draggable={false}
+              className="h-[27px] w-auto max-w-[126px] object-contain object-left"
+            />
 
-            <div className="min-w-0">
-              <div className="truncate text-[11px] font-extrabold uppercase tracking-[0.12em] text-sky-400">
-                SAOLATEK
-              </div>
-              <div className="mt-0.5 flex items-center gap-1.5 text-[9px] text-[var(--vs-muted)]">
-                <span>v1.8.0</span>
-                <span className="text-[var(--vs-border)]">
-                  ·
-                </span>
-                <span className="max-w-[120px] truncate">
-                  {projectName}
-                </span>
-              </div>
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[8px] font-medium text-[var(--vs-muted)]">
+              <span className="shrink-0">v1.8.0</span>
+              <span className="shrink-0 text-[var(--vs-border)]">
+                ·
+              </span>
+              <span className="truncate">
+                {projectName}
+              </span>
             </div>
           </div>
 
@@ -1408,6 +1419,8 @@ export function PotreeSidebar({
                     {c.hide}
                   </Segment>
                 </div>
+
+                {measurementManager}
               </div>
 
               <div className="viewer-section-shell space-y-3">
@@ -1422,13 +1435,10 @@ export function PotreeSidebar({
                         type="button"
                         key={tool.id}
                         onClick={() => {
-                          if (
-                            tool.id === 'clear'
-                          ) {
-                            onClear();
-                          }
+                          onClipTool?.(tool.id as 'box' | 'polygon' | 'plane' | 'clear');
                         }}
-                        title={tool.title}
+                        disabled={tool.id === 'polygon'}
+                        title={tool.id === 'polygon' ? 'Clipping polygon chưa được hỗ trợ an toàn cho pipeline hiện tại' : tool.title}
                         className={`${baseToolButton} ${
                           tool.id === 'clear'
                             ? dangerToolButton
@@ -1469,7 +1479,7 @@ export function PotreeSidebar({
                         type="button"
                         key={mode}
                         onClick={() =>
-                          setClipMode(mode)
+                          onClipModeChange?.(mode)
                         }
                         className={`px-1 py-1.5 text-[9px] font-semibold capitalize transition ${
                           clipMode === mode
@@ -1499,7 +1509,7 @@ export function PotreeSidebar({
                     }
                     first
                     onClick={() =>
-                      setClipFilter('any')
+                      onClipFilterChange?.('any')
                     }
                   >
                     {c.insideAny}
@@ -1513,7 +1523,7 @@ export function PotreeSidebar({
                     }
                     last
                     onClick={() =>
-                      setClipFilter('all')
+                      onClipFilterChange?.('all')
                     }
                   >
                     {c.insideAll}
@@ -1532,13 +1542,16 @@ export function PotreeSidebar({
                       <button
                         type="button"
                         key={tool.id}
+                        disabled={tool.id === 'heli' || tool.id === 'anim'}
                         onClick={() => {
                           if (tool.action) {
                             tool.action();
+                          } else if (tool.id !== 'heli' && tool.id !== 'anim') {
+                            onNavigationAction?.(tool.id as 'earth' | 'fps' | 'orbit' | 'compass');
                           }
                         }}
                         title={tool.title}
-                        className={baseToolButton}
+                        className={`${baseToolButton} disabled:cursor-not-allowed disabled:opacity-40`}
                       >
                         <img
                           src={tool.icon}
@@ -1708,9 +1721,10 @@ export function PotreeSidebar({
                 </MicroTitle>
 
                 <PtCheckbox
-                  label={c.enable}
+                  label={edlSupported ? c.enable : `${c.enable} (không hỗ trợ)`}
                   checked={edlEnabled}
                   onChange={onEdlToggle}
+                  disabled={!edlSupported}
                 />
 
                 {edlEnabled && (

@@ -36,6 +36,7 @@ model User {
 
   createdProjects Project[]       @relation("CreatedProjects")
   memberships     ProjectMember[]
+  measurements    Measurement[]   @relation("CreatedMeasurements")
 }
 
 model ProjectMember {
@@ -69,6 +70,27 @@ model Project {
   createdById  String?
   createdBy    User?           @relation("CreatedProjects", fields: [createdById], references: [id], onDelete: SetNull)
   members      ProjectMember[]
+  measurements Measurement[]
+}
+
+model Measurement {
+  id          String   @id
+  projectId   String
+  type        String
+  positions   Json
+  value       String?
+  label       String?
+  visible     Boolean  @default(true)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User?   @relation("CreatedMeasurements", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([projectId, createdAt])
+  @@index([createdById])
 }
 
 enum LeadStatus {

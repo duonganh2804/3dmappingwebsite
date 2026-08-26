@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
-import { PotreeSidebar } from './PotreeSidebar';
+import { PotreeSidebar, type LayerLoadStatus } from './PotreeSidebar';
 import { OptimizerPanel } from './OptimizerPanel';
 import { UnifiedToolbar, type DisplayMode, type ViewAngle } from './UnifiedToolbar';
 import { MeasurementManager, type MeasurementManagerItem } from './MeasurementManager';
@@ -18,6 +18,10 @@ import { useAuthStore } from '../../store/useAuthStore';
 import type { MeasurementRecord, ProfileResult, ProfileSample } from './measurementTypes';
 import { deserializeMeasurement, serializeMeasurementRecord } from './measurementPersistence';
 import {
+  buildAreaReferencePlane,
+  buildControlProfilePreview,
+  buildProfileChartPoints,
+  buildProfileSamplePlan,
   calculateAngleDegrees,
   calculateCentroid,
   calculatePolygonArea,
@@ -27,47 +31,33 @@ import {
   getProjectedPoint,
   MEASUREMENT_RING_DOT_GLOW_IMAGE,
   MEASUREMENT_RING_DOT_IMAGE,
+  normalizeAreaPoints,
+  projectPointToPlane,
 } from './measurementUtils';
+import { ClippingController, type ClipTool } from './clippingController';
+import { useCameraNavigation } from './navigation/useCameraNavigation';
+import { useHeatmap } from './heatmap/useHeatmap';
+import { CalibNumberInput } from './viewer/CalibNumberInput';
+import {
+  AREA_SURFACE_PLANE_MAX_DISTANCE,
+  DEFAULT_POINT_SIZE,
+  MEASUREMENT_SURFACE_DRAG_SENSITIVITY,
+} from './viewer/constants';
+import { isFiniteCartesian } from './viewer/geometry';
+import { usePointCloudAppearance } from './pointCloud/usePointCloudAppearance';
+import {
+  appendDomCacheBust,
+  classifyPointCloudSource,
+  getPointCloudIndexBaseUrl,
+  isCopcTilesIndex,
+  isDirectTilesetUrl,
+  resolvePointCloudTileUrl,
+} from './loaders/sourceUtils';
 
 export type { MeasurementRecord, MeasureTarget, ProfileResult, ProfileSample, ToolMode } from './measurementTypes';
 import type { ToolMode } from './measurementTypes';
 type ClipMode = 'none' | 'highlight' | 'inside' | 'outside';
 type ClipFilter = 'any' | 'all';
-
-// Component hỗ trợ nhập số mượt mà cho Calibration Panel (cho phép gõ -, 0., xóa trắng mà không bị reset về 0)
-const CalibNumberInput: React.FC<{
-  value: number;
-  onChange: (val: number) => void;
-  step?: string;
-  className?: string;
-}> = ({ value, onChange, step = "any", className = "" }) => {
-  const [text, setText] = useState<string>(value !== undefined && value !== null ? value.toString() : '0');
-
-  useEffect(() => {
-    setText(value !== undefined && value !== null ? value.toString() : '0');
-  }, [value]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const valStr = e.target.value;
-    setText(valStr);
-    const parsed = parseFloat(valStr);
-    if (!isNaN(parsed)) {
-      onChange(parsed);
-    }
-  };
-
-  return (
-    <input
-      type="number"
-      step={step}
-      value={text}
-      onChange={handleChange}
-      className={className}
-    />
-  );
-};
-
-
 export const CesiumViewer: React.FC<{
   projectId?: string;
   projectName?: string;
@@ -92,8 +82,12 @@ export const CesiumViewer: React.FC<{
     const measurementsStoreRef = useRef<MeasurementRecord[]>([]);
     const measurementPersistenceQueueRef = useRef(new Map<string, Promise<void>>());
     const hydratedMeasurementsProjectRef = useRef<string | null>(null);
-    const clippingCollectionsRef = useRef<Cesium.ClippingPlaneCollection[]>([]);
-    const clippingEntitiesRef = useRef<Cesium.Entity[]>([]);
+    const measurementCameraStateRef = useRef<Record<string, boolean> | null>(null);
+    const measurementCameraLockOwnerRef = useRef(false);
+    const measurementDragCancelRef = useRef<(() => void) | null>(null);
+    const measurementDragHandlerRef = useRef<Cesium.ScreenSpaceEventHandler | null>(null);
+    const areaReferencePlanesRef = useRef(new Map<string, Cesium.Plane>());
+    const clippingControllerRef = useRef<ClippingController | null>(null);
     // Lazy load: track whether PC đã được load (tránh load lại nhiều lần)
     const pointCloudLoadedRef = useRef(false);
 
@@ -107,13 +101,85 @@ export const CesiumViewer: React.FC<{
     const [isOptimizerOpen, setIsOptimizerOpen] = useState(false);
     const [displayMode, setDisplayMode] = useState<DisplayMode>('full');
     const [viewAngle, setViewAngle] = useState<ViewAngle>('default');
-    const [navigationMode, setNavigationMode] = useState<'earth' | 'fps' | 'orbit'>('earth');
+    const [activeCameraView, setActiveCameraView] = useState<'L' | 'R' | 'F' | 'B' | 'T' | 'D' | null>(null);
+    const [isFocusPicking, setIsFocusPicking] = useState(false);
+    const [isReturningFocusOrigin, setIsReturningFocusOrigin] = useState(false);
+    const [hasFocusedTarget, setHasFocusedTarget] = useState(false);
+    const focusOriginRef = useRef<{
+      destination: Cesium.Cartesian3;
+      heading: number;
+      pitch: number;
+      roll: number;
+    } | null>(null);
+    const suppressPresetClearRef = useRef(false);
+    const [cameraHeading, setCameraHeading] = useState(0);
     const [clipMode, setClipMode] = useState<ClipMode>('highlight');
     const [clipFilter, setClipFilter] = useState<ClipFilter>('any');
-    const [activeClipTool, setActiveClipTool] = useState<'box' | 'plane' | null>(null);
+    const [activeClipTool, setActiveClipTool] = useState<ClipTool | null>(null);
+    const [clipInstruction, setClipInstruction] = useState<string | null>(null);
+
+    const getAreaReferencePlane = (record: MeasurementRecord) => {
+      const existing = areaReferencePlanesRef.current.get(record.id);
+      if (existing) return existing;
+      const plane = record.type === 'area' ? buildAreaReferencePlane(record.points) : null;
+      if (plane) areaReferencePlanesRef.current.set(record.id, plane);
+      return plane;
+    };
+
+    const getMeasurementCameraFlags = (controller: Cesium.ScreenSpaceCameraController) => ({
+      enableInputs: controller.enableInputs,
+      enableRotate: controller.enableRotate,
+      enableTranslate: controller.enableTranslate,
+      enableZoom: controller.enableZoom,
+      enableTilt: controller.enableTilt,
+      enableLook: controller.enableLook,
+    });
+
+    const lockMeasurementCamera = () => {
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed() || measurementCameraLockOwnerRef.current) return;
+      const controller = viewer.scene.screenSpaceCameraController;
+      const before = getMeasurementCameraFlags(controller);
+      measurementCameraStateRef.current = before;
+      measurementCameraLockOwnerRef.current = true;
+      controller.enableInputs = controller.enableRotate = controller.enableTranslate = false;
+      controller.enableZoom = controller.enableTilt = controller.enableLook = false;
+      console.info('[MEASURE CAMERA] LOCK', { before, after: getMeasurementCameraFlags(controller) });
+    };
+
+    const restoreMeasurementCamera = () => {
+      const viewer = viewerRef.current;
+      if (!measurementCameraLockOwnerRef.current) {
+        if (viewer && !viewer.isDestroyed()) {
+          const current = getMeasurementCameraFlags(viewer.scene.screenSpaceCameraController);
+          console.info('[MEASURE CAMERA] RESTORE', { owner: false, before: current, after: current });
+        }
+        return;
+      }
+      const savedState = measurementCameraStateRef.current;
+      measurementCameraStateRef.current = null;
+      measurementCameraLockOwnerRef.current = false;
+      if (!viewer || viewer.isDestroyed() || !savedState) return;
+      const controller = viewer.scene.screenSpaceCameraController;
+      const before = getMeasurementCameraFlags(controller);
+      Object.assign(controller, savedState);
+      console.info('[MEASURE CAMERA] RESTORE', { before, after: getMeasurementCameraFlags(controller) });
+    };
 
     // State loading model: hiện spinner khi đang fetch/parse glTF
-    const [isModelLoading, setIsModelLoading] = useState(false);
+    const [modelLoadStatus, setModelLoadStatus] = useState<LayerLoadStatus>('idle');
+    const [pointCloudLoadStatus, setPointCloudLoadStatus] = useState<LayerLoadStatus>('idle');
+    const [domLoadStatus, setDomLoadStatus] = useState<LayerLoadStatus>('idle');
+    const [modelLoadError, setModelLoadError] = useState<string | null>(null);
+    const [pointCloudLoadError, setPointCloudLoadError] = useState<string | null>(null);
+    const [domLoadError, setDomLoadError] = useState<string | null>(null);
+    const [domLoadAttempt, setDomLoadAttempt] = useState(0);
+    const modelLoadGenerationRef = useRef(0);
+    const pointCloudLoadGenerationRef = useRef(0);
+    const domLoadGenerationRef = useRef(0);
+    const retryModelRef = useRef<() => void>(() => undefined);
+    const retryPointCloudRef = useRef<() => void>(() => undefined);
+    const activeLayerProjectRef = useRef<string | null>(null);
 
     // States quản lý bật tắt layer
     // Mặc định: chỉ hiện Model 3D, ẩn Point Cloud và DOM để tránh flash khi load
@@ -122,12 +188,15 @@ export const CesiumViewer: React.FC<{
     const [showPointCloud, setShowPointCloud] = useState(false);
 
     // States quản lý Appearance (Ngoại quan Potree)
-    const [pointSize, setPointSize] = useState(2.5);
+    const [pointSize, setPointSize] = useState(DEFAULT_POINT_SIZE);
     const [fov, setFov] = useState(60);
     const [edlEnabled, setEdlEnabled] = useState(false);
     const [edlRadius, setEdlRadius] = useState(1.4);
     const [edlStrength, setEdlStrength] = useState(0.4);
     const [edlOpacity, setEdlOpacity] = useState(1.0);
+    const [modelOpacity, setModelOpacity] = useState(1);
+    const [pointCloudOpacity, setPointCloudOpacity] = useState(1);
+    const [domOpacity, setDomOpacity] = useState(1);
     const [background, setBackground] = useState<'sky' | 'gradient' | 'black' | 'white' | 'none'>('gradient');
     const [quality, setQuality] = useState<'standard' | 'high'>('standard');
     const [minPointBudget, setMinPointBudget] = useState(100_000);
@@ -137,9 +206,22 @@ export const CesiumViewer: React.FC<{
     const [lockView, setLockView] = useState(false);
     const [isOrthographic, setIsOrthographic] = useState(false);
     const [showMeasurements, setShowMeasurements] = useState(true);
-    const [cameraSpeed, setCameraSpeed] = useState(130.6);
     const [activeProfile, setActiveProfile] = useState<ProfileResult | null>(null);
     const [isProfileSampling, setIsProfileSampling] = useState(false);
+    const {
+      controllerRef: heatmapControllerRef,
+      enabled: heatmapEnabled,
+      max: heatmapMax,
+      onEnabledChange: handleHeatmapEnabledChange,
+      property: heatmapProperty,
+      rangeAvailable: heatmapRangeAvailable,
+      resetRange: resetHeatmapRange,
+      setProperty: setHeatmapProperty,
+    } = useHeatmap({
+      viewerRef,
+      pointCloudLoadStatus,
+      projectKey: project?.id ? String(project.id) : undefined,
+    });
 
     const enqueueMeasurementPersistence = (measurementId: string, operation: () => Promise<unknown>) => {
       const previous = measurementPersistenceQueueRef.current.get(measurementId) ?? Promise.resolve();
@@ -206,6 +288,20 @@ export const CesiumViewer: React.FC<{
     const loadedPointCloudTilesetsRef = useRef<Cesium.Cesium3DTileset[]>([]);
     const domImageRef = useRef<HTMLImageElement | null>(null);
     const domImageSrcRef = useRef<string | null>(null);
+    const layerVisibilityRef = useRef({ model: showModel, pointCloud: showPointCloud, dom: showDom });
+    layerVisibilityRef.current = { model: showModel, pointCloud: showPointCloud, dom: showDom };
+    const layerOpacityRef = useRef({ model: modelOpacity, pointCloud: pointCloudOpacity, dom: domOpacity });
+    layerOpacityRef.current = { model: modelOpacity, pointCloud: pointCloudOpacity, dom: domOpacity };
+
+    const applyProjectLayerVisibility = () => {
+      const visibility = layerVisibilityRef.current;
+      if (modelRef.current && !modelRef.current.isDestroyed()) modelRef.current.show = visibility.model;
+      loadedPointCloudTilesetsRef.current.forEach(tileset => {
+        if (!tileset.isDestroyed()) tileset.show = visibility.pointCloud;
+      });
+      if (domLayerRef.current && !domLayerRef.current.isDestroyed()) domLayerRef.current.show = visibility.dom;
+      viewerRef.current?.scene.requestRender();
+    };
 
     useEffect(() => {
       offsetsRef.current = offsets;
@@ -296,7 +392,7 @@ export const CesiumViewer: React.FC<{
       }
 
       // 3. Nạp từ tileset.json nếu pointCloudId là đường dẫn JSON
-      if (project.pointCloudId && (project.pointCloudId.startsWith('http') || project.pointCloudId.startsWith('/')) && project.pointCloudId.endsWith('tileset.json')) {
+      if (project.pointCloudId && isDirectTilesetUrl(project.pointCloudId)) {
         fetch(project.pointCloudId)
           .then(res => res.json())
           .then(tsData => {
@@ -367,9 +463,18 @@ export const CesiumViewer: React.FC<{
     // Cập nhật thời gian thực ảnh DOM khi tinh chỉnh (offset/scale) với Debounce 250ms (DUY NHẤT)
     useEffect(() => {
       const viewer = viewerRef.current;
-      if (!viewer || viewer.isDestroyed() || !project || !project.domUrl) return;
+      const generation = ++domLoadGenerationRef.current;
+      if (!project?.domUrl) {
+        setDomLoadStatus(project ? 'unavailable' : 'idle');
+        setDomLoadError(null);
+        return;
+      }
+      if (!viewer || viewer.isDestroyed()) return;
 
       let isCurrent = true;
+      const isActive = () => isCurrent && generation === domLoadGenerationRef.current && !viewer.isDestroyed();
+      setDomLoadStatus('loading');
+      setDomLoadError(null);
 
       const timer = setTimeout(async () => {
         const baseLon = project.centerLon || 106.8099;
@@ -442,7 +547,7 @@ export const CesiumViewer: React.FC<{
           // Tải hình ảnh dưới dạng Blob để giải quyết CORS và tránh làm bẩn (tainting) canvas
           let img = domImageRef.current;
           if (!img || domImageSrcRef.current !== domUrl) {
-            const res = await fetch(domUrl + "?cb=" + Date.now(), { mode: 'cors' });
+            const res = await fetch(appendDomCacheBust(domUrl, Date.now()), { mode: 'cors' });
             if (!res.ok) throw new Error("Fetch DOM image failed");
             const blob = await res.blob();
             const blobUrl = URL.createObjectURL(blob);
@@ -459,7 +564,7 @@ export const CesiumViewer: React.FC<{
               };
               image.src = blobUrl;
             });
-            if (!isCurrent) return;
+            if (!isActive()) return;
             domImageRef.current = img;
             domImageSrcRef.current = domUrl;
           }
@@ -512,11 +617,12 @@ export const CesiumViewer: React.FC<{
             rectangle: newDomRectangle,
           });
 
-          if (!isCurrent || viewer.isDestroyed()) return;
+          if (!isActive()) return;
 
           const oldLayer = domLayerRef.current;
           const newLayer = viewer.imageryLayers.addImageryProvider(provider);
-          newLayer.show = showDom;
+          newLayer.show = layerVisibilityRef.current.dom;
+          newLayer.alpha = layerOpacityRef.current.dom;
           newLayer.colorToAlpha = Cesium.Color.BLACK;
           newLayer.colorToAlphaThreshold = 0.15;
 
@@ -526,6 +632,7 @@ export const CesiumViewer: React.FC<{
           if (oldLayer && !viewer.isDestroyed() && !oldLayer.isDestroyed() && viewer.imageryLayers.contains(oldLayer)) {
             viewer.imageryLayers.remove(oldLayer, true);
           }
+          setDomLoadStatus('ready');
         } catch (canvasErr) {
           console.warn("⚠️ Không thể tạo ảnh DOM xoay bằng canvas. Chuyển sang nạp ảnh gốc không xoay làm dự phòng:", canvasErr);
 
@@ -539,21 +646,26 @@ export const CesiumViewer: React.FC<{
             finalWest >= finalEast || finalSouth >= finalNorth ||
             finalWest < -180 || finalEast > 180 || finalSouth < -90 || finalNorth > 90
           ) {
+            if (isActive()) {
+              setDomLoadStatus('error');
+              setDomLoadError('Tải DOM thất bại');
+            }
             return;
           }
 
           const domRectangle = Cesium.Rectangle.fromDegrees(finalWest, finalSouth, finalEast, finalNorth);
 
           try {
-            const provider = await Cesium.SingleTileImageryProvider.fromUrl(domUrl + "?cb=" + Date.now(), {
+            const provider = await Cesium.SingleTileImageryProvider.fromUrl(appendDomCacheBust(domUrl, Date.now()), {
               rectangle: domRectangle,
             });
 
-            if (!isCurrent || viewer.isDestroyed()) return;
+            if (!isActive()) return;
 
             const oldLayer = domLayerRef.current;
             const newLayer = viewer.imageryLayers.addImageryProvider(provider);
-            newLayer.show = showDom;
+            newLayer.show = layerVisibilityRef.current.dom;
+            newLayer.alpha = layerOpacityRef.current.dom;
             newLayer.colorToAlpha = Cesium.Color.BLACK;
             newLayer.colorToAlphaThreshold = 0.15;
 
@@ -563,7 +675,12 @@ export const CesiumViewer: React.FC<{
             if (oldLayer && !viewer.isDestroyed() && !oldLayer.isDestroyed() && viewer.imageryLayers.contains(oldLayer)) {
               viewer.imageryLayers.remove(oldLayer, true);
             }
+            setDomLoadStatus('ready');
           } catch (err) {
+            if (isActive()) {
+              setDomLoadStatus('error');
+              setDomLoadError('Tải DOM thất bại');
+            }
             console.error("Lỗi nghiêm trọng khi nạp ảnh DOM dự phòng:", err);
           }
         }
@@ -573,7 +690,7 @@ export const CesiumViewer: React.FC<{
         isCurrent = false;
         clearTimeout(timer);
       };
-    }, [offsets.domLon, offsets.domLat, offsets.domScale, offsets.domHeading, showDom, project]);
+    }, [offsets.domLon, offsets.domLat, offsets.domScale, offsets.domHeading, project, domLoadAttempt]);
 
     // Cập nhật vị trí Point Cloud theo thời gian thực khi Admin hiệu chỉnh (offset/rotation/tilt)
     useEffect(() => {
@@ -622,48 +739,57 @@ export const CesiumViewer: React.FC<{
 
     // Đồng bộ trạng thái hiển thị Mô hình 3D Mesh với Primitive Cesium
     useEffect(() => {
-      if (modelRef.current && !modelRef.current.isDestroyed()) {
-        modelRef.current.show = showModel;
-      }
-    }, [showModel]);
+      applyProjectLayerVisibility();
+    }, [showModel, showPointCloud, showDom]);
 
-    // Đồng bộ trạng thái hiển thị Đám mây điểm Point Cloud với Tilesets Cesium
     useEffect(() => {
-      loadedPointCloudTilesetsRef.current.forEach(ts => {
-        if (ts && !ts.isDestroyed()) {
-          ts.show = showPointCloud;
-        }
-      });
-    }, [showPointCloud]);
+      layerOpacityRef.current = { model: 1, pointCloud: 1, dom: 1 };
+      setModelOpacity(1);
+      setPointCloudOpacity(1);
+      setDomOpacity(1);
+    }, [projectId]);
 
-    // Đồng bộ trạng thái hiển thị Ảnh trực giao DOM với ImageryLayer Cesium
-    useEffect(() => {
-      if (domLayerRef.current && !domLayerRef.current.isDestroyed()) {
-        domLayerRef.current.show = showDom;
-      }
-    }, [showDom]);
+    const fullSceneReadinessKey = displayMode === 'full'
+      ? `${project?.id ?? ''}:${modelLoadStatus}:${pointCloudLoadStatus}:${domLoadStatus}`
+      : '';
 
     // Xử lý chuyển đổi chế độ hiển thị 4 lựa chọn (Full Map, Point Cloud, 3D Model, DOM Image)
     useEffect(() => {
       const viewer = viewerRef.current;
       if (!viewer || viewer.isDestroyed()) return;
 
+      const statusesBelongToProject = activeLayerProjectRef.current === project?.id;
+      const modelReady = statusesBelongToProject && modelLoadStatus === 'ready';
+      const pointCloudReady = statusesBelongToProject && pointCloudLoadStatus === 'ready';
+      const domReady = statusesBelongToProject && domLoadStatus === 'ready';
+      const fullVisibility = modelReady
+        ? { model: true, pointCloud: false, dom: domReady }
+        : pointCloudReady
+          ? { model: false, pointCloud: true, dom: domReady }
+          : { model: false, pointCloud: false, dom: domReady };
+      const visibilityByMode: Record<DisplayMode, { model: boolean; pointCloud: boolean; dom: boolean }> = {
+        full: fullVisibility,
+        pointcloud: { model: false, pointCloud: true, dom: false },
+        model3d: { model: true, pointCloud: false, dom: false },
+        dom: { model: false, pointCloud: false, dom: true },
+      };
+      const visibility = visibilityByMode[displayMode];
+      layerVisibilityRef.current = visibility;
+      setShowModel(visibility.model);
+      setShowPointCloud(visibility.pointCloud);
+      setShowDom(visibility.dom);
+      applyProjectLayerVisibility();
+
       if (displayMode === 'full') {
         viewer.scene.globe.show = true;
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true;
         if (viewer.scene.skyBox) viewer.scene.skyBox.show = true;
         viewer.scene.backgroundColor = Cesium.Color.BLACK;
-        setShowPointCloud(false); // Ở chế độ Full Map: chỉ hiển thị 3D Model, ẩn Point Cloud và DOM
-        setShowModel(true);
-        setShowDom(false);
       } else if (displayMode === 'pointcloud') {
         viewer.scene.globe.show = false; // Ẩn quả địa cầu Cesium
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
         if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
         viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#090d16');
-        setShowPointCloud(true);
-        setShowModel(false);
-        setShowDom(false);
         // Lazy load: nếu trên mobile và PC chưa được load thì trigger load ngay bây giờ
         if (isMobile && !pointCloudLoadedRef.current && project) {
           pointCloudLoadedRef.current = true; // đặt cờ trước để tránh load nhiều lần
@@ -676,21 +802,15 @@ export const CesiumViewer: React.FC<{
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
         if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
         viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#090d16');
-        setShowModel(true);
-        setShowPointCloud(false);
-        setShowDom(false);
         handleFocusProject();
       } else if (displayMode === 'dom') {
         viewer.scene.globe.show = true;
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true;
         if (viewer.scene.skyBox) viewer.scene.skyBox.show = true;
         viewer.scene.backgroundColor = Cesium.Color.BLACK;
-        setShowDom(true);
-        setShowPointCloud(false);
-        setShowModel(false);
         handleFocusDom();
       }
-    }, [displayMode, project]);
+    }, [displayMode, project, fullSceneReadinessKey]);
 
     // Xử lý chuyển đổi góc nhìn camera (Default perspective vs Top Down 90°) xoay quanh tâm màn hình
     const prevViewAngleRef = useRef<ViewAngle>('default');
@@ -983,7 +1103,16 @@ export const CesiumViewer: React.FC<{
       });
 
       viewerRef.current = viewer;
-      viewer.scene.pickTranslucentDepth = false; // Tắt pickTranslucentDepth để tránh crash WebGL khi hủy viewer/unmount
+      const updateCameraHeading = () => {
+        setCameraHeading((Cesium.Math.toDegrees(viewer.camera.heading) + 360) % 360);
+      };
+      const clearCameraPreset = () => {
+        if (!suppressPresetClearRef.current) setActiveCameraView(null);
+      };
+      updateCameraHeading();
+      viewer.camera.changed.addEventListener(updateCameraHeading);
+      viewer.camera.moveStart.addEventListener(clearCameraPreset);
+      viewer.scene.pickTranslucentDepth = true;
       viewer.scene.globe.depthTestAgainstTerrain = true;
 
       // ── BEST PRACTICE: ResolutionScale theo device pixel ratio ──
@@ -1015,6 +1144,19 @@ export const CesiumViewer: React.FC<{
       measurementEntitiesRef.current = [];
 
       return () => {
+        focusOriginRef.current = null;
+        // Restore tracked styles while primitives are still alive, then release
+        // every weak reference before Cesium destroys the scene.
+        heatmapControllerRef.current.reset();
+        measurementDragCancelRef.current?.();
+        measurementDragCancelRef.current = null;
+        restoreMeasurementCamera();
+        if (measurementDragHandlerRef.current && !measurementDragHandlerRef.current.isDestroyed()) {
+          measurementDragHandlerRef.current.destroy();
+        }
+        measurementDragHandlerRef.current = null;
+        clippingControllerRef.current?.destroy();
+        clippingControllerRef.current = null;
         if (handlerRef.current) {
           try { handlerRef.current.destroy(); } catch (e) {}
           handlerRef.current = null;
@@ -1022,7 +1164,10 @@ export const CesiumViewer: React.FC<{
 
         const v = viewerRef.current;
         viewerRef.current = null;
+        if (!viewer.isDestroyed()) viewer.camera.changed.removeEventListener(updateCameraHeading);
+        if (!viewer.isDestroyed()) viewer.camera.moveStart.removeEventListener(clearCameraPreset);
         measurementEntitiesRef.current = [];
+        areaReferencePlanesRef.current.clear();
 
         if (v && !v.isDestroyed()) {
           try {
@@ -1042,9 +1187,18 @@ export const CesiumViewer: React.FC<{
       if (!viewer || viewer.isDestroyed() || !project) return;
 
       let isCurrent = true;
+      activeLayerProjectRef.current = project.id;
+      modelLoadGenerationRef.current += 1;
+      pointCloudLoadGenerationRef.current += 1;
+      setModelLoadStatus(project.modelUrl ? 'idle' : 'unavailable');
+      setPointCloudLoadStatus(project.pointCloudId ? 'idle' : 'unavailable');
+      setModelLoadError(null);
+      setPointCloudLoadError(null);
 
       // 1. Dọn dẹp sạch sẽ các lớp dữ liệu của dự án cũ trước khi nạp dự án mới
       try {
+        heatmapControllerRef.current.reset();
+        resetHeatmapRange();
         if (modelRef.current && !viewer.isDestroyed() && !modelRef.current.isDestroyed()) {
           viewer.scene.primitives.remove(modelRef.current);
           modelRef.current = null;
@@ -1074,11 +1228,19 @@ export const CesiumViewer: React.FC<{
         latitude = temp;
       }
 
+      heatmapControllerRef.current.setProjectReference(
+        Cesium.Cartesian3.fromDegrees(longitude, latitude, 0),
+        String(project.id),
+      );
+
       // 1. Nạp mô hình 3D model
-      const loadOfflineModel = async () => {
+      const loadOfflineModel = async (flyAfterLoad = true) => {
+        const generation = ++modelLoadGenerationRef.current;
+        const isActive = () => isCurrent && generation === modelLoadGenerationRef.current && !viewer.isDestroyed();
         try {
           const modelUrl = project.modelUrl;
           if (!modelUrl) {
+            if (isActive()) setModelLoadStatus('unavailable');
             console.log("Dự án này không có mô hình 3D Mesh.");
             const position = Cesium.Cartesian3.fromDegrees(longitude, latitude, 20);
             const targetSphere = new Cesium.BoundingSphere(position, 100.0);
@@ -1091,6 +1253,13 @@ export const CesiumViewer: React.FC<{
               )
             });
             return;
+          }
+
+          setModelLoadStatus('loading');
+          setModelLoadError(null);
+          if (modelRef.current && !modelRef.current.isDestroyed()) {
+            viewer.scene.primitives.remove(modelRef.current);
+            modelRef.current = null;
           }
 
           let initLon = 0;
@@ -1144,7 +1313,6 @@ export const CesiumViewer: React.FC<{
           );
 
           console.log("Nạp 3D model từ:", modelUrl);
-          setIsModelLoading(true);
           const model = await Cesium.Model.fromGltfAsync({
             url: modelUrl,
             modelMatrix: modelMatrix,
@@ -1161,14 +1329,18 @@ export const CesiumViewer: React.FC<{
             clampAnimations: true,
           });
 
-          if (!isCurrent || viewer.isDestroyed()) return;
+          if (!isActive()) {
+            if (!model.isDestroyed()) model.destroy();
+            return;
+          }
           viewer.scene.primitives.add(model);
           modelRef.current = model;
-          model.show = showModel;
-          setIsModelLoading(false);
+          model.show = layerVisibilityRef.current.model;
+          model.color = Cesium.Color.WHITE.withAlpha(layerOpacityRef.current.model);
+          setModelLoadStatus('ready');
 
           const targetSphere = new Cesium.BoundingSphere(position, 200.0);
-          viewer.camera.flyToBoundingSphere(targetSphere, {
+          if (flyAfterLoad) viewer.camera.flyToBoundingSphere(targetSphere, {
             // Mobile: bay nhanh hơn để không block interaction
             duration: isMobile ? 1.5 : 2.5,
             offset: new Cesium.HeadingPitchRange(
@@ -1181,8 +1353,9 @@ export const CesiumViewer: React.FC<{
           // requestRenderMode: yêu cầu render 1 frame sau khi model load xong
           if (!(viewer as any).useDefaultRenderLoop) viewer.scene.requestRender();
         } catch (error) {
-          setIsModelLoading(false);
-          if (viewerRef.current && !viewerRef.current.isDestroyed()) {
+          if (isActive()) {
+            setModelLoadStatus('error');
+            setModelLoadError('Tải Model thất bại');
             console.error("Lỗi khi load mô hình 3D:", error);
           }
         }
@@ -1242,25 +1415,40 @@ export const CesiumViewer: React.FC<{
 
       // 3. Nạp lớp đám mây điểm Point Cloud
       const loadPointCloud = async () => {
+        const generation = ++pointCloudLoadGenerationRef.current;
+        const isActive = () => isCurrent && generation === pointCloudLoadGenerationRef.current && !viewer.isDestroyed();
         const pcId = project.pointCloudId;
         if (!pcId) {
+          if (isActive()) setPointCloudLoadStatus('unavailable');
           console.log("Dự án này không có mây điểm Point Cloud.");
           return;
         }
+        const pointCloudSource = classifyPointCloudSource(pcId);
+
+        setPointCloudLoadStatus('loading');
+        setPointCloudLoadError(null);
+        loadedPointCloudTilesetsRef.current.forEach(tileset => {
+          if (!tileset.isDestroyed()) viewer.scene.primitives.remove(tileset);
+        });
+        loadedPointCloudTilesetsRef.current = [];
+        pointCloudRef.current = null;
+        pointCloudOriginalCenterRef.current = null;
 
         const targetPosition = Cesium.Cartesian3.fromDegrees(longitude, latitude, 0);
 
         try {
           // Trường hợp 1: URL trỏ tới file COPC đơn (.copc.laz) hoặc tileset.json 3D Tiles
-          if ((pcId.startsWith('http') || pcId.startsWith('/')) &&
-            (pcId.endsWith('tileset.json') || pcId.endsWith('.laz') || pcId.endsWith('.copc.laz'))) {
+          if (pointCloudSource.kind === 'direct-url') {
             console.log("Nạp Point Cloud COPC/3DTiles từ URL:", pcId);
             const tileset = await Cesium.Cesium3DTileset.fromUrl(pcId);
-            if (!isCurrent || viewer.isDestroyed()) return;
+            if (!isActive()) {
+              if (!tileset.isDestroyed()) tileset.destroy();
+              return;
+            }
             viewer.scene.primitives.add(tileset);
             pointCloudRef.current = tileset;
             loadedPointCloudTilesetsRef.current = [tileset];
-            tileset.show = showPointCloud;
+            tileset.show = layerVisibilityRef.current.pointCloud;
             
             // ── BEST PRACTICE TỐI ƯU POINT CLOUD 3D TILES ──
             tileset.skipLevelOfDetail = true; // Bỏ qua LOD trung gian giúp giảm 50-70% request HTTP
@@ -1288,18 +1476,19 @@ export const CesiumViewer: React.FC<{
             }
             
             applyPcCalibration(tileset, targetPosition);
+            setPointCloudLoadStatus('ready');
             return;
           }
 
           // Trường hợp 2: URL trỏ tới index.json (custom copc-tiles format)
-          if ((pcId.startsWith('http') || pcId.startsWith('/')) && pcId.endsWith('index.json')) {
+          if (pointCloudSource.kind === 'custom-index') {
             console.log("Phát hiện custom copc-tiles index.json, đọc danh sách tiles:", pcId);
             try {
               const res = await fetch(pcId);
               const indexData = await res.json();
 
-              if (indexData.type === 'copc-tiles' && Array.isArray(indexData.tiles) && indexData.tiles.length > 0) {
-                const baseUrl = pcId.substring(0, pcId.lastIndexOf('/') + 1);
+              if (isCopcTilesIndex(indexData)) {
+                const baseUrl = getPointCloudIndexBaseUrl(pcId);
                 const tilesToLoad = indexData.tiles.slice(0, Math.min(indexData.tiles.length, 5));
                 console.log(`Nạp ${tilesToLoad.length}/${indexData.tiles.length} COPC tiles từ R2...`);
 
@@ -1307,11 +1496,14 @@ export const CesiumViewer: React.FC<{
                 loadedPointCloudTilesetsRef.current = [];
                 for (const tileName of tilesToLoad) {
                   try {
-                    const tileUrl = baseUrl + tileName;
+                    const tileUrl = resolvePointCloudTileUrl(baseUrl, tileName);
                     const ts = await Cesium.Cesium3DTileset.fromUrl(tileUrl);
-                    if (!isCurrent || viewer.isDestroyed()) return;
+                    if (!isActive()) {
+                      if (!ts.isDestroyed()) ts.destroy();
+                      return;
+                    }
                     viewer.scene.primitives.add(ts);
-                    ts.show = showPointCloud;
+                    ts.show = layerVisibilityRef.current.pointCloud;
                     
                     // ── BEST PRACTICE TỐI ƯU POINT CLOUD 3D TILES ──
                     ts.skipLevelOfDetail = true;
@@ -1348,7 +1540,10 @@ export const CesiumViewer: React.FC<{
                     console.warn(`Không thể load tile ${tileName}:`, tileErr);
                   }
                 }
-                if (firstTileset) return;
+                if (firstTileset) {
+                  setPointCloudLoadStatus('ready');
+                  return;
+                }
               }
             } catch (indexErr) {
               console.warn("Không thể đọc index.json, thử load trực tiếp:", indexErr);
@@ -1356,15 +1551,18 @@ export const CesiumViewer: React.FC<{
           }
 
           // Trường hợp 3: Cesium Ion Asset ID (số nguyên)
-          if (!isNaN(parseInt(pcId))) {
-            const pointCloudAssetId = parseInt(pcId);
+          if (pointCloudSource.kind === 'ion-asset') {
+            const pointCloudAssetId = pointCloudSource.assetId;
             console.log("Nạp Point Cloud từ Cesium Ion Asset ID:", pointCloudAssetId);
             const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(pointCloudAssetId);
-            if (!isCurrent || viewer.isDestroyed()) return;
+            if (!isActive()) {
+              if (!tileset.isDestroyed()) tileset.destroy();
+              return;
+            }
             viewer.scene.primitives.add(tileset);
             pointCloudRef.current = tileset;
             loadedPointCloudTilesetsRef.current = [tileset];
-            tileset.show = showPointCloud;
+            tileset.show = layerVisibilityRef.current.pointCloud;
             
             // ── BEST PRACTICE TỐI ƯU POINT CLOUD 3D TILES ──
             tileset.skipLevelOfDetail = true;
@@ -1388,17 +1586,32 @@ export const CesiumViewer: React.FC<{
             }
             
             applyPcCalibration(tileset, targetPosition);
+            setPointCloudLoadStatus('ready');
             return;
           }
 
           console.warn("Không nhận diện được định dạng pointCloudId:", pcId);
+          if (isActive()) {
+            setPointCloudLoadStatus('error');
+            setPointCloudLoadError('Tải Point Cloud thất bại');
+          }
         } catch (error) {
+          if (isActive()) {
+            setPointCloudLoadStatus('error');
+            setPointCloudLoadError('Tải Point Cloud thất bại');
+          }
           console.error("Lỗi khi load Point Cloud:", error);
         }
       };
 
       // Reset lazy load flag khi đổi project
       pointCloudLoadedRef.current = false;
+
+      retryModelRef.current = () => { void loadOfflineModel(false); };
+      retryPointCloudRef.current = () => {
+        if (isMobile) void loadPointCloudLazy(false);
+        else void loadPointCloud();
+      };
 
       loadOfflineModel();
 
@@ -1413,6 +1626,8 @@ export const CesiumViewer: React.FC<{
 
       return () => {
         isCurrent = false;
+        modelLoadGenerationRef.current += 1;
+        pointCloudLoadGenerationRef.current += 1;
 
         // Nếu component đang unmount (viewer chuẩn bị hủy), ta không cần remove từng phần tử
         // vì viewer.destroy() sẽ tự dọn dẹp WebGL ở tick tiếp theo.
@@ -1456,16 +1671,31 @@ export const CesiumViewer: React.FC<{
 
     // ── Hàm lazy load Point Cloud cho Mobile ──
     // Được gọi khi user lần đầu chuyển sang chế độ Point Cloud trên mobile
-    const loadPointCloudLazy = async () => {
+    const loadPointCloudLazy = async (focusAfterLoad = true) => {
       const viewer = viewerRef.current;
       if (!viewer || viewer.isDestroyed() || !project) return;
+      const generation = ++pointCloudLoadGenerationRef.current;
+      const isActive = () => generation === pointCloudLoadGenerationRef.current && activeLayerProjectRef.current === project.id && !viewer.isDestroyed();
 
       let longitude = project.centerLon || 106.8099;
       let latitude = project.centerLat || 10.8404;
       if (longitude < 90 && latitude > 90) { const t = longitude; longitude = latitude; latitude = t; }
 
       const pcId = project.pointCloudId;
-      if (!pcId) return;
+      if (!pcId) {
+        if (isActive()) setPointCloudLoadStatus('unavailable');
+        return;
+      }
+      const pointCloudSource = classifyPointCloudSource(pcId);
+
+      setPointCloudLoadStatus('loading');
+      setPointCloudLoadError(null);
+      loadedPointCloudTilesetsRef.current.forEach(tileset => {
+        if (!tileset.isDestroyed()) viewer.scene.primitives.remove(tileset);
+      });
+      loadedPointCloudTilesetsRef.current = [];
+      pointCloudRef.current = null;
+      pointCloudOriginalCenterRef.current = null;
 
       const targetPosition = Cesium.Cartesian3.fromDegrees(longitude, latitude, 0);
 
@@ -1491,16 +1721,20 @@ export const CesiumViewer: React.FC<{
 
       try {
         let tileset: Cesium.Cesium3DTileset | null = null;
-        if ((pcId.startsWith('http') || pcId.startsWith('/')) && (pcId.endsWith('tileset.json') || pcId.endsWith('.laz') || pcId.endsWith('.copc.laz'))) {
+        if (pointCloudSource.kind === 'direct-url') {
           tileset = await Cesium.Cesium3DTileset.fromUrl(pcId);
-        } else if (!isNaN(parseInt(pcId))) {
-          tileset = await Cesium.Cesium3DTileset.fromIonAssetId(parseInt(pcId));
+        } else if (pointCloudSource.kind === 'ion-asset') {
+          tileset = await Cesium.Cesium3DTileset.fromIonAssetId(pointCloudSource.assetId);
         }
-        if (!tileset || viewer.isDestroyed()) return;
+        if (!tileset) throw new Error('Unsupported Point Cloud source');
+        if (!isActive()) {
+          if (!tileset.isDestroyed()) tileset.destroy();
+          return;
+        }
         viewer.scene.primitives.add(tileset);
         pointCloudRef.current = tileset;
         loadedPointCloudTilesetsRef.current = [tileset];
-        tileset.show = true;
+        tileset.show = layerVisibilityRef.current.pointCloud;
         
         // ── BEST PRACTICE TỐI ƯU POINT CLOUD TRONG CHẾ ĐỘ LAZY LOAD ──
         tileset.skipLevelOfDetail = true;
@@ -1518,73 +1752,54 @@ export const CesiumViewer: React.FC<{
         }
 
         applyMatrix(tileset);
-        handleFocusPointCloud();
+        setPointCloudLoadStatus('ready');
+        if (focusAfterLoad) handleFocusPointCloud();
         viewer.scene.requestRender();
       } catch(e) {
         pointCloudLoadedRef.current = false; // Reset để có thể thử lại
+        if (isActive()) {
+          setPointCloudLoadStatus('error');
+          setPointCloudLoadError('Tải Point Cloud thất bại');
+        }
         console.error("Lazy load PC thất bại:", e);
       }
     };
 
-    // Xử lý bật tắt hiển thị mô hình 3D
-    useEffect(() => {
-      if (modelRef.current) {
-        modelRef.current.show = showModel;
-      }
-    }, [showModel]);
-
-    // Xử lý bật tắt hiển thị ảnh DOM
-    useEffect(() => {
-      if (domLayerRef.current) {
-        domLayerRef.current.show = showDom;
-      }
-    }, [showDom]);
-
-    // Xử lý bật tắt hiển thị Đám mây điểm Point Cloud
-    useEffect(() => {
-      loadedPointCloudTilesetsRef.current.forEach(ts => {
-        if (ts && !ts.isDestroyed()) {
-          ts.show = showPointCloud;
-        }
-      });
-    }, [showPointCloud]);
-
-    // Cập nhật Style Point Cloud (Point Size, Opacity, và Point Budget Thinning Filter trên GPU)
-    useEffect(() => {
-      const minB = minPointBudget || 100_000;
-      const maxB = maxPointBudget || 12_000_000;
-      const ratio = Math.max(0.01, Math.min(1.0, (pointBudget - minB) / Math.max(1, maxB - minB)));
-
-      const styleOptions: Record<string, unknown> = {
-        pointSize: pointSize,
-      };
-
-      // Khi giảm budget (< 98%), áp dụng thuật toán băm tọa độ (Spatial Hash Point Thinning)
-      // ngay trên GPU Shader để làm thưa/dày điểm tức thì ở 60 FPS theo đúng tỷ lệ Budget
-      if (ratio < 0.98) {
-        styleOptions.show = `(fract(abs(\${POSITION}[0] * 12.9898 + \${POSITION}[1] * 78.233 + \${POSITION}[2] * 45.164))) <= ${ratio.toFixed(4)}`;
-      } else {
-        styleOptions.show = true;
-      }
-
-      // Chỉ áp dụng opacity khi < 1.0 (tránh override không cần thiết)
-      if (edlOpacity < 1.0) {
-        // "${COLOR}" → màu gốc từ dữ liệu điểm (RGB); nhân với white+alpha để điều chỉnh độ trong suốt
-        styleOptions.color = `\${COLOR} * color('white', ${edlOpacity.toFixed(2)})`;
-      }
-
-      const style = new Cesium.Cesium3DTileStyle(styleOptions);
-      loadedPointCloudTilesetsRef.current.forEach(ts => {
-        if (ts && !ts.isDestroyed()) {
-          ts.style = style;
-        }
-      });
-
+    const retryModel = () => retryModelRef.current();
+    const retryPointCloud = () => retryPointCloudRef.current();
+    const retryDom = () => {
       const viewer = viewerRef.current;
-      if (viewer && !viewer.isDestroyed()) {
-        viewer.scene.requestRender();
+      domLoadGenerationRef.current += 1;
+      if (viewer && !viewer.isDestroyed() && domLayerRef.current && !domLayerRef.current.isDestroyed()) {
+        if (viewer.imageryLayers.contains(domLayerRef.current)) viewer.imageryLayers.remove(domLayerRef.current, true);
       }
-    }, [pointSize, edlOpacity, pointBudget, minPointBudget, maxPointBudget]);
+      domLayerRef.current = null;
+      domImageRef.current = null;
+      domImageSrcRef.current = null;
+      setDomLoadAttempt(attempt => attempt + 1);
+    };
+
+    useEffect(() => {
+      if (modelRef.current && !modelRef.current.isDestroyed()) {
+        modelRef.current.color = Cesium.Color.WHITE.withAlpha(modelOpacity);
+      }
+      if (domLayerRef.current && !domLayerRef.current.isDestroyed()) {
+        domLayerRef.current.alpha = domOpacity;
+      }
+      viewerRef.current?.scene.requestRender();
+    }, [modelOpacity, domOpacity, modelLoadStatus, domLoadStatus]);
+
+    usePointCloudAppearance({
+      viewerRef,
+      tilesetsRef: loadedPointCloudTilesetsRef,
+      heatmapControllerRef,
+      pointSize,
+      opacity: pointCloudOpacity,
+      pointBudget,
+      minPointBudget,
+      maxPointBudget,
+      loadStatus: pointCloudLoadStatus,
+    });
 
     // Cập nhật Góc nhìn (Field of View)
     useEffect(() => {
@@ -1772,101 +1987,17 @@ export const CesiumViewer: React.FC<{
     useEffect(() => {
       const viewer = viewerRef.current;
       if (!viewer || viewer.isDestroyed()) return;
+      const destination = Cesium.Cartesian3.clone(viewer.camera.positionWC);
+      const direction = Cesium.Cartesian3.clone(viewer.camera.directionWC);
+      const up = Cesium.Cartesian3.clone(viewer.camera.upWC);
       if (isOrthographic) {
         viewer.camera.switchToOrthographicFrustum();
       } else {
         viewer.camera.switchToPerspectiveFrustum();
       }
+      viewer.camera.setView({ destination, orientation: { direction, up } });
+      viewer.scene.requestRender();
     }, [isOrthographic]);
-
-    type ProfileSamplePlanItem = {
-      distance: number;
-      cartographic: Cesium.Cartographic;
-      fallbackHeight: number;
-    };
-
-    const buildProfileSamplePlan = (
-      controlPoints: Cesium.Cartesian3[],
-      maxSamples = 220
-    ): { items: ProfileSamplePlanItem[]; totalDistance: number } | null => {
-      if (controlPoints.length < 2) return null;
-
-      const segments: {
-        geodesic: Cesium.EllipsoidGeodesic;
-        length: number;
-        startDistance: number;
-        startHeight: number;
-        endHeight: number;
-      }[] = [];
-
-      let totalDistance = 0;
-      for (let i = 0; i < controlPoints.length - 1; i++) {
-        const start = Cesium.Cartographic.fromCartesian(controlPoints[i]);
-        const end = Cesium.Cartographic.fromCartesian(controlPoints[i + 1]);
-        const geodesic = new Cesium.EllipsoidGeodesic(start, end);
-        const length = geodesic.surfaceDistance;
-        if (!Number.isFinite(length) || length < 0.01) continue;
-
-        segments.push({
-          geodesic,
-          length,
-          startDistance: totalDistance,
-          startHeight: start.height,
-          endHeight: end.height,
-        });
-        totalDistance += length;
-      }
-
-      if (segments.length === 0 || totalDistance < 0.01) return null;
-
-      // Khoảng 1 mẫu/m, nhưng luôn có đủ điểm để biểu đồ mượt và giới hạn để
-      // sampleHeightMostDetailed không tạo quá nhiều request.
-      const sampleCount = Math.max(
-        24,
-        Math.min(maxSamples, Math.ceil(totalDistance / 1.0) + 1)
-      );
-
-      const items: ProfileSamplePlanItem[] = [];
-      let segmentIndex = 0;
-
-      for (let i = 0; i < sampleCount; i++) {
-        const targetDistance =
-          i === sampleCount - 1
-            ? totalDistance
-            : (totalDistance * i) / (sampleCount - 1);
-
-        while (
-          segmentIndex < segments.length - 1 &&
-          targetDistance >
-            segments[segmentIndex].startDistance + segments[segmentIndex].length
-        ) {
-          segmentIndex++;
-        }
-
-        const segment = segments[segmentIndex];
-        const localDistance = Cesium.Math.clamp(
-          targetDistance - segment.startDistance,
-          0,
-          segment.length
-        );
-        const t = segment.length > 0 ? localDistance / segment.length : 0;
-        const cartographic = segment.geodesic.interpolateUsingSurfaceDistance(
-          localDistance,
-          new Cesium.Cartographic()
-        );
-        cartographic.height = 0;
-
-        items.push({
-          distance: targetDistance,
-          cartographic,
-          fallbackHeight:
-            segment.startHeight +
-            (segment.endHeight - segment.startHeight) * t,
-        });
-      }
-
-      return { items, totalDistance };
-    };
 
     const sampleProfileAlongPath = async (
       controlPoints: Cesium.Cartesian3[]
@@ -1990,31 +2121,6 @@ export const CesiumViewer: React.FC<{
       };
     };
 
-    const buildProfileChartPoints = (
-      profile: ProfileResult,
-      width = 520,
-      height = 160,
-      paddingX = 18,
-      paddingY = 18
-    ): string => {
-      const distanceRange = Math.max(profile.totalDistance, 0.01);
-      const heightRange = Math.max(profile.maxHeight - profile.minHeight, 0.01);
-      const drawWidth = width - paddingX * 2;
-      const drawHeight = height - paddingY * 2;
-
-      return profile.samples
-        .map(sample => {
-          const x =
-            paddingX + (sample.distance / distanceRange) * drawWidth;
-          const y =
-            height -
-            paddingY -
-            ((sample.height - profile.minHeight) / heightRange) * drawHeight;
-          return `${x.toFixed(1)},${y.toFixed(1)}`;
-        })
-        .join(' ');
-    };
-
     const updateProfileSummaryLabel = (
       record: MeasurementRecord,
       profile: ProfileResult
@@ -2058,12 +2164,12 @@ export const CesiumViewer: React.FC<{
         updateProfileSummaryLabel(record, result);
         setActiveProfile(result);
         setMeasurementRevision(revision => revision + 1);
-        persistMeasurementUpdate(record);
 
         const viewer = viewerRef.current;
         if (viewer && !viewer.isDestroyed()) viewer.scene.requestRender();
       } finally {
         setIsProfileSampling(false);
+        persistMeasurementUpdate(record);
       }
     };
 
@@ -2290,6 +2396,12 @@ export const CesiumViewer: React.FC<{
               ]);
             }
           }
+          const preview = buildControlProfilePreview(record.id, points);
+          record.profileSamples = preview.samples;
+          const sampledLine = lineEntities.find(entity => (entity as any)._isProfileSampleLine === true);
+          if (sampledLine?.polyline) sampledLine.polyline.positions = new Cesium.ConstantProperty(points);
+          updateProfileSummaryLabel(record, preview);
+          setActiveProfile(preview);
         }
       }
     };
@@ -2351,8 +2463,15 @@ export const CesiumViewer: React.FC<{
         return entity;
       };
 
-      data.points.forEach(addPoint);
-      const points = data.points;
+      let points = data.points.map(point => Cesium.Cartesian3.clone(point));
+      if (data.type === 'area') {
+        const plane = buildAreaReferencePlane(points);
+        if (plane) {
+          points = normalizeAreaPoints(points, plane);
+          areaReferencePlanesRef.current.set(data.id, plane);
+        }
+      }
+      points.forEach(addPoint);
       const labelAt = (index: number, fallback = '') => data.labelTexts[index] ?? fallback;
 
       if (data.type === 'area') {
@@ -2416,6 +2535,7 @@ export const CesiumViewer: React.FC<{
         fillEntity, summaryLabelEntity, profileSamples: data.profileSamples,
         visible: data.visible, isFinalized: true
       };
+      if (record.type === 'area') getAreaReferencePlane(record);
       if (data.type !== 'profile' && data.type !== 'annotation') updateMeasurementRecord(record);
       return record;
     };
@@ -2436,6 +2556,7 @@ export const CesiumViewer: React.FC<{
       });
       measurementEntitiesRef.current = [];
       measurementsStoreRef.current = [];
+      areaReferencePlanesRef.current.clear();
       setMeasurementPoints([]);
       setActiveProfile(null);
       hydratedMeasurementsProjectRef.current = projectId;
@@ -2466,21 +2587,54 @@ export const CesiumViewer: React.FC<{
       const v = viewerRef.current;
       if (!v || v.isDestroyed() || !windowPosition) return null;
       const scene = v.scene;
-      if (scene.pickPositionSupported) {
-        try {
-          const picked = scene.pickPosition(windowPosition);
-          if (Cesium.defined(picked)) return Cesium.Cartesian3.clone(picked);
-        } catch (e) {}
+      const nonSurfaceEntities = new Set<Cesium.Entity>(measurementEntitiesRef.current);
+      v.entities.values.forEach(entity => {
+        if (
+          (entity as any).__clipHandle ||
+          (entity as any).__clipBody ||
+          (entity as any).__flightPathVisual ||
+          (entity as any).__orbitTargetVisual
+        ) nonSurfaceEntities.add(entity);
+      });
+      const getPickedEntity = (picked: unknown) => {
+        const hit = picked as { id?: unknown; primitive?: { id?: unknown } } | undefined;
+        return hit?.id instanceof Cesium.Entity
+          ? hit.id
+          : hit?.primitive?.id instanceof Cesium.Entity
+            ? hit.primitive.id
+            : null;
+      };
+      let hiddenEntities: Cesium.Entity[] = [];
+      try {
+        let renderedObject = scene.pick(windowPosition);
+        const pickedEntity = getPickedEntity(renderedObject);
+        if (pickedEntity && nonSurfaceEntities.has(pickedEntity)) {
+          hiddenEntities = Array.from(nonSurfaceEntities).filter(entity => entity.show);
+          hiddenEntities.forEach(entity => { entity.show = false; });
+          scene.render();
+          renderedObject = scene.pick(windowPosition);
+        }
+        if (Cesium.defined(renderedObject) && scene.pickPositionSupported) {
+          const surfacePosition = scene.pickPosition(windowPosition);
+          if (isFiniteCartesian(surfacePosition)) return Cesium.Cartesian3.clone(surfacePosition);
+        }
+      } catch (error) {
+        console.warn('Measurement surface pick failed.', error);
+      } finally {
+        hiddenEntities.forEach(entity => { entity.show = true; });
+        if (hiddenEntities.length) scene.requestRender();
       }
       try {
         const ray = scene.camera.getPickRay(windowPosition);
         if (ray) {
           const globePos = scene.globe.pick(ray, scene);
-          if (Cesium.defined(globePos)) return Cesium.Cartesian3.clone(globePos);
+          if (isFiniteCartesian(globePos)) return Cesium.Cartesian3.clone(globePos);
           const ellipsoidPos = scene.camera.pickEllipsoid(windowPosition, scene.globe.ellipsoid);
-          if (Cesium.defined(ellipsoidPos)) return Cesium.Cartesian3.clone(ellipsoidPos);
+          if (isFiniteCartesian(ellipsoidPos)) return Cesium.Cartesian3.clone(ellipsoidPos);
         }
-      } catch (e) {}
+      } catch (error) {
+        console.warn('Measurement globe fallback failed.', error);
+      }
       return null;
     };
 
@@ -2496,13 +2650,13 @@ export const CesiumViewer: React.FC<{
         handlerRef.current = null;
       }
 
+      measurementDragCancelRef.current?.();
+      restoreMeasurementCamera();
+
       if (toolMode === 'none') {
-        viewer.scene.screenSpaceCameraController.enableInputs = true;
         setMeasurementPoints([]);
         return;
       }
-
-      viewer.scene.screenSpaceCameraController.enableInputs = true;
 
       const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
       handlerRef.current = handler;
@@ -2531,7 +2685,22 @@ export const CesiumViewer: React.FC<{
       measurementsStoreRef.current.push(currentRecord);
 
       const finalizeCurrentRecord = (record: MeasurementRecord) => {
+        measurementDragCancelRef.current?.();
+        restoreMeasurementCamera();
+        if (record.type === 'area') {
+          const plane = buildAreaReferencePlane(record.points);
+          if (plane) {
+            record.points = normalizeAreaPoints(record.points, plane);
+            areaReferencePlanesRef.current.set(record.id, plane);
+          }
+        }
         Object.assign(currentRecord, record, { visible: true, isFinalized: true });
+        if (currentRecord.type === 'area') {
+          currentRecord.pointEntities.forEach((entity, index) => {
+            entity.position = new Cesium.ConstantPositionProperty(currentRecord.points[index]);
+          });
+          updateMeasurementRecord(currentRecord);
+        }
         measurementFinalized = true;
         setMeasurementRevision(revision => revision + 1);
         if (projectId) {
@@ -3940,6 +4109,8 @@ export const CesiumViewer: React.FC<{
       }
 
       return () => {
+        measurementDragCancelRef.current?.();
+        restoreMeasurementCamera();
         clearTempEntities();
         if (!measurementFinalized) {
           const unfinishedEntities = new Set<Cesium.Entity>([
@@ -3971,28 +4142,65 @@ export const CesiumViewer: React.FC<{
       const viewer = viewerRef.current;
       if (!viewer || viewer.isDestroyed()) return;
 
+      if (measurementDragHandlerRef.current && !measurementDragHandlerRef.current.isDestroyed()) {
+        measurementDragHandlerRef.current.destroy();
+      }
       const dragHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+      measurementDragHandlerRef.current = dragHandler;
 
       let draggedTarget: {
         record: MeasurementRecord;
         pointIndex: number;
         pointEntity: Cesium.Entity;
+        previousMouse: Cesium.Cartesian2;
+        virtualScreen: Cesium.Cartesian2;
       } | null = null;
 
       let hoveredEntity: Cesium.Entity | null = null;
+
+      const hasClippingHandleAt = (windowPos: Cesium.Cartesian2) =>
+        viewer.scene.drillPick(windowPos, 24).some(hit => {
+          const picked = hit as { id?: Cesium.Entity; primitive?: { id?: Cesium.Entity } };
+          const entity = picked.id instanceof Cesium.Entity
+            ? picked.id
+            : picked.primitive?.id instanceof Cesium.Entity
+              ? picked.primitive.id
+              : undefined;
+          return !!entity && !!(entity as any).__clipHandle;
+        });
+
+      const pickMeasurementSurface = (windowPos: Cesium.Cartesian2) => getPickedPosition(windowPos);
+
+      const pickAreaPlanePosition = (record: MeasurementRecord, windowPos: Cesium.Cartesian2) => {
+        const plane = getAreaReferencePlane(record);
+        if (!plane) return null;
+        const surfaceCandidate = pickMeasurementSurface(windowPos);
+        if (
+          surfaceCandidate &&
+          Math.abs(Cesium.Plane.getPointDistance(plane, surfaceCandidate)) <= AREA_SURFACE_PLANE_MAX_DISTANCE
+        ) {
+          return projectPointToPlane(surfaceCandidate, plane);
+        }
+        const ray = viewer.camera.getPickRay(windowPos);
+        if (!ray) return null;
+        const intersection = Cesium.IntersectionTests.rayPlane(ray, plane, new Cesium.Cartesian3());
+        return isFiniteCartesian(intersection) ? projectPointToPlane(intersection, plane) : null;
+      };
 
       // Hàm tìm điểm đo gần nhất theo khoảng cách 2D trên màn hình (độ nhạy 25px)
       const findPointAtScreenPos = (windowPos: Cesium.Cartesian2) => {
         const v = viewerRef.current;
         if (!v || v.isDestroyed() || !windowPos) return null;
-        const tolerance = 25;
+        const tolerance = 6;
         let bestDist = Infinity;
         let bestTarget: { record: MeasurementRecord; pointIndex: number; pointEntity: Cesium.Entity } | null = null;
 
         for (const record of measurementsStoreRef.current) {
+          if (!record.isFinalized || record.visible === false) continue;
           for (let i = 0; i < record.points.length; i++) {
             const pt3d = record.points[i];
-            if (!pt3d) continue;
+            const pointEntity = record.pointEntities[i];
+            if (!pt3d || !pointEntity || pointEntity.show === false) continue;
             try {
               const screenPos = Cesium.SceneTransforms.worldToWindowCoordinates(v.scene, pt3d);
               if (screenPos) {
@@ -4004,7 +4212,7 @@ export const CesiumViewer: React.FC<{
                   bestTarget = {
                     record,
                     pointIndex: i,
-                    pointEntity: record.pointEntities[i]
+                    pointEntity
                   };
                 }
               }
@@ -4014,12 +4222,71 @@ export const CesiumViewer: React.FC<{
         return bestTarget;
       };
 
+      const resetMarker = (entity: Cesium.Entity | null) => {
+        if (!entity?.billboard) return;
+        entity.billboard.width = new Cesium.ConstantProperty(9);
+        entity.billboard.height = new Cesium.ConstantProperty(9);
+        entity.billboard.image = new Cesium.ConstantProperty(MEASUREMENT_RING_DOT_IMAGE);
+      };
+
+      const finishDrag = (persist = true) => {
+        if (!draggedTarget) {
+          restoreMeasurementCamera();
+          return;
+        }
+
+        const finishedRecord = draggedTarget.record;
+        resetMarker(draggedTarget.pointEntity);
+        draggedTarget = null;
+        restoreMeasurementCamera();
+        if (!viewer.isDestroyed()) {
+          viewer.scene.canvas.style.cursor = hoveredEntity ? 'grab' : 'default';
+          viewer.scene.requestRender();
+        }
+        if (finishedRecord.type === 'area') {
+          const plane = getAreaReferencePlane(finishedRecord);
+          if (plane) {
+            console.info('[MEASURE AREA PLANE]', {
+              normal: Cesium.Cartesian3.clone(plane.normal),
+              maxResidual: Math.max(
+                0,
+                ...finishedRecord.points.map(point =>
+                  Math.abs(Cesium.Plane.getPointDistance(plane, point))
+                ),
+              ),
+            });
+          }
+        }
+        setMeasurementRevision(revision => revision + 1);
+        if (!persist) return;
+        if (finishedRecord.type === 'profile') void refreshProfileRecord(finishedRecord);
+        else persistMeasurementUpdate(finishedRecord);
+      };
+
+      const finishDragOnPointerUp = () => finishDrag(true);
+      const cancelDragOnWindowBlur = () => finishDrag(false);
+      measurementDragCancelRef.current = cancelDragOnWindowBlur;
+      window.addEventListener('pointerup', finishDragOnPointerUp);
+      window.addEventListener('blur', cancelDragOnWindowBlur);
+
       // 1. LEFT_DOWN: Bắt đầu kéo điểm đo
       dragHandler.setInputAction((click: any) => {
+        if (hasClippingHandleAt(click.position)) return;
         const target = findPointAtScreenPos(click.position);
         if (target) {
-          draggedTarget = target;
-          viewer.scene.screenSpaceCameraController.enableInputs = false;
+          if (draggedTarget || measurementCameraLockOwnerRef.current) return;
+          const markerScreen = Cesium.SceneTransforms.worldToWindowCoordinates(
+            viewer.scene,
+            target.record.points[target.pointIndex],
+          );
+          draggedTarget = {
+            ...target,
+            previousMouse: Cesium.Cartesian2.clone(click.position),
+            virtualScreen: markerScreen
+              ? Cesium.Cartesian2.clone(markerScreen)
+              : Cesium.Cartesian2.clone(click.position),
+          };
+          lockMeasurementCamera();
           viewer.scene.canvas.style.cursor = 'grabbing';
           if (draggedTarget.pointEntity?.billboard) {
             draggedTarget.pointEntity.billboard.width = new Cesium.ConstantProperty(12);
@@ -4028,24 +4295,49 @@ export const CesiumViewer: React.FC<{
           }
           viewer.scene.requestRender();
         }
-      }, Cesium.ScreenSpaceEventType.LEFT_DOWN, Cesium.KeyboardEventModifier.SHIFT);
+      }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
 
       // 2. MOUSE_MOVE: Di chuyển điểm và cập nhật hình học đo thời gian thực
       dragHandler.setInputAction((movement: any) => {
         if (draggedTarget) {
-          const newPos = getPickedPosition(movement.endPosition);
-          if (newPos) {
-            const worldPosition = Cesium.Cartesian3.clone(newPos);
-            draggedTarget.record.points[draggedTarget.pointIndex] = worldPosition;
-            draggedTarget.pointEntity.position = new Cesium.ConstantPositionProperty(worldPosition) as any;
-            updateMeasurementRecord(draggedTarget.record);
-            viewer.scene.requestRender();
+          try {
+            const mouseDelta = Cesium.Cartesian2.subtract(
+              movement.endPosition,
+              draggedTarget.previousMouse,
+              new Cesium.Cartesian2(),
+            );
+            Cesium.Cartesian2.multiplyByScalar(
+              mouseDelta,
+              MEASUREMENT_SURFACE_DRAG_SENSITIVITY,
+              mouseDelta,
+            );
+            Cesium.Cartesian2.add(
+              draggedTarget.virtualScreen,
+              mouseDelta,
+              draggedTarget.virtualScreen,
+            );
+            Cesium.Cartesian2.clone(movement.endPosition, draggedTarget.previousMouse);
+            const worldPosition = draggedTarget.record.type === 'area'
+              ? pickAreaPlanePosition(draggedTarget.record, draggedTarget.virtualScreen)
+              : pickMeasurementSurface(draggedTarget.virtualScreen);
+            if (worldPosition) {
+              draggedTarget.record.points[draggedTarget.pointIndex] = worldPosition;
+              draggedTarget.pointEntity.position = new Cesium.ConstantPositionProperty(worldPosition) as any;
+              updateMeasurementRecord(draggedTarget.record);
+              setMeasurementRevision(revision => revision + 1);
+              viewer.scene.requestRender();
+            }
+          } catch (error) {
+            console.error('Measurement drag failed.', error);
+            finishDrag(false);
           }
           return;
         }
 
         // Hover effect khi rê chuột qua các điểm đo
-        const hovered = findPointAtScreenPos(movement.endPosition);
+        const hovered = hasClippingHandleAt(movement.endPosition)
+          ? null
+          : findPointAtScreenPos(movement.endPosition);
         if (hovered) {
           viewer.scene.canvas.style.cursor = 'grab';
           if (hoveredEntity !== hovered.pointEntity) {
@@ -4072,9 +4364,6 @@ export const CesiumViewer: React.FC<{
             hoveredEntity = null;
             viewer.scene.requestRender();
           }
-          if (!draggedTarget) {
-            viewer.scene.screenSpaceCameraController.enableInputs = !lockView;
-          }
           if (toolMode === 'none') {
             viewer.scene.canvas.style.cursor = 'default';
           }
@@ -4084,98 +4373,73 @@ export const CesiumViewer: React.FC<{
       // 3. LEFT_UP: Thả chuột và kết thúc kéo điểm
       dragHandler.setInputAction(() => {
         if (draggedTarget) {
-          const finishedRecord = draggedTarget.record;
-          if (draggedTarget.pointEntity?.billboard) {
-            draggedTarget.pointEntity.billboard.width = new Cesium.ConstantProperty(9);
-            draggedTarget.pointEntity.billboard.height = new Cesium.ConstantProperty(9);
-            draggedTarget.pointEntity.billboard.image = new Cesium.ConstantProperty(MEASUREMENT_RING_DOT_IMAGE);
-          }
-          draggedTarget = null;
-          viewer.scene.screenSpaceCameraController.enableInputs = !lockView;
-          viewer.scene.canvas.style.cursor = 'default';
-          viewer.scene.requestRender();
-          setMeasurementRevision(revision => revision + 1);
+          finishDrag(true);
 
           // Profile đã finalize phải sample lại sau khi Shift+kéo một control point.
-          if (finishedRecord.type === 'profile') {
-            void refreshProfileRecord(finishedRecord);
-          } else {
-            persistMeasurementUpdate(finishedRecord);
-          }
         }
       }, Cesium.ScreenSpaceEventType.LEFT_UP);
 
       return () => {
+        window.removeEventListener('pointerup', finishDragOnPointerUp);
+        window.removeEventListener('blur', cancelDragOnWindowBlur);
+        finishDrag(false);
+        if (measurementDragCancelRef.current === cancelDragOnWindowBlur) measurementDragCancelRef.current = null;
+        resetMarker(hoveredEntity);
+        hoveredEntity = null;
         if (!dragHandler.isDestroyed()) {
           dragHandler.destroy();
         }
+        if (measurementDragHandlerRef.current === dragHandler) measurementDragHandlerRef.current = null;
       };
     }, [toolMode, lockView]);
+
+    const getProjectBoundingSphere = () => {
+      const spheres: Cesium.BoundingSphere[] = [];
+      loadedPointCloudTilesetsRef.current.forEach(tileset => {
+        if (!tileset.isDestroyed() && tileset.boundingSphere) spheres.push(tileset.boundingSphere);
+      });
+      if (modelRef.current && !modelRef.current.isDestroyed() && modelRef.current.boundingSphere) {
+        spheres.push(modelRef.current.boundingSphere);
+      }
+      if (spheres.length === 1) return spheres[0];
+      if (spheres.length > 1) return Cesium.BoundingSphere.fromBoundingSpheres(spheres);
+      return new Cesium.BoundingSphere(
+        Cesium.Cartesian3.fromDegrees(project?.centerLon || 106.8099, project?.centerLat || 10.8404, 50),
+        100,
+      );
+    };
+
+    const getFocusBoundingSphere = () => {
+      const pointCloud = pointCloudRef.current;
+      const model = modelRef.current;
+      if (displayMode === 'pointcloud' && pointCloud && !pointCloud.isDestroyed()) return pointCloud.boundingSphere;
+      if (displayMode === 'model3d' && model && !model.isDestroyed()) return model.boundingSphere;
+      if (showPointCloud && pointCloud && !pointCloud.isDestroyed()) return pointCloud.boundingSphere;
+      if (showModel && model && !model.isDestroyed()) return model.boundingSphere;
+      return getProjectBoundingSphere();
+    };
+
+    const flyToSphere = (sphere: Cesium.BoundingSphere, pitch = Cesium.Math.toRadians(-30)) => {
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed()) return;
+      const radius = Math.max(10, sphere.radius);
+      viewer.camera.cancelFlight();
+      viewer.camera.flyToBoundingSphere(sphere, {
+        duration: 1.35,
+        offset: new Cesium.HeadingPitchRange(viewer.camera.heading, pitch, Math.min(50000, Math.max(30, radius * 2.5))),
+      });
+    };
 
     const handleFocusProject = () => {
       const viewer = viewerRef.current;
       if (!viewer || viewer.isDestroyed()) return;
-      setShowModel(true);
-
-      if (modelRef.current && modelRef.current.boundingSphere) {
-        const bs = modelRef.current.boundingSphere;
-        viewer.camera.flyToBoundingSphere(bs, {
-          duration: 1.5,
-          offset: new Cesium.HeadingPitchRange(
-            viewer.camera.heading,
-            Cesium.Math.toRadians(-30),
-            bs.radius * 2.5
-          )
-        });
-        return;
-      }
-
-      if (pointCloudRef.current && pointCloudRef.current.boundingSphere) {
-        const bs = pointCloudRef.current.boundingSphere;
-        viewer.camera.flyToBoundingSphere(bs, {
-          duration: 1.5,
-          offset: new Cesium.HeadingPitchRange(
-            viewer.camera.heading,
-            Cesium.Math.toRadians(-30),
-            bs.radius * 2.5
-          )
-        });
-        return;
-      }
-
-      const target = Cesium.Cartesian3.fromDegrees(
-        project?.centerLon || 106.8099,
-        project?.centerLat || 10.8404,
-        150
-      );
-      viewer.camera.flyTo({
-        destination: target,
-        duration: 1.5
-      });
+      flyToSphere(getProjectBoundingSphere());
     };
 
     const handleFocusPointCloud = () => {
       const viewer = viewerRef.current;
       if (!viewer || viewer.isDestroyed()) return;
-      setShowPointCloud(true);
-
-      if (pointCloudRef.current) {
-        viewer.zoomTo(pointCloudRef.current);
-      } else {
-        viewer.camera.flyTo({
-          destination: Cesium.Cartesian3.fromDegrees(
-            project?.centerLon || 106.8099,
-            (project?.centerLat || 10.8404) - 0.001,
-            150
-          ),
-          orientation: {
-            heading: 0,
-            pitch: Cesium.Math.toRadians(-45),
-            roll: 0.0
-          },
-          duration: 2
-        });
-      }
+      flyToSphere(getFocusBoundingSphere(), Cesium.Math.toRadians(-35));
     };
 
     const handleFocusDOM = () => {
@@ -4208,6 +4472,171 @@ export const CesiumViewer: React.FC<{
 
     const handleFocusDom = handleFocusDOM;
 
+    const {
+      navigationMode,
+      cameraSpeed,
+      setCameraSpeed,
+      isCameraAnimating,
+      flightHeight,
+      setFlightHeight,
+      orbitRadius,
+      onOrbitRadiusChange,
+      setOrbitTargetFromFocus,
+      flightPathPointCount,
+      isDrawingFlightPath,
+      flightPathStatus,
+      hasOrbitTarget,
+      isSelectingOrbitTarget,
+      isOrbitingSelectedTarget,
+      setIsDrawingFlightPath,
+      stopCameraAnimation,
+      stopFlightPath,
+      stopSelectedOrbit,
+      clearSelectedOrbitTarget,
+      beginOrbitTargetSelection,
+      startSelectedOrbit,
+      drawFlightPath,
+      runFlightPath,
+      pauseFlightPath,
+      clearFlightPath,
+      handleNavigationAction,
+      handleSetCameraView,
+    } = useCameraNavigation({
+      viewerRef,
+      projectId,
+      toolMode,
+      lockView,
+      viewAngle,
+      setViewAngle,
+      prevViewAngleRef,
+      setActiveCameraView,
+      suppressPresetClearRef,
+      getPickedPosition,
+      getFocusBoundingSphere,
+      beforeInteractiveNavigation: () => {
+        measurementDragCancelRef.current?.();
+        restoreMeasurementCamera();
+        setToolMode('none');
+        setActiveTarget('none');
+      },
+      clearClipping: () => clippingControllerRef.current?.clear(),
+    });
+
+    useEffect(() => {
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed() || !isFocusPicking) return;
+      const canvas = viewer.scene.canvas;
+      const previousCursor = canvas.style.cursor;
+      canvas.style.cursor = 'crosshair';
+      const handler = new Cesium.ScreenSpaceEventHandler(canvas);
+
+      const cancelFocusPick = () => setIsFocusPicking(false);
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') cancelFocusPick();
+      };
+
+      handler.setInputAction((click: { position: Cesium.Cartesian2 }) => {
+        let target: Cesium.Cartesian3 | null = null;
+        if (viewer.scene.pickPositionSupported) {
+          const pickedPosition = viewer.scene.pickPosition(click.position);
+          if (isFiniteCartesian(pickedPosition)) target = Cesium.Cartesian3.clone(pickedPosition);
+        }
+        if (!target) {
+          const ray = viewer.camera.getPickRay(click.position);
+          const globePosition = ray ? viewer.scene.globe.pick(ray, viewer.scene) : undefined;
+          if (isFiniteCartesian(globePosition)) target = Cesium.Cartesian3.clone(globePosition);
+        }
+        if (!target) return;
+
+        stopFlightPath();
+        stopCameraAnimation();
+        stopSelectedOrbit();
+        viewer.camera.cancelFlight();
+
+        const cameraHeight = Cesium.Cartographic.fromCartesian(viewer.camera.positionWC).height;
+        const desiredRange = Cesium.Math.clamp(cameraHeight * 0.08, 30, 180);
+        const heading = viewer.camera.heading;
+        const pitch = Cesium.Math.clamp(
+          viewer.camera.pitch,
+          Cesium.Math.toRadians(-80),
+          Cesium.Math.toRadians(-5),
+        );
+        setOrbitTargetFromFocus(new Cesium.BoundingSphere(target, 1));
+        viewer.camera.flyToBoundingSphere(new Cesium.BoundingSphere(target, 1), {
+          duration: 1.2,
+          offset: new Cesium.HeadingPitchRange(heading, pitch, desiredRange),
+        });
+        setHasFocusedTarget(true);
+        setIsFocusPicking(false);
+      }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+      window.addEventListener('keydown', onKeyDown);
+      return () => {
+        window.removeEventListener('keydown', onKeyDown);
+        if (!handler.isDestroyed()) handler.destroy();
+        canvas.style.cursor = previousCursor;
+      };
+    }, [isFocusPicking]);
+
+    useEffect(() => {
+      setIsFocusPicking(false);
+      setIsReturningFocusOrigin(false);
+      setHasFocusedTarget(false);
+      focusOriginRef.current = null;
+    }, [projectId]);
+
+    const handleToggleFocusPick = () => {
+      if (isReturningFocusOrigin) return;
+      if (isFocusPicking) {
+        setIsFocusPicking(false);
+        return;
+      }
+
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed()) return;
+      setIsDrawingFlightPath(false);
+      setToolMode('none');
+      clearSelectedOrbitTarget();
+
+      if (!focusOriginRef.current) {
+        focusOriginRef.current = {
+          destination: Cesium.Cartesian3.clone(viewer.camera.positionWC),
+          heading: viewer.camera.heading,
+          pitch: viewer.camera.pitch,
+          roll: viewer.camera.roll,
+        };
+        setIsFocusPicking(true);
+        return;
+      }
+
+      if (!hasFocusedTarget) {
+        setIsFocusPicking(true);
+        return;
+      }
+
+      const origin = focusOriginRef.current;
+      stopFlightPath();
+      stopCameraAnimation();
+      stopSelectedOrbit();
+      viewer.camera.cancelFlight();
+      setIsReturningFocusOrigin(true);
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.clone(origin.destination),
+        orientation: {
+          heading: origin.heading,
+          pitch: origin.pitch,
+          roll: origin.roll,
+        },
+        duration: 0.9,
+        complete: () => {
+          setIsReturningFocusOrigin(false);
+          setHasFocusedTarget(false);
+          setIsFocusPicking(true);
+        },
+        cancel: () => setIsReturningFocusOrigin(false),
+      });
+    };
+
     // Tắt/bật hiển thị toàn bộ phép đo
     useEffect(() => {
       const managedEntities = new Set<Cesium.Entity>();
@@ -4231,213 +4660,39 @@ export const CesiumViewer: React.FC<{
     }, [showMeasurements, measurementRevision]);
 
     // Điều chỉnh tốc độ camera theo slider
-    useEffect(() => {
+    const getClippingController = () => {
       const viewer = viewerRef.current;
-      if (!viewer || viewer.isDestroyed()) return;
-      const factor = cameraSpeed / 100;
-      viewer.scene.screenSpaceCameraController.zoomFactor = 5.0 * factor;
-    }, [cameraSpeed]);
-
-    useEffect(() => {
-      if (navigationMode !== 'fps') return;
-      const viewer = viewerRef.current;
-      if (!viewer || viewer.isDestroyed()) return;
-      const pressed = new Set<string>();
-      let frameId = 0;
-      let previousTime = performance.now();
-      const onKeyDown = (event: KeyboardEvent) => {
-        if (!['INPUT', 'TEXTAREA'].includes((event.target as HTMLElement | null)?.tagName || '')) pressed.add(event.code);
-      };
-      const onKeyUp = (event: KeyboardEvent) => pressed.delete(event.code);
-      const tick = (time: number) => {
-        const seconds = Math.min(0.1, (time - previousTime) / 1000);
-        previousTime = time;
-        const amount = cameraSpeed * seconds;
-        if (pressed.has('KeyW') || pressed.has('ArrowUp')) viewer.camera.moveForward(amount);
-        if (pressed.has('KeyS') || pressed.has('ArrowDown')) viewer.camera.moveBackward(amount);
-        if (pressed.has('KeyA') || pressed.has('ArrowLeft')) viewer.camera.moveLeft(amount);
-        if (pressed.has('KeyD') || pressed.has('ArrowRight')) viewer.camera.moveRight(amount);
-        if (pressed.has('KeyE')) viewer.camera.moveUp(amount);
-        if (pressed.has('KeyQ')) viewer.camera.moveDown(amount);
-        if (pressed.size > 0) viewer.scene.requestRender();
-        frameId = requestAnimationFrame(tick);
-      };
-      window.addEventListener('keydown', onKeyDown);
-      window.addEventListener('keyup', onKeyUp);
-      frameId = requestAnimationFrame(tick);
-      return () => {
-        cancelAnimationFrame(frameId);
-        window.removeEventListener('keydown', onKeyDown);
-        window.removeEventListener('keyup', onKeyUp);
-      };
-    }, [navigationMode, cameraSpeed]);
-
-    const handleNavigationAction = (action: 'earth' | 'fps' | 'orbit' | 'heli' | 'compass' | 'anim') => {
-      const viewer = viewerRef.current;
-      if (!viewer || viewer.isDestroyed()) return;
-      if (action === 'compass') {
-        viewer.camera.setView({ orientation: { heading: 0, pitch: viewer.camera.pitch, roll: 0 } });
-        viewer.scene.requestRender();
-        return;
+      if (!viewer || viewer.isDestroyed()) return null;
+      if (!clippingControllerRef.current) {
+        clippingControllerRef.current = new ClippingController(
+          viewer,
+          () => [
+            ...loadedPointCloudTilesetsRef.current.filter(tileset => !tileset.isDestroyed()),
+            ...(modelRef.current ? [modelRef.current] : []),
+          ],
+          setActiveClipTool,
+          setClipInstruction,
+        );
       }
-      if (action === 'earth' || action === 'fps' || action === 'orbit') {
-        setNavigationMode(action);
-        const controller = viewer.scene.screenSpaceCameraController;
-        controller.enableInputs = !lockView;
-        controller.enableRotate = !lockView;
-        controller.enableTranslate = !lockView;
-        controller.enableZoom = !lockView;
-        controller.enableTilt = !lockView;
-        controller.enableLook = !lockView;
-        if (action === 'orbit') handleFocusPointCloud();
-      }
+      return clippingControllerRef.current;
     };
 
-    // Chuyển góc nhìn camera theo khối lập phương điều hướng [L] [R] [F] [B] [T] [D]
-    const handleSetCameraView = (view: 'L' | 'R' | 'F' | 'B' | 'T' | 'D') => {
-      const viewer = viewerRef.current;
-      if (!viewer || viewer.isDestroyed()) return;
-
-      const target = pointCloudRef.current?.boundingSphere?.center 
-        || modelRef.current?.boundingSphere?.center 
-        || Cesium.Cartesian3.fromDegrees(project?.centerLon || 106.8099, project?.centerLat || 10.8404, 50);
-
-      const bs = new Cesium.BoundingSphere(target, 200);
-
-      let heading = 0;
-      let pitch = Cesium.Math.toRadians(-30);
-
-      switch (view) {
-        case 'L': // Left / West
-          heading = Cesium.Math.toRadians(90);
-          pitch = Cesium.Math.toRadians(-5);
-          break;
-        case 'R': // Right / East
-          heading = Cesium.Math.toRadians(270);
-          pitch = Cesium.Math.toRadians(-5);
-          break;
-        case 'F': // Front / South
-          heading = Cesium.Math.toRadians(0);
-          pitch = Cesium.Math.toRadians(-5);
-          break;
-        case 'B': // Back / North
-          heading = Cesium.Math.toRadians(180);
-          pitch = Cesium.Math.toRadians(-5);
-          break;
-        case 'T': // Top / Nader
-          heading = 0;
-          pitch = Cesium.Math.toRadians(-90);
-          break;
-        case 'D': // Down / Underneath
-          heading = 0;
-          pitch = Cesium.Math.toRadians(85);
-          break;
-      }
-
-      viewer.camera.flyToBoundingSphere(bs, {
-        duration: 1.2,
-        offset: new Cesium.HeadingPitchRange(heading, pitch, bs.radius * 2.2)
-      });
-    };
-
-    const clearClipping = () => {
-      loadedPointCloudTilesetsRef.current.forEach(tileset => {
-        if (!tileset.isDestroyed()) (tileset as any).clippingPlanes = undefined;
-      });
-      if (modelRef.current) (modelRef.current as any).clippingPlanes = undefined;
-      clippingCollectionsRef.current.forEach(collection => {
-        try { if (!collection.isDestroyed()) collection.destroy(); } catch (e) {}
-      });
-      clippingCollectionsRef.current = [];
-      const viewer = viewerRef.current;
-      if (viewer && !viewer.isDestroyed()) {
-        clippingEntitiesRef.current.forEach(entity => viewer.entities.remove(entity));
-        viewer.scene.requestRender();
-      }
-      clippingEntitiesRef.current = [];
-      setActiveClipTool(null);
-    };
+    const clearClipping = () => clippingControllerRef.current?.clear();
 
     const handleClipTool = (tool: 'box' | 'polygon' | 'plane' | 'clear') => {
+      setIsDrawingFlightPath(false);
+      stopFlightPath();
       if (tool === 'clear') {
         clearClipping();
         return;
       }
-      if (tool === 'polygon') {
-        console.warn('Clipping polygon is disabled: this viewer has no validated ClippingPolygon target pipeline.');
-        return;
-      }
-      const viewer = viewerRef.current;
-      if (!viewer || viewer.isDestroyed()) return;
-      clearClipping();
-      const sphere = pointCloudRef.current?.boundingSphere || modelRef.current?.boundingSphere;
-      if (!sphere) return;
-      const center = Cesium.Cartesian3.clone(sphere.center);
-      const halfSize = Math.max(1, sphere.radius * 0.55);
-      const modelMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(center);
-      const shouldClip = clipMode === 'inside' || clipMode === 'outside';
-      const direction = clipMode === 'outside' ? -1 : 1;
-
-      const createCollection = () => {
-        const planes = tool === 'plane'
-          ? [new Cesium.ClippingPlane(new Cesium.Cartesian3(0, 0, direction), 0)]
-          : [
-              new Cesium.ClippingPlane(new Cesium.Cartesian3(direction, 0, 0), -halfSize),
-              new Cesium.ClippingPlane(new Cesium.Cartesian3(-direction, 0, 0), -halfSize),
-              new Cesium.ClippingPlane(new Cesium.Cartesian3(0, direction, 0), -halfSize),
-              new Cesium.ClippingPlane(new Cesium.Cartesian3(0, -direction, 0), -halfSize),
-              new Cesium.ClippingPlane(new Cesium.Cartesian3(0, 0, direction), -halfSize),
-              new Cesium.ClippingPlane(new Cesium.Cartesian3(0, 0, -direction), -halfSize)
-            ];
-        return new Cesium.ClippingPlaneCollection({
-          planes,
-          modelMatrix: Cesium.Matrix4.clone(modelMatrix),
-          unionClippingRegions: clipFilter === 'any',
-          edgeColor: Cesium.Color.YELLOW,
-          edgeWidth: clipMode === 'highlight' ? 2 : 1,
-          enabled: shouldClip
-        });
-      };
-
-      loadedPointCloudTilesetsRef.current.forEach(tileset => {
-        if (!tileset.isDestroyed()) {
-          const collection = createCollection();
-          (tileset as any).clippingPlanes = collection;
-          clippingCollectionsRef.current.push(collection);
-        }
-      });
-      if (modelRef.current) {
-        const collection = createCollection();
-        (modelRef.current as any).clippingPlanes = collection;
-        clippingCollectionsRef.current.push(collection);
-      }
-
-      const visual = viewer.entities.add(tool === 'box' ? {
-        position: center,
-        box: {
-          dimensions: new Cesium.Cartesian3(halfSize * 2, halfSize * 2, halfSize * 2),
-          material: Cesium.Color.YELLOW.withAlpha(0.05),
-          outline: true,
-          outlineColor: Cesium.Color.YELLOW
-        }
-      } : {
-        position: center,
-        plane: {
-          plane: new Cesium.Plane(Cesium.Cartesian3.UNIT_Z, 0),
-          dimensions: new Cesium.Cartesian2(halfSize * 2, halfSize * 2),
-          material: Cesium.Color.YELLOW.withAlpha(0.18),
-          outline: true,
-          outlineColor: Cesium.Color.YELLOW
-        }
-      });
-      clippingEntitiesRef.current.push(visual);
-      setActiveClipTool(tool);
-      viewer.scene.requestRender();
+      // Clipping and measurement creation must never own competing click handlers.
+      setToolMode('none');
+      getClippingController()?.activate(tool, clipMode, clipFilter);
     };
 
     useEffect(() => {
-      if (activeClipTool) handleClipTool(activeClipTool);
-      // Rebuild Cesium clipping collections when semantic mode/filter changes.
+      clippingControllerRef.current?.updateSettings(clipMode, clipFilter);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [clipMode, clipFilter]);
 
@@ -4469,6 +4724,7 @@ export const CesiumViewer: React.FC<{
       entities.forEach(entity => viewer.entities.remove(entity));
       measurementEntitiesRef.current = measurementEntitiesRef.current.filter(entity => !entities.has(entity));
       measurementsStoreRef.current = measurementsStoreRef.current.filter(item => item.id !== id);
+      areaReferencePlanesRef.current.delete(id);
       if (activeProfile?.id === id) setActiveProfile(null);
       setMeasurementRevision(revision => revision + 1);
       viewer.scene.requestRender();
@@ -4493,6 +4749,8 @@ export const CesiumViewer: React.FC<{
     const activeProfileVisible = !activeProfile || measurementsStoreRef.current.find(record => record.id === activeProfile.id)?.visible !== false;
 
     const handleClear = () => {
+      measurementDragCancelRef.current?.();
+      restoreMeasurementCamera();
       const viewer = viewerRef.current;
       if (viewer && !viewer.isDestroyed()) {
         measurementEntitiesRef.current.forEach(e => {
@@ -4501,6 +4759,7 @@ export const CesiumViewer: React.FC<{
       }
       measurementEntitiesRef.current = [];
       measurementsStoreRef.current = [];
+      areaReferencePlanesRef.current.clear();
       setMeasurementPoints([]);
       setActiveProfile(null);
       setIsProfileSampling(false);
@@ -4515,6 +4774,11 @@ export const CesiumViewer: React.FC<{
     };
 
     const handleToolModeChange = (mode: ToolMode) => {
+      setIsDrawingFlightPath(false);
+      stopFlightPath();
+      stopCameraAnimation();
+      measurementDragCancelRef.current?.();
+      restoreMeasurementCamera();
       setToolMode(current => current === mode ? 'none' : mode);
     };
 
@@ -4525,10 +4789,8 @@ export const CesiumViewer: React.FC<{
           onDisplayModeChange={setDisplayMode}
           viewAngle={viewAngle}
           onViewAngleChange={setViewAngle}
-          toolMode={toolMode}
-          onToolModeChange={handleToolModeChange}
-          onClear={handleClear}
           reserveAdminPanel={isAdmin}
+          reserveSidebar={isSidebarOpen}
         />
 
         {/* Component Potree Sidebar điều khiển bên trái */}
@@ -4547,6 +4809,8 @@ export const CesiumViewer: React.FC<{
             />
           )}
           onClipTool={handleClipTool}
+          activeClipTool={activeClipTool}
+          clipInstruction={clipInstruction}
           clipMode={clipMode}
           onClipModeChange={setClipMode}
           clipFilter={clipFilter}
@@ -4557,6 +4821,34 @@ export const CesiumViewer: React.FC<{
           onCameraSpeedChange={setCameraSpeed}
           onSetCameraView={handleSetCameraView}
           onNavigationAction={handleNavigationAction}
+          isFocusPicking={isFocusPicking}
+          isReturningFocusOrigin={isReturningFocusOrigin}
+          onToggleFocusPick={handleToggleFocusPick}
+          navigationMode={navigationMode}
+          isCameraAnimating={isCameraAnimating}
+          flightHeight={flightHeight}
+          onFlightHeightChange={setFlightHeight}
+          orbitRadius={orbitRadius}
+          onOrbitRadiusChange={onOrbitRadiusChange}
+          flightPathPointCount={flightPathPointCount}
+          isDrawingFlightPath={isDrawingFlightPath}
+          flightPathStatus={flightPathStatus}
+          onDrawFlightPath={drawFlightPath}
+          onStartFlightPath={() => runFlightPath(true)}
+          onPauseFlightPath={pauseFlightPath}
+          onResumeFlightPath={() => runFlightPath(false)}
+          onStopFlightPath={stopFlightPath}
+          onReplayFlightPath={() => runFlightPath(true)}
+          onDeleteFlightPath={clearFlightPath}
+          activeCameraView={activeCameraView}
+          viewAngle={viewAngle}
+          cameraHeading={cameraHeading}
+          orbitTargetSelected={hasOrbitTarget}
+          isSelectingOrbitTarget={isSelectingOrbitTarget}
+          isOrbitingTarget={isOrbitingSelectedTarget}
+          onSelectOrbitTarget={beginOrbitTargetSelection}
+          onStartOrbitTarget={() => startSelectedOrbit()}
+          onStopOrbitTarget={() => stopSelectedOrbit()}
           isOptimizerOpen={isOptimizerOpen}
           onToggleOptimizer={() => setIsOptimizerOpen(!isOptimizerOpen)}
           showOptimizerControl={isAdmin}
@@ -4566,6 +4858,27 @@ export const CesiumViewer: React.FC<{
           setShowDom={setShowDom}
           showPointCloud={showPointCloud}
           setShowPointCloud={setShowPointCloud}
+          modelOpacity={modelOpacity}
+          onModelOpacityChange={(value) => setModelOpacity(Cesium.Math.clamp(value, 0, 1))}
+          pointCloudOpacity={pointCloudOpacity}
+          onPointCloudOpacityChange={(value) => setPointCloudOpacity(Cesium.Math.clamp(value, 0, 1))}
+          heatmapEnabled={heatmapEnabled}
+          onHeatmapEnabledChange={handleHeatmapEnabledChange}
+          heatmapProperty={heatmapProperty}
+          onHeatmapPropertyChange={setHeatmapProperty}
+          heatmapMax={heatmapMax}
+          heatmapRangeAvailable={heatmapRangeAvailable}
+          domOpacity={domOpacity}
+          onDomOpacityChange={(value) => setDomOpacity(Cesium.Math.clamp(value, 0, 1))}
+          modelLoadStatus={modelLoadStatus}
+          pointCloudLoadStatus={pointCloudLoadStatus}
+          domLoadStatus={domLoadStatus}
+          modelLoadError={modelLoadError}
+          pointCloudLoadError={pointCloudLoadError}
+          domLoadError={domLoadError}
+          onRetryModel={retryModel}
+          onRetryPointCloud={retryPointCloud}
+          onRetryDom={retryDom}
           pointSize={pointSize}
           onPointSizeChange={setPointSize}
           fov={fov}
@@ -4593,9 +4906,9 @@ export const CesiumViewer: React.FC<{
           onLockViewChange={setLockView}
           isOrthographic={isOrthographic}
           onProjectionChange={setIsOrthographic}
-          onFocusProject={handleFocusProject}
-          onFocusPointCloud={handleFocusPointCloud}
-          onFocusDom={handleFocusDom}
+          onFocusProject={() => { stopFlightPath(); stopSelectedOrbit(); handleFocusProject(); }}
+          onFocusPointCloud={() => { stopFlightPath(); stopSelectedOrbit(); handleFocusPointCloud(); }}
+          onFocusDom={() => { stopFlightPath(); stopSelectedOrbit(); handleFocusDom(); }}
         />
 
 
@@ -4609,7 +4922,7 @@ export const CesiumViewer: React.FC<{
         <div ref={cesiumContainer} className="absolute inset-0 z-0" />
 
         {/* ── Loading Overlay: hiện khi đang fetch/parse Model 3D ── */}
-        {isModelLoading && (
+        {modelLoadStatus === 'loading' && (
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-none">
             <div className="flex flex-col items-center gap-4">
               {/* Spinner vòng tròn */}

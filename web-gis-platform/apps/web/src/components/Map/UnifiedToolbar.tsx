@@ -5,19 +5,13 @@
 import React from 'react';
 import {
   ArrowDown,
-  ArrowUpDown,
   Box,
-  ChevronRight,
   Compass,
   Image as ImageIcon,
   Layers,
   Map,
-  Ruler,
-  Square,
-  Trash2,
 } from 'lucide-react';
 
-import type { ToolMode } from './CesiumViewer';
 import { useLanguage } from '../../hooks/useLanguage';
 
 export type DisplayMode =
@@ -30,8 +24,6 @@ export type ViewAngle =
   | 'default'
   | 'topdown';
 
-export type { ToolMode };
-
 interface UnifiedToolbarProps {
   displayMode: DisplayMode;
   onDisplayModeChange: (
@@ -43,15 +35,9 @@ interface UnifiedToolbarProps {
     angle: ViewAngle
   ) => void;
 
-  toolMode: ToolMode;
-  onToolModeChange: (
-    mode: ToolMode
-  ) => void;
-
-  onClear: () => void;
-
   // Reserve the fixed top-right area occupied by Calibration Panel (Admin).
   reserveAdminPanel?: boolean;
+  reserveSidebar?: boolean;
 }
 
 const toolbarStyle = `
@@ -86,19 +72,9 @@ const toolbarStyle = `
     height: 0;
   }
 
-  /*
-   * Keep the toolbar's LEFT EDGE stable.
-   * Previously it was centered with translateX(-50%), so adding Xóa/hint
-   * made the bar wider and pushed its left edge underneath "Bảng điều khiển".
-   */
-  @media (max-width: 1180px) {
-    .viewer-command-bar {
-      left: 328px !important;
-    }
-  }
-
   .viewer-command-group {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     gap: 3px;
   }
@@ -159,11 +135,6 @@ const toolbarStyle = `
     color: var(--bar-text);
   }
 
-  .viewer-measure-hint {
-    border: 1px solid var(--bar-border-soft);
-    background: var(--bar-surface);
-    color: var(--bar-muted);
-  }
 `;
 
 
@@ -175,16 +146,6 @@ const TOOLBAR_COPY = {
     dom: 'Ảnh DOM',
     defaultView: 'Mặc định',
     topDown: 'Nhìn từ trên',
-    distance: 'Khoảng cách',
-    height: 'Chiều cao',
-    area: 'Diện tích',
-    clear: 'Xóa',
-    distanceHint:
-      'Click chốt điểm · Click lại điểm cuối để kết thúc',
-    heightHint:
-      'Click 2 điểm để đo chiều cao đứng',
-    areaHint:
-      'Click chốt đỉnh · Double-click để đóng đa giác',
   },
   en: {
     fullMap: 'Full Map',
@@ -193,13 +154,6 @@ const TOOLBAR_COPY = {
     dom: 'DOM Image',
     defaultView: 'Default',
     topDown: 'Top Down',
-    distance: 'Distance',
-    height: 'Height',
-    area: 'Area',
-    clear: 'Clear',
-    distanceHint: 'Click to place points · Click the last point again to finish',
-    heightHint: 'Click 2 points to measure vertical height',
-    areaHint: 'Click vertices · Double-click to close the polygon',
   },
   zh: {
     fullMap: '全景',
@@ -208,13 +162,6 @@ const TOOLBAR_COPY = {
     dom: 'DOM影像',
     defaultView: '默认',
     topDown: '俯视',
-    distance: '距离',
-    height: '高度',
-    area: '面积',
-    clear: '清除',
-    distanceHint: '点击放置测点 · 再次点击最后一点完成',
-    heightHint: '点击两个点测量垂直高度',
-    areaHint: '点击添加顶点 · 双击闭合多边形',
   },
 } as const;
 
@@ -270,33 +217,6 @@ const VIEW_BUTTONS = [
   },
 ];
 
-const MEASURE_BUTTONS = [
-  {
-    mode: 'distance' as ToolMode,
-    icon: Ruler,
-    labelKey: 'distance' as const,
-    iconColor: 'text-sky-500',
-    title:
-      'Đo khoảng cách 3D giữa các điểm',
-  },
-  {
-    mode: 'height' as ToolMode,
-    icon: ArrowUpDown,
-    labelKey: 'height' as const,
-    iconColor: 'text-emerald-500',
-    title:
-      'Đo chiều cao đứng giữa 2 điểm',
-  },
-  {
-    mode: 'area' as ToolMode,
-    icon: Square,
-    labelKey: 'area' as const,
-    iconColor: 'text-amber-500',
-    title:
-      'Đo diện tích đa giác',
-  },
-];
-
 export const UnifiedToolbar: React.FC<
   UnifiedToolbarProps
 > = ({
@@ -304,35 +224,25 @@ export const UnifiedToolbar: React.FC<
   onDisplayModeChange,
   viewAngle,
   onViewAngleChange,
-  toolMode,
-  onToolModeChange,
-  onClear,
   reserveAdminPanel = false,
+  reserveSidebar = true,
 }) => {
   const { currentLang } =
     useLanguage('vi');
   const c = TOOLBAR_COPY[currentLang];
-
-  const isMeasuring =
-    toolMode !== 'none';
-
-  const handleMeasureClick = (
-    mode: ToolMode
-  ) => {
-    onToolModeChange(
-      toolMode === mode ? 'none' : mode
-    );
-  };
+  const leftReserve = reserveSidebar ? 308 : 16;
+  const rightReserve = reserveAdminPanel ? 352 : 16;
 
   return (
     <>
       <style>{toolbarStyle}</style>
 
       <div
-        className="viewer-command-bar fixed left-[468px] top-3 z-30 flex items-center overflow-x-auto rounded-2xl border border-[var(--bar-border)] bg-[var(--bar-bg)] p-1.5 shadow-[var(--bar-shadow)] backdrop-blur-xl select-none"
+        className="viewer-command-bar fixed top-3 z-30 flex w-max max-w-full flex-nowrap items-center overflow-x-auto rounded-2xl border border-[var(--bar-border)] bg-[var(--bar-bg)] p-1.5 shadow-[var(--bar-shadow)] backdrop-blur-xl select-none"
         style={{
-          right: reserveAdminPanel ? '352px' : '16px',
-          maxWidth: 'none',
+          left: `calc(${leftReserve}px + (100vw - ${leftReserve + rightReserve}px) / 2)`,
+          maxWidth: `calc(100vw - ${leftReserve + rightReserve}px)`,
+          transform: 'translateX(-50%)',
         }}
       >
         <div className="viewer-command-group">
@@ -418,87 +328,6 @@ export const UnifiedToolbar: React.FC<
           )}
         </div>
 
-        <div className="viewer-command-divider" />
-
-        <div className="viewer-command-group">
-          {MEASURE_BUTTONS.map(
-            ({
-              mode,
-              icon: Icon,
-              labelKey,
-              iconColor,
-              title,
-            }) => {
-              const active =
-                toolMode === mode;
-
-              return (
-                <button
-                  type="button"
-                  key={mode}
-                  onClick={() =>
-                    handleMeasureClick(mode)
-                  }
-                  title={title}
-                  className={`viewer-command-btn ${
-                    active
-                      ? 'is-secondary-active'
-                      : ''
-                  }`}
-                >
-                  <Icon
-                    size={14}
-                    className={
-                      active
-                        ? 'text-sky-500'
-                        : iconColor
-                    }
-                  />
-                  <span>{c[labelKey]}</span>
-                </button>
-              );
-            }
-          )}
-
-          {isMeasuring && (
-            <button
-              type="button"
-              onClick={() => {
-                onClear();
-                onToolModeChange('none');
-              }}
-              title="Xóa tất cả các phép đo"
-              className="viewer-command-btn !text-rose-500 hover:!border-rose-500/25 hover:!bg-rose-500/[0.08]"
-            >
-              <Trash2 size={14} />
-              <span>Xóa</span>
-            </button>
-          )}
-        </div>
-
-        {isMeasuring && (
-          <>
-            <div className="viewer-command-divider hidden 2xl:block" />
-
-            <div className="viewer-measure-hint hidden items-center gap-1.5 rounded-lg px-2.5 py-2 text-[10px] 2xl:flex">
-              <ChevronRight
-                size={10}
-                className="text-sky-500"
-              />
-
-              <span className="max-w-[245px] truncate">
-                {toolMode === 'distance' &&
-                  c.distanceHint}
-
-                {toolMode === 'height' &&
-                  c.heightHint}
-
-                {toolMode === 'area' &&
-                  c.areaHint}
-              </span>
-            </div>
-          </>
-        )}
       </div>
     </>
   );

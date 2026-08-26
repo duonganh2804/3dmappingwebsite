@@ -5,17 +5,22 @@
 import React, { useEffect, useState } from 'react';
 import {
   Box,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Image as ImageIcon,
   Layers,
+  Loader2,
   Lock,
   MapPin,
   Navigation as NavIcon,
   Settings2,
   Moon,
+  MinusCircle,
   Sun,
   Unlock,
+  AlertTriangle,
+  Flame,
   Wrench,
 } from 'lucide-react';
 
@@ -39,6 +44,8 @@ type ClipMode =
   | 'outside';
 
 type ClipFilter = 'any' | 'all';
+
+export type LayerLoadStatus = 'idle' | 'loading' | 'ready' | 'error' | 'unavailable';
 
 const THEME_STORAGE_KEY = 'saolatek_theme';
 const THEME_CHANGE_EVENT = 'saolatek-theme-change';
@@ -67,6 +74,8 @@ interface PotreeSidebarProps {
   onClear: () => void;
   measurementManager?: React.ReactNode;
   onClipTool?: (tool: 'box' | 'polygon' | 'plane' | 'clear') => void;
+  activeClipTool?: 'box' | 'polygon' | 'plane' | null;
+  clipInstruction?: string | null;
   clipMode?: ClipMode;
   onClipModeChange?: (mode: ClipMode) => void;
   clipFilter?: ClipFilter;
@@ -80,6 +89,34 @@ interface PotreeSidebarProps {
     view: 'L' | 'R' | 'F' | 'B' | 'T' | 'D'
   ) => void;
   onNavigationAction?: (action: 'earth' | 'fps' | 'orbit' | 'heli' | 'compass' | 'anim') => void;
+  isFocusPicking?: boolean;
+  isReturningFocusOrigin?: boolean;
+  onToggleFocusPick?: () => void;
+  navigationMode?: 'earth' | 'fps' | 'orbit' | 'heli';
+  isCameraAnimating?: boolean;
+  flightHeight?: number;
+  onFlightHeightChange?: (height: number) => void;
+  orbitRadius?: number;
+  onOrbitRadiusChange?: (radius: number) => void;
+  flightPathPointCount?: number;
+  isDrawingFlightPath?: boolean;
+  flightPathStatus?: 'idle' | 'flying' | 'paused';
+  onDrawFlightPath?: () => void;
+  onStartFlightPath?: () => void;
+  onPauseFlightPath?: () => void;
+  onResumeFlightPath?: () => void;
+  onStopFlightPath?: () => void;
+  onReplayFlightPath?: () => void;
+  onDeleteFlightPath?: () => void;
+  activeCameraView?: 'L' | 'R' | 'F' | 'B' | 'T' | 'D' | null;
+  viewAngle?: 'default' | 'topdown';
+  cameraHeading?: number;
+  orbitTargetSelected?: boolean;
+  isSelectingOrbitTarget?: boolean;
+  isOrbitingTarget?: boolean;
+  onSelectOrbitTarget?: () => void;
+  onStartOrbitTarget?: () => void;
+  onStopOrbitTarget?: () => void;
 
   isOptimizerOpen: boolean;
   onToggleOptimizer: () => void;
@@ -91,6 +128,27 @@ interface PotreeSidebarProps {
   setShowDom: (v: boolean) => void;
   showPointCloud: boolean;
   setShowPointCloud: (v: boolean) => void;
+  modelOpacity: number;
+  onModelOpacityChange: (v: number) => void;
+  pointCloudOpacity: number;
+  onPointCloudOpacityChange: (v: number) => void;
+  heatmapEnabled: boolean;
+  onHeatmapEnabledChange: (v: boolean) => void;
+  heatmapProperty: 'elevation';
+  onHeatmapPropertyChange: (v: 'elevation') => void;
+  heatmapMax: number;
+  heatmapRangeAvailable: boolean;
+  domOpacity: number;
+  onDomOpacityChange: (v: number) => void;
+  modelLoadStatus?: LayerLoadStatus;
+  pointCloudLoadStatus?: LayerLoadStatus;
+  domLoadStatus?: LayerLoadStatus;
+  modelLoadError?: string | null;
+  pointCloudLoadError?: string | null;
+  domLoadError?: string | null;
+  onRetryModel?: () => void;
+  onRetryPointCloud?: () => void;
+  onRetryDom?: () => void;
 
   pointSize: number;
   onPointSizeChange: (v: number) => void;
@@ -368,6 +426,13 @@ const viewerStyle = `
     color: var(--vs-accent);
   }
 
+  .viewer-camera-key.is-active {
+    border-color: rgba(14,165,233,.52);
+    background: var(--vs-accent-soft);
+    color: var(--vs-accent);
+    box-shadow: inset 0 0 0 1px rgba(14,165,233,.08);
+  }
+
   /* Calibration panel stays functional but follows the same light surface. */
   html[data-saolatek-theme='light']
     [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80'] {
@@ -424,6 +489,7 @@ function SliderRow({
   max,
   step,
   onChange,
+  stepButtons,
 }: {
   label: string;
   value: number;
@@ -432,7 +498,15 @@ function SliderRow({
   max: number;
   step: number;
   onChange: (v: number) => void;
+  stepButtons?: {
+    amount: number;
+    decreaseAriaLabel: string;
+    increaseAriaLabel: string;
+  };
 }) {
+  const stepButtonClass =
+    'flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[var(--vs-border)] bg-[var(--vs-panel)] text-xs font-bold text-[var(--vs-text-soft)] transition hover:border-sky-500/50 hover:bg-sky-500/10 hover:text-sky-500 disabled:cursor-not-allowed disabled:opacity-35';
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
@@ -445,19 +519,43 @@ function SliderRow({
         </span>
       </div>
 
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(event) =>
-          onChange(
-            parseFloat(event.target.value)
-          )
-        }
-        className="viewer-slider"
-      />
+      <div className="flex min-w-0 items-center gap-1.5">
+        {stepButtons && (
+          <button
+            type="button"
+            aria-label={stepButtons.decreaseAriaLabel}
+            disabled={value <= min}
+            onClick={() => onChange(Math.max(min, value - stepButtons.amount))}
+            className={stepButtonClass}
+          >
+            −
+          </button>
+        )}
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(event) =>
+            onChange(
+              parseFloat(event.target.value)
+            )
+          }
+          className="viewer-slider min-w-0 flex-1"
+        />
+        {stepButtons && (
+          <button
+            type="button"
+            aria-label={stepButtons.increaseAriaLabel}
+            disabled={value >= max}
+            onClick={() => onChange(Math.min(max, value + stepButtons.amount))}
+            className={stepButtonClass}
+          >
+            +
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -513,6 +611,42 @@ function CheckMark() {
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+function LayerStatus({ status, error, onRetry }: {
+  status: LayerLoadStatus;
+  error?: string | null;
+  onRetry?: () => void;
+}) {
+  const icon = status === 'ready'
+    ? <CheckCircle2 size={12} className="text-emerald-400" />
+    : status === 'loading'
+      ? <Loader2 size={12} className="animate-spin text-sky-400" />
+      : status === 'error'
+        ? <AlertTriangle size={12} className="text-rose-400" />
+        : <MinusCircle size={12} className="text-[var(--vs-muted)] opacity-65" />;
+
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-1.5" onClick={(event) => event.stopPropagation()}>
+      <span title={error || (status === 'unavailable' ? 'Không có dữ liệu' : status)} aria-label={error || `Layer status: ${status}`}>
+        {icon}
+      </span>
+      {status === 'error' && error && (
+        <span className="max-w-[70px] truncate text-[8px] text-rose-400" title={error}>{error}</span>
+      )}
+      {status === 'error' && onRetry && (
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={onRetry}
+          onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onRetry(); }}
+          className="rounded border border-rose-400/25 bg-rose-400/[0.08] px-1.5 py-0.5 text-[8px] font-semibold text-rose-400 transition hover:bg-rose-400/[0.14] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-400"
+        >
+          Thử lại
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -820,16 +954,46 @@ export function PotreeSidebar({
   onClear,
   measurementManager,
   onClipTool,
+  activeClipTool,
+  clipInstruction,
   clipMode = 'highlight',
   onClipModeChange,
   clipFilter = 'any',
   onClipFilterChange,
   showMeasurements = true,
   onToggleShowMeasurements,
-  cameraSpeed = 130.6,
+  cameraSpeed = 40,
   onCameraSpeedChange,
   onSetCameraView,
   onNavigationAction,
+  isFocusPicking = false,
+  isReturningFocusOrigin = false,
+  onToggleFocusPick,
+  navigationMode = 'earth',
+  isCameraAnimating = false,
+  flightHeight = 60,
+  onFlightHeightChange,
+  orbitRadius = 35,
+  onOrbitRadiusChange,
+  flightPathPointCount = 0,
+  isDrawingFlightPath = false,
+  flightPathStatus = 'idle',
+  onDrawFlightPath,
+  onStartFlightPath,
+  onPauseFlightPath,
+  onResumeFlightPath,
+  onStopFlightPath,
+  onReplayFlightPath,
+  onDeleteFlightPath,
+  activeCameraView = null,
+  viewAngle = 'default',
+  cameraHeading = 0,
+  orbitTargetSelected = false,
+  isSelectingOrbitTarget = false,
+  isOrbitingTarget = false,
+  onSelectOrbitTarget,
+  onStartOrbitTarget,
+  onStopOrbitTarget,
   onToggleOptimizer,
   isOptimizerOpen,
   showModel,
@@ -838,6 +1002,27 @@ export function PotreeSidebar({
   setShowDom,
   showPointCloud,
   setShowPointCloud,
+  modelOpacity,
+  onModelOpacityChange,
+  pointCloudOpacity,
+  onPointCloudOpacityChange,
+  heatmapEnabled,
+  onHeatmapEnabledChange,
+  heatmapProperty,
+  onHeatmapPropertyChange,
+  heatmapMax,
+  heatmapRangeAvailable,
+  domOpacity,
+  onDomOpacityChange,
+  modelLoadStatus = 'idle',
+  pointCloudLoadStatus = 'idle',
+  domLoadStatus = 'idle',
+  modelLoadError,
+  pointCloudLoadError,
+  domLoadError,
+  onRetryModel,
+  onRetryPointCloud,
+  onRetryDom,
   pointSize,
   onPointSizeChange,
   fov,
@@ -882,7 +1067,6 @@ export function PotreeSidebar({
 
   const [isDarkMode, setIsDarkMode] =
     useState(readInitialTheme);
-
   useEffect(() => {
     const savedTheme = isDarkMode
       ? 'dark'
@@ -1180,9 +1364,13 @@ export function PotreeSidebar({
     {
       id: 'focus',
       icon: getIconUrl('focus.svg'),
-      title: 'Focus tới Point Cloud',
+      title: isReturningFocusOrigin
+        ? 'Đang trở về góc nhìn trước Focus'
+        : isFocusPicking
+          ? 'Hủy chọn điểm Focus'
+          : 'Chọn một điểm để Focus',
       label: c.navFocus,
-      action: onFocusPointCloud,
+      action: onToggleFocusPick,
     },
     {
       id: 'cube',
@@ -1437,12 +1625,11 @@ export function PotreeSidebar({
                         onClick={() => {
                           onClipTool?.(tool.id as 'box' | 'polygon' | 'plane' | 'clear');
                         }}
-                        disabled={tool.id === 'polygon'}
-                        title={tool.id === 'polygon' ? 'Clipping polygon chưa được hỗ trợ an toàn cho pipeline hiện tại' : tool.title}
+                        title={tool.title}
                         className={`${baseToolButton} ${
                           tool.id === 'clear'
                             ? dangerToolButton
-                            : amberToolButton
+                            : `${amberToolButton} ${activeClipTool === tool.id ? 'ring-1 ring-amber-300 bg-amber-400/15' : ''}`
                         }`}
                       >
                         <img
@@ -1464,6 +1651,12 @@ export function PotreeSidebar({
                     )
                   )}
                 </div>
+
+                {clipInstruction && (
+                  <p className="text-[10px] leading-4 text-[var(--vs-text-soft)]" role="status">
+                    {clipInstruction}
+                  </p>
+                )}
 
                 <div className="grid grid-cols-4 overflow-hidden rounded-md border border-[var(--vs-border)] bg-[var(--vs-bg-soft)]">
                   {(
@@ -1532,9 +1725,17 @@ export function PotreeSidebar({
               </div>
 
               <div className="viewer-section-shell space-y-3">
-                <MicroTitle>
-                  {c.navigation}
-                </MicroTitle>
+                <div className="flex items-center justify-between gap-2">
+                  <MicroTitle>{c.navigation}</MicroTitle>
+                  <span
+                    className="inline-flex items-center gap-1 rounded-md border border-[var(--vs-border-soft)] bg-[var(--vs-bg-soft)] px-2 py-1 font-mono text-[9px] font-semibold tabular-nums text-[var(--vs-accent)]"
+                    title="Current camera heading"
+                    aria-label={`Current camera heading ${Math.round(cameraHeading) % 360} degrees`}
+                  >
+                    <NavIcon aria-hidden="true" className="h-3 w-3 transition-transform duration-150" style={{ transform: `rotate(${-cameraHeading}deg)` }} />
+                    {String(Math.round(cameraHeading) % 360).padStart(3, '0')}°
+                  </span>
+                </div>
 
                 <div className="grid grid-cols-4 gap-2">
                   {navigationTools.map(
@@ -1542,24 +1743,33 @@ export function PotreeSidebar({
                       <button
                         type="button"
                         key={tool.id}
-                        disabled={tool.id === 'heli' || tool.id === 'anim'}
+                        disabled={tool.id === 'focus' && isReturningFocusOrigin}
                         onClick={() => {
                           if (tool.action) {
                             tool.action();
-                          } else if (tool.id !== 'heli' && tool.id !== 'anim') {
-                            onNavigationAction?.(tool.id as 'earth' | 'fps' | 'orbit' | 'compass');
+                          } else {
+                            onNavigationAction?.(tool.id as 'earth' | 'fps' | 'orbit' | 'heli' | 'compass' | 'anim');
                           }
                         }}
                         title={tool.title}
-                        className={`${baseToolButton} disabled:cursor-not-allowed disabled:opacity-40`}
+                        className={`${baseToolButton} ${
+                          ((tool.id === 'earth' || tool.id === 'fps' || tool.id === 'orbit' || tool.id === 'heli') && navigationMode === tool.id) ||
+                          (tool.id === 'anim' && isCameraAnimating) ||
+                          (tool.id === 'focus' && (isFocusPicking || isReturningFocusOrigin))
+                            ? activeToolButton
+                            : ''
+                        } disabled:cursor-not-allowed disabled:opacity-40`}
                       >
                         <img
                           src={tool.icon}
                           alt={tool.title}
                           className="h-5 w-5 object-contain opacity-95"
                           style={{
-                            filter:
-                              activeIconFilter,
+                            filter: (((tool.id === 'earth' || tool.id === 'fps' || tool.id === 'orbit' || tool.id === 'heli') && navigationMode === tool.id) ||
+                              (tool.id === 'anim' && isCameraAnimating))
+                              || (tool.id === 'focus' && (isFocusPicking || isReturningFocusOrigin))
+                              ? activeIconFilter
+                              : neutralIconFilter,
                           }}
                         />
                         <span className="viewer-tool-label">
@@ -1570,16 +1780,185 @@ export function PotreeSidebar({
                   )}
                 </div>
 
+                {navigationMode === 'orbit' && (
+                  <div className="sticky bottom-2 z-20 space-y-2.5 rounded-md border border-sky-500/30 bg-[var(--vs-panel)]/95 p-2.5 shadow-lg backdrop-blur">
+                    <div className="flex items-center justify-between text-[9px] font-bold uppercase tracking-[0.12em] text-sky-500">
+                      <span>Orbit</span>
+                      {orbitTargetSelected
+                        ? <span>Sẵn sàng bay</span>
+                        : isSelectingOrbitTarget
+                          ? <span>Đang tạo vòng</span>
+                          : null}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={onSelectOrbitTarget}
+                      className={`${baseToolButton} w-full flex-row justify-center gap-2 ${isSelectingOrbitTarget ? activeToolButton : ''}`}
+                    >
+                      {orbitTargetSelected ? 'Chọn lại tâm + bán kính' : 'Chọn tâm + bán kính'}
+                    </button>
+
+                    {isSelectingOrbitTarget && (
+                      <div className="rounded-md border border-sky-500/20 bg-sky-500/[0.05] px-2 py-1.5 text-[9px] leading-4 text-[var(--vs-text-soft)]">
+                        <div>1. Click điểm muốn focus.</div>
+                        <div>2. Di chuột để xem vòng → click mép vòng để chốt bán kính.</div>
+                        <div>3. Chỉnh Độ cao bay → vòng preview nâng/hạ realtime.</div>
+                      </div>
+                    )}
+
+                    {(orbitTargetSelected || isSelectingOrbitTarget) && (
+                      <div className="space-y-2">
+                        <SliderRow
+                          label="Độ cao bay"
+                          value={flightHeight}
+                          displayValue={`${flightHeight.toFixed(0)} m`}
+                          min={10}
+                          max={200}
+                          step={5}
+                          onChange={onFlightHeightChange || (() => {})}
+                          stepButtons={{
+                            amount: 5,
+                            decreaseAriaLabel: 'Giảm độ cao bay',
+                            increaseAriaLabel: 'Tăng độ cao bay',
+                          }}
+                        />
+                        <SliderRow
+                          label="Bán kính vòng"
+                          value={orbitRadius}
+                          displayValue={`${orbitRadius.toFixed(0)} m`}
+                          min={12}
+                          max={500}
+                          step={5}
+                          onChange={onOrbitRadiusChange || (() => {})}
+                          stepButtons={{
+                            amount: 5,
+                            decreaseAriaLabel: 'Giảm bán kính vòng',
+                            increaseAriaLabel: 'Tăng bán kính vòng',
+                          }}
+                        />
+                        <SliderRow
+                          label="Tốc độ bay"
+                          value={cameraSpeed}
+                          displayValue={`${cameraSpeed.toFixed(1)} m/s`}
+                          min={5}
+                          max={150}
+                          step={1}
+                          onChange={onCameraSpeedChange || (() => {})}
+                          stepButtons={{
+                            amount: 1,
+                            decreaseAriaLabel: 'Giảm tốc độ bay',
+                            increaseAriaLabel: 'Tăng tốc độ bay',
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    {orbitTargetSelected && !isOrbitingTarget && (
+                      <button
+                        type="button"
+                        onClick={onStartOrbitTarget}
+                        className={`${baseToolButton} ${activeToolButton} w-full flex-row justify-center gap-2 font-semibold`}
+                      >
+                        ▶ Bắt đầu bay
+                      </button>
+                    )}
+
+                    {orbitTargetSelected && isOrbitingTarget && (
+                      <button
+                        type="button"
+                        onClick={onStopOrbitTarget}
+                        className={`${baseToolButton} w-full flex-row justify-center gap-2`}
+                      >
+                        ■ Dừng bay
+                      </button>
+                    )}
+
+                    <p className="text-[9px] leading-4 text-[var(--vs-muted)]">
+                      Vòng bay giữ nguyên khi dừng. Khi đang bay, lăn chuột để co/giãn vòng; kéo camera để dừng.
+                    </p>
+                  </div>
+                )}
+
+                {navigationMode === 'fps' && (
+                  <div className="space-y-3 rounded-md border border-sky-500/20 bg-sky-500/[0.04] p-2.5">
+                    <div className="flex items-center justify-between text-[9px] font-bold uppercase tracking-[0.12em] text-sky-500">
+                      <span>Bay</span>
+                      {flightPathPointCount > 0 && <span>{flightPathPointCount} waypoint</span>}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onDrawFlightPath}
+                      disabled={isDrawingFlightPath}
+                      className={`${baseToolButton} w-full flex-row justify-center gap-2 ${isDrawingFlightPath ? activeToolButton : ''} disabled:cursor-not-allowed`}
+                    >
+                      {flightPathPointCount >= 2 ? 'Vẽ lại đường bay' : 'Vẽ đường bay'}
+                    </button>
+                    {isDrawingFlightPath && (
+                      <p className="text-[9px] leading-4 text-[var(--vs-text-soft)]">Click waypoint · Nhấp đúp để hoàn tất · Có thể zoom / xoay / pan khi vẽ</p>
+                    )}
+                    <SliderRow
+                      label="Độ cao bay"
+                      value={flightHeight}
+                      displayValue={`${Math.round(flightHeight)} m`}
+                      min={10}
+                      max={300}
+                      step={1}
+                      onChange={onFlightHeightChange || (() => {})}
+                      stepButtons={{
+                        amount: 5,
+                        decreaseAriaLabel: 'Giảm độ cao bay',
+                        increaseAriaLabel: 'Tăng độ cao bay',
+                      }}
+                    />
+                    <SliderRow
+                      label="Tốc độ bay"
+                      value={cameraSpeed}
+                      displayValue={`${cameraSpeed.toFixed(1)} m/s`}
+                      min={5}
+                      max={150}
+                      step={1}
+                      onChange={onCameraSpeedChange || (() => {})}
+                      stepButtons={{
+                        amount: 1,
+                        decreaseAriaLabel: 'Giảm tốc độ bay',
+                        increaseAriaLabel: 'Tăng tốc độ bay',
+                      }}
+                    />
+                    {flightPathPointCount >= 2 && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <button type="button" onClick={onStartFlightPath} disabled={flightPathStatus === 'flying'} className={`${baseToolButton} disabled:cursor-not-allowed disabled:opacity-40`}>▶ Bắt đầu</button>
+                        <button type="button" onClick={onReplayFlightPath} className={baseToolButton}>↻ Bay lại</button>
+                        <button
+                          type="button"
+                          onClick={flightPathStatus === 'paused' ? onResumeFlightPath : onPauseFlightPath}
+                          disabled={flightPathStatus === 'idle'}
+                          className={`${baseToolButton} disabled:cursor-not-allowed disabled:opacity-40`}
+                        >
+                          {flightPathStatus === 'paused' ? '▶ Tiếp tục' : '⏸ Tạm dừng'}
+                        </button>
+                        <button type="button" onClick={onStopFlightPath} disabled={flightPathStatus === 'idle'} className={`${baseToolButton} disabled:cursor-not-allowed disabled:opacity-40`}>■ Dừng</button>
+                        <button type="button" onClick={onDeleteFlightPath} className={`${baseToolButton} ${dangerToolButton} col-span-2`}>Xóa đường</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-6 gap-1">
                   {cubeViews.map((view) => (
                     <button
                       type="button"
                       key={view}
-                      onClick={() =>
-                        onSetCameraView?.(view)
-                      }
+                      onClick={() => {
+                        onSetCameraView?.(view);
+                      }}
                       title={`Góc nhìn ${view}`}
-                      className="viewer-camera-key py-2"
+                      aria-pressed={activeCameraView === view || (view === 'T' && viewAngle === 'topdown')}
+                      className={`viewer-camera-key py-2 ${
+                        activeCameraView === view || (view === 'T' && viewAngle === 'topdown')
+                          ? 'is-active'
+                          : ''
+                      }`}
                     >
                       {view}
                     </button>
@@ -1610,22 +1989,22 @@ export function PotreeSidebar({
                   </Segment>
                 </div>
 
-                <div className="pt-1">
-                  <SliderRow
-                    label={c.speed}
-                    value={cameraSpeed}
-                    displayValue={cameraSpeed.toFixed(
-                      1
-                    )}
-                    min={10}
-                    max={500}
-                    step={1}
-                    onChange={
-                      onCameraSpeedChange ||
-                      (() => {})
-                    }
-                  />
-                </div>
+                {navigationMode !== 'fps' && navigationMode !== 'orbit' && (
+                  <div className="pt-1">
+                    <SliderRow
+                      label={c.speed}
+                      value={cameraSpeed}
+                      displayValue={`${cameraSpeed.toFixed(1)} m/s`}
+                      min={10}
+                      max={300}
+                      step={1}
+                      onChange={
+                        onCameraSpeedChange ||
+                        (() => {})
+                      }
+                    />
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1640,6 +2019,57 @@ export function PotreeSidebar({
 
           {sections.appearance && (
             <div className="space-y-4 border-b border-[var(--vs-border-soft)] px-3.5 py-4">
+              <div className="viewer-section-shell space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Flame size={13} className="text-orange-400" aria-hidden="true" />
+                    <MicroTitle>Heatmap</MicroTitle>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={heatmapEnabled}
+                    onClick={() => onHeatmapEnabledChange(!heatmapEnabled)}
+                    className={`rounded-md border px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide transition ${heatmapEnabled
+                      ? 'border-orange-400/45 bg-orange-400/10 text-orange-300'
+                      : 'border-[var(--vs-border)] bg-[var(--vs-bg-soft)] text-[var(--vs-muted)] hover:text-[var(--vs-text)]'
+                    }`}
+                  >
+                    {heatmapEnabled ? 'On' : 'Off'}
+                  </button>
+                </div>
+
+                <fieldset disabled={!heatmapEnabled} className="space-y-3 disabled:opacity-45">
+                  <label className="block space-y-1.5 text-[10px] text-[var(--vs-text-soft)]">
+                    <span>Thuộc tính</span>
+                    <select
+                      value={heatmapProperty}
+                      onChange={event => onHeatmapPropertyChange(event.target.value as 'elevation')}
+                      className="w-full rounded-md border border-[var(--vs-border)] bg-[var(--vs-surface)] px-2.5 py-2 text-[10px] text-[var(--vs-text)] outline-none focus-visible:border-sky-500"
+                    >
+                      <option value="elevation">Elevation / Height</option>
+                    </select>
+                  </label>
+
+                  {heatmapRangeAvailable && <div className="space-y-2">
+                    <MicroTitle>Độ cao</MicroTitle>
+                    <div>
+                      <div
+                        className="h-2.5 rounded-full border border-white/10 bg-[linear-gradient(90deg,#0066ff_0%,#00e5ff_20%,#00d45a_40%,#ffe600_60%,#ff8c00_80%,#ff2b20_100%)]"
+                        aria-label="Continuous elevation gradient from blue to red"
+                      />
+                      <div className="mt-1.5 flex justify-between text-[9px] tabular-nums text-[var(--vs-muted)]">
+                        <span>0.0 m</span>
+                        <span>{heatmapMax.toFixed(1)} m</span>
+                      </div>
+                    </div>
+                  </div>}
+                  {!heatmapRangeAvailable && (
+                    <p className="text-[9px] leading-4 text-amber-400">Độ cao sẽ được tính tự động khi point cloud sẵn sàng.</p>
+                  )}
+                </fieldset>
+              </div>
+
               {(() => {
                 const minBudget =
                   minPointBudget || 0;
@@ -1705,6 +2135,7 @@ export function PotreeSidebar({
               <SliderRow
                 label={c.pointSize}
                 value={pointSize}
+                displayValue={pointSize.toFixed(1)}
                 min={1}
                 max={8}
                 step={0.5}
@@ -1901,7 +2332,19 @@ export function PotreeSidebar({
                   <span className="viewer-scene-label text-[11px] transition">
                     {c.pointCloud}
                   </span>
+                  <LayerStatus status={pointCloudLoadStatus} error={pointCloudLoadError} onRetry={onRetryPointCloud} />
                 </button>
+                <div className="px-1.5 pb-2">
+                  <SliderRow
+                    label={`${c.pointCloud} · ${c.opacity}`}
+                    value={pointCloudOpacity}
+                    displayValue={`${Math.round(pointCloudOpacity * 100)}%`}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    onChange={onPointCloudOpacityChange}
+                  />
+                </div>
 
                 <button
                   type="button"
@@ -1930,7 +2373,19 @@ export function PotreeSidebar({
                   <span className="viewer-scene-label text-[11px] transition">
                     {c.model3d}
                   </span>
+                  <LayerStatus status={modelLoadStatus} error={modelLoadError} onRetry={onRetryModel} />
                 </button>
+                <div className="px-1.5 pb-2">
+                  <SliderRow
+                    label={`${c.model3d} · ${c.opacity}`}
+                    value={modelOpacity}
+                    displayValue={`${Math.round(modelOpacity * 100)}%`}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    onChange={onModelOpacityChange}
+                  />
+                </div>
 
                 <button
                   type="button"
@@ -1957,7 +2412,19 @@ export function PotreeSidebar({
                   <span className="viewer-scene-label text-[11px] transition">
                     {c.dom}
                   </span>
+                  <LayerStatus status={domLoadStatus} error={domLoadError} onRetry={onRetryDom} />
                 </button>
+                <div className="px-1.5 pb-1">
+                  <SliderRow
+                    label={`${c.dom} · ${c.opacity}`}
+                    value={domOpacity}
+                    displayValue={`${Math.round(domOpacity * 100)}%`}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    onChange={onDomOpacityChange}
+                  />
+                </div>
               </div>
 
               <div className="space-y-2 pt-1">

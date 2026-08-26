@@ -1,5 +1,185 @@
 import * as Cesium from 'cesium';
-import type { MeasurementRecord, ToolMode } from './measurementTypes';
+import type { MeasurementRecord, ProfileResult, ToolMode } from './measurementTypes';
+
+export type ProfileSamplePlanItem = {
+  distance: number;
+  cartographic: Cesium.Cartographic;
+  fallbackHeight: number;
+};
+
+export function buildAreaReferencePlane(points: Cesium.Cartesian3[]): Cesium.Plane | null {
+  if (points.length < 3) return null;
+  const centroid = Cesium.Cartesian3.multiplyByScalar(
+    points.reduce((sum, point) => Cesium.Cartesian3.add(sum, point, sum), new Cesium.Cartesian3()),
+    1 / points.length,
+    new Cesium.Cartesian3(),
+  );
+  const enu = Cesium.Transforms.eastNorthUpToFixedFrame(centroid);
+  const inverseEnu = Cesium.Matrix4.inverse(enu, new Cesium.Matrix4());
+  const local = points.map(point => Cesium.Matrix4.multiplyByPoint(inverseEnu, point, new Cesium.Cartesian3()));
+  const horizontalSpan = Math.max(
+    1,
+    ...local.flatMap((point, index) => local.slice(index + 1).map(other =>
+      Math.hypot(point.x - other.x, point.y - other.y)
+    )),
+  );
+  const inlierThreshold = Math.max(0.05, horizontalSpan * 0.01);
+  let best: { normal: Cesium.Cartesian3; point: Cesium.Cartesian3; score: number } | null = null;
+
+  for (let first = 0; first < local.length - 2; first++) {
+    for (let second = first + 1; second < local.length - 1; second++) {
+      for (let third = second + 1; third < local.length; third++) {
+        const ab = Cesium.Cartesian3.subtract(local[second], local[first], new Cesium.Cartesian3());
+        const ac = Cesium.Cartesian3.subtract(local[third], local[first], new Cesium.Cartesian3());
+        const normal = Cesium.Cartesian3.cross(ab, ac, new Cesium.Cartesian3());
+        if (Cesium.Cartesian3.magnitudeSquared(normal) < Cesium.Math.EPSILON12) continue;
+        Cesium.Cartesian3.normalize(normal, normal);
+        if (normal.z < 0) Cesium.Cartesian3.negate(normal, normal);
+        const upScore = normal.z;
+        if (upScore < 0.35) continue;
+        const distance = -Cesium.Cartesian3.dot(normal, local[first]);
+        const residuals = local.map(point => Math.abs(Cesium.Cartesian3.dot(normal, point) + distance));
+        const inlierCount = residuals.filter(residual => residual <= inlierThreshold).length;
+        const meanInlierResidual = residuals
+          .filter(residual => residual <= inlierThreshold)
+          .reduce((sum, residual) => sum + residual, 0) / Math.max(1, inlierCount);
+        const score = inlierCount * 1000 + upScore * 100 - meanInlierResidual;
+        if (!best || score > best.score) best = { normal, point: local[first], score };
+      }
+    }
+  }
+
+  if (!best) return null;
+  const worldNormal = Cesium.Matrix4.multiplyByPointAsVector(enu, best.normal, new Cesium.Cartesian3());
+  Cesium.Cartesian3.normalize(worldNormal, worldNormal);
+  const worldPoint = Cesium.Matrix4.multiplyByPoint(enu, best.point, new Cesium.Cartesian3());
+  return Cesium.Plane.fromPointNormal(worldPoint, worldNormal);
+}
+
+export function projectPointToPlane(point: Cesium.Cartesian3, plane: Cesium.Plane): Cesium.Cartesian3 {
+  return Cesium.Cartesian3.subtract(
+    point,
+    Cesium.Cartesian3.multiplyByScalar(
+      plane.normal,
+      Cesium.Plane.getPointDistance(plane, point),
+      new Cesium.Cartesian3(),
+    ),
+    new Cesium.Cartesian3(),
+  );
+}
+
+export function normalizeAreaPoints(points: Cesium.Cartesian3[], plane: Cesium.Plane): Cesium.Cartesian3[] {
+  const normalized = points.map(point => projectPointToPlane(point, plane));
+  const maxResidual = Math.max(
+    0,
+    ...normalized.map(point => Math.abs(Cesium.Plane.getPointDistance(plane, point))),
+  );
+  console.info('[MEASURE AREA PLANE]', {
+    normal: Cesium.Cartesian3.clone(plane.normal),
+    maxResidual,
+  });
+  return normalized;
+}
+
+export function buildProfileSamplePlan(
+  controlPoints: Cesium.Cartesian3[],
+  maxSamples = 220,
+): { items: ProfileSamplePlanItem[]; totalDistance: number } | null {
+  if (controlPoints.length < 2) return null;
+  const segments: {
+    geodesic: Cesium.EllipsoidGeodesic;
+    length: number;
+    startDistance: number;
+    startHeight: number;
+    endHeight: number;
+  }[] = [];
+  let totalDistance = 0;
+
+  for (let index = 0; index < controlPoints.length - 1; index++) {
+    const start = Cesium.Cartographic.fromCartesian(controlPoints[index]);
+    const end = Cesium.Cartographic.fromCartesian(controlPoints[index + 1]);
+    const geodesic = new Cesium.EllipsoidGeodesic(start, end);
+    const length = geodesic.surfaceDistance;
+    if (!Number.isFinite(length) || length < 0.01) continue;
+    segments.push({ geodesic, length, startDistance: totalDistance, startHeight: start.height, endHeight: end.height });
+    totalDistance += length;
+  }
+
+  if (segments.length === 0 || totalDistance < 0.01) return null;
+  const sampleCount = Math.max(24, Math.min(maxSamples, Math.ceil(totalDistance / 1.0) + 1));
+  const items: ProfileSamplePlanItem[] = [];
+  let segmentIndex = 0;
+
+  for (let index = 0; index < sampleCount; index++) {
+    const targetDistance = index === sampleCount - 1
+      ? totalDistance
+      : (totalDistance * index) / (sampleCount - 1);
+    while (
+      segmentIndex < segments.length - 1 &&
+      targetDistance > segments[segmentIndex].startDistance + segments[segmentIndex].length
+    ) segmentIndex++;
+
+    const segment = segments[segmentIndex];
+    const localDistance = Cesium.Math.clamp(targetDistance - segment.startDistance, 0, segment.length);
+    const progress = segment.length > 0 ? localDistance / segment.length : 0;
+    const cartographic = segment.geodesic.interpolateUsingSurfaceDistance(localDistance, new Cesium.Cartographic());
+    cartographic.height = 0;
+    items.push({
+      distance: targetDistance,
+      cartographic,
+      fallbackHeight: segment.startHeight + (segment.endHeight - segment.startHeight) * progress,
+    });
+  }
+  return { items, totalDistance };
+}
+
+export function buildProfileChartPoints(
+  profile: ProfileResult,
+  width = 520,
+  height = 160,
+  paddingX = 18,
+  paddingY = 18,
+): string {
+  const distanceRange = Math.max(profile.totalDistance, 0.01);
+  const heightRange = Math.max(profile.maxHeight - profile.minHeight, 0.01);
+  const drawWidth = width - paddingX * 2;
+  const drawHeight = height - paddingY * 2;
+  return profile.samples.map(sample => {
+    const x = paddingX + (sample.distance / distanceRange) * drawWidth;
+    const y = height - paddingY - ((sample.height - profile.minHeight) / heightRange) * drawHeight;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+}
+
+export function buildControlProfilePreview(id: string, points: Cesium.Cartesian3[]): ProfileResult {
+  let totalDistance = 0;
+  let elevationGain = 0;
+  let elevationLoss = 0;
+  const samples = points.map((point, index) => {
+    const height = Cesium.Cartographic.fromCartesian(point).height;
+    if (index > 0) {
+      totalDistance += Cesium.Cartesian3.distance(points[index - 1], point);
+      const previousHeight = Cesium.Cartographic.fromCartesian(points[index - 1]).height;
+      const delta = height - previousHeight;
+      if (delta >= 0) elevationGain += delta;
+      else elevationLoss += -delta;
+    }
+    return { distance: totalDistance, height, position: point, source: 'control' as const };
+  });
+  const heights = samples.map(sample => sample.height);
+  return {
+    id,
+    samples,
+    totalDistance,
+    minHeight: Math.min(...heights),
+    maxHeight: Math.max(...heights),
+    elevationGain,
+    elevationLoss,
+    sceneSampleCount: 0,
+    terrainSampleCount: 0,
+    fallbackSampleCount: samples.length,
+  };
+}
 
 export const MEASUREMENT_RING_DOT_IMAGE = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="rgba(0,0,0,0.22)" stroke="#ffffff" stroke-width="1"/><circle cx="8" cy="8" r="2.5" fill="#22d3ee"/></svg>'

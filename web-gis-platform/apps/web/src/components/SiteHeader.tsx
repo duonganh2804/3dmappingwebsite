@@ -4,6 +4,7 @@ import {
   ArrowRight,
   ChevronDown,
   Globe,
+  LogOut,
   Menu,
   X,
 } from 'lucide-react';
@@ -48,13 +49,14 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
 
   const { currentLang, setCurrentLang } = useLanguage('vi');
   const { openDemo, isDemoLoading } = useDemoNavigation();
-  const { user, isAuthenticated } = useAuthStore();
+  const { user, isAuthenticated, logout } = useAuthStore();
 
   const [isDarkMode, setIsDarkMode] = useState(readInitialTheme);
   const [activeDropdown, setActiveDropdown] =
     useState<SiteNavGroupKey | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [languageOpen, setLanguageOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -85,6 +87,28 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
     // - có Demo access -> openDemo() đưa vào project Demo
     // - chưa có Demo access -> openDemo() đưa sang /book-demo
     openDemo();
+  };
+
+  const logoutLabel: Record<Language, string> = {
+    vi: 'Đăng xuất',
+    en: 'Log out',
+    zh: '退出登录',
+  };
+
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+
+    setIsLoggingOut(true);
+
+    try {
+      await logout();
+      setActiveDropdown(null);
+      setLanguageOpen(false);
+      setMobileMenuOpen(false);
+      navigate('/', { replace: true });
+    } finally {
+      setIsLoggingOut(false);
+    }
   };
 
   useEffect(() => {
@@ -933,6 +957,53 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
           box-shadow: none;
         }
 
+        .site-header__logout-corner {
+          display: inline-flex;
+          width: 40px;
+          height: 40px;
+          flex: 0 0 40px;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
+
+          border: 1px solid var(--sh-border-strong);
+          border-radius: 10px;
+          background: transparent;
+          color: var(--sh-dim);
+
+          cursor: pointer;
+          transition:
+            color .16s ease,
+            border-color .16s ease,
+            background .16s ease,
+            transform .16s ease;
+        }
+
+        .site-header__logout-corner:hover {
+          border-color: rgba(239,68,68,.36);
+          background: rgba(239,68,68,.07);
+          color: #ef4444;
+          transform: translateY(-1px);
+        }
+
+        .site-header__logout-corner:disabled {
+          cursor: wait;
+          opacity: .5;
+          transform: none;
+        }
+
+        .site-header-mobile__logout {
+          grid-column: 1 / -1;
+          border-color: rgba(239,68,68,.26);
+          color: #ef4444;
+        }
+
+        .site-header-mobile__logout:hover {
+          border-color: rgba(239,68,68,.46);
+          background: rgba(239,68,68,.08);
+          color: #ef4444;
+        }
+
         .site-header__hamburger {
           display: none;
           width: 40px;
@@ -1281,6 +1352,19 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
             >
               {actionCopy.demo}
             </button>
+
+            {isAuthenticated && (
+              <button
+                type="button"
+                className="site-header__logout-corner"
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+                aria-label={logoutLabel[currentLang]}
+                title={logoutLabel[currentLang]}
+              >
+                <LogOut size={17} />
+              </button>
+            )}
           </div>
 
           <button
@@ -1400,6 +1484,18 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
             >
               {actionCopy.demo}
             </button>
+
+            {isAuthenticated && (
+              <button
+                type="button"
+                className="site-header__button site-header__button--ghost site-header-mobile__logout"
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+              >
+                <LogOut size={15} />
+                {logoutLabel[currentLang]}
+              </button>
+            )}
           </div>
         </div>
       )}

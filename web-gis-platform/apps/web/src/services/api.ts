@@ -179,6 +179,77 @@ export const updateProject = async (
   }
 };
 
+export interface PersistedMeasurement {
+  id: string;
+  projectId: string;
+  type: string;
+  positions: Array<{ x: number; y: number; z: number }>;
+  value: string | null;
+  label: string | null;
+  visible: boolean;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+  createdById: string | null;
+}
+
+export type MeasurementPayload = Pick<PersistedMeasurement, 'id' | 'type' | 'positions' | 'visible'> &
+  Partial<Pick<PersistedMeasurement, 'value' | 'label' | 'metadata'>>;
+
+const throwMeasurementApiError = async (operation: string, response: Response): Promise<never> => {
+  const responseBody = await response.text().catch(() => '');
+  throw new Error(
+    `[Measurement API] ${operation} failed: HTTP ${response.status} ${response.statusText}` +
+    (responseBody ? ` - ${responseBody}` : '')
+  );
+};
+
+export const fetchProjectMeasurements = async (projectId: string): Promise<PersistedMeasurement[]> => {
+  const response = await fetch(`${API_BASE_URL}/projects/${projectId}/measurements`, {
+    headers: getAuthHeaders(), credentials: 'include'
+  });
+  if (!response.ok) return throwMeasurementApiError(`GET project ${projectId}`, response);
+  return response.json();
+};
+
+export const createProjectMeasurement = async (projectId: string, data: MeasurementPayload): Promise<PersistedMeasurement> => {
+  const response = await fetch(`${API_BASE_URL}/projects/${projectId}/measurements`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    credentials: 'include', body: JSON.stringify(data)
+  });
+  if (!response.ok) return throwMeasurementApiError(`POST project ${projectId}`, response);
+  return response.json();
+};
+
+export const updateProjectMeasurement = async (
+  projectId: string,
+  measurementId: string,
+  data: Partial<Omit<MeasurementPayload, 'id' | 'type'>>
+): Promise<PersistedMeasurement> => {
+  const response = await fetch(`${API_BASE_URL}/projects/${projectId}/measurements/${measurementId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    credentials: 'include', body: JSON.stringify(data)
+  });
+  if (!response.ok) return throwMeasurementApiError(`PATCH project ${projectId}/${measurementId}`, response);
+  return response.json();
+};
+
+export const deleteProjectMeasurement = async (projectId: string, measurementId: string): Promise<void> => {
+  const response = await fetch(`${API_BASE_URL}/projects/${projectId}/measurements/${measurementId}`, {
+    method: 'DELETE', headers: getAuthHeaders(), credentials: 'include'
+  });
+  if (!response.ok) return throwMeasurementApiError(`DELETE project ${projectId}/${measurementId}`, response);
+};
+
+export const clearProjectMeasurements = async (projectId: string): Promise<void> => {
+  const response = await fetch(`${API_BASE_URL}/projects/${projectId}/measurements`, {
+    method: 'DELETE', headers: getAuthHeaders(), credentials: 'include'
+  });
+  if (!response.ok) return throwMeasurementApiError(`CLEAR project ${projectId}`, response);
+};
+
 // ── Demo Leads API Services ───────────────────────────────────────────────
 export interface DemoLeadData {
   id?: string;
@@ -574,4 +645,40 @@ export const deleteConsultationLead = async (
     );
     return false;
   }
+};
+
+// ── Customer Accounts API Services ────────────────────────────────────────
+export interface CustomerAccountData {
+  id: string;
+  email: string;
+  fullName: string;
+  role: 'SUPERADMIN' | 'USER';
+  avatarUrl?: string | null;
+  authProvider?: 'GOOGLE' | 'PASSWORD';
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export const fetchCustomerAccounts = async (): Promise<
+  CustomerAccountData[]
+> => {
+  const response = await fetch(
+    `${API_BASE_URL}/admin/users`,
+    {
+      headers: getAuthHeaders(),
+      credentials: 'include'
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch customer accounts (${response.status})`
+    );
+  }
+
+  const data = await response.json();
+
+  return Array.isArray(data)
+    ? (data as CustomerAccountData[])
+    : [];
 };

@@ -1,32 +1,67 @@
 /**
- * PotreeSidebar — Redesigned to match authentic Potree v1.8 UI
- * Includes TOOLS (Measurements, Clipping, Navigation), APPEARANCE, and SCENE TREE
+ * PotreeSidebar — SAOLATEK visual refresh
+ * UI-only redesign. Functional props / handlers are intentionally preserved.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  Box,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Globe,
-  Layers,
-  Box,
   Image as ImageIcon,
-  Navigation as NavIcon,
-  MapPin,
+  Layers,
+  Loader2,
   Lock,
-  Unlock,
+  MapPin,
+  Navigation as NavIcon,
   Settings2,
+  Moon,
+  MinusCircle,
+  Sun,
+  Unlock,
+  AlertTriangle,
+  Flame,
   Wrench,
-  Eye,
-  Trash2,
 } from 'lucide-react';
 
 import type { ToolMode } from './CesiumViewer';
+import { useLanguage } from '../../hooks/useLanguage';
+import logoImg from '../../assets/logo.webp';
 
-/* ─── Prop types ─── */
-type BgMode = 'sky' | 'gradient' | 'black' | 'white' | 'none';
+type BgMode =
+  | 'sky'
+  | 'gradient'
+  | 'black'
+  | 'white'
+  | 'none';
+
 type QualityMode = 'standard' | 'high';
-type ClipMode = 'none' | 'highlight' | 'inside' | 'outside';
+
+type ClipMode =
+  | 'none'
+  | 'highlight'
+  | 'inside'
+  | 'outside';
+
 type ClipFilter = 'any' | 'all';
+
+export type LayerLoadStatus = 'idle' | 'loading' | 'ready' | 'error' | 'unavailable';
+
+const THEME_STORAGE_KEY = 'saolatek_theme';
+const THEME_CHANGE_EVENT = 'saolatek-theme-change';
+
+const readInitialTheme = () => {
+  if (typeof window === 'undefined') return true;
+
+  const saved = window.localStorage.getItem(
+    THEME_STORAGE_KEY
+  );
+
+  if (saved === 'light') return false;
+  if (saved === 'dark') return true;
+
+  return true;
+};
 
 interface PotreeSidebarProps {
   isOpen?: boolean;
@@ -37,35 +72,91 @@ interface PotreeSidebarProps {
   currentMode: ToolMode;
   onModeChange: (mode: ToolMode) => void;
   onClear: () => void;
+  measurementManager?: React.ReactNode;
+  onClipTool?: (tool: 'box' | 'polygon' | 'plane' | 'clear') => void;
+  activeClipTool?: 'box' | 'polygon' | 'plane' | null;
+  clipInstruction?: string | null;
+  clipMode?: ClipMode;
+  onClipModeChange?: (mode: ClipMode) => void;
+  clipFilter?: ClipFilter;
+  onClipFilterChange?: (filter: ClipFilter) => void;
 
-  /* Visibility & Camera Navigation */
   showMeasurements?: boolean;
   onToggleShowMeasurements?: () => void;
   cameraSpeed?: number;
   onCameraSpeedChange?: (speed: number) => void;
-  onSetCameraView?: (view: 'L' | 'R' | 'F' | 'B' | 'T' | 'D') => void;
+  onSetCameraView?: (
+    view: 'L' | 'R' | 'F' | 'B' | 'T' | 'D'
+  ) => void;
+  onNavigationAction?: (action: 'earth' | 'fps' | 'orbit' | 'heli' | 'compass' | 'anim') => void;
+  isFocusPicking?: boolean;
+  isReturningFocusOrigin?: boolean;
+  onToggleFocusPick?: () => void;
+  navigationMode?: 'earth' | 'fps' | 'orbit' | 'heli';
+  isCameraAnimating?: boolean;
+  flightHeight?: number;
+  onFlightHeightChange?: (height: number) => void;
+  orbitRadius?: number;
+  onOrbitRadiusChange?: (radius: number) => void;
+  flightPathPointCount?: number;
+  isDrawingFlightPath?: boolean;
+  flightPathStatus?: 'idle' | 'flying' | 'paused';
+  onDrawFlightPath?: () => void;
+  onStartFlightPath?: () => void;
+  onPauseFlightPath?: () => void;
+  onResumeFlightPath?: () => void;
+  onStopFlightPath?: () => void;
+  onReplayFlightPath?: () => void;
+  onDeleteFlightPath?: () => void;
+  activeCameraView?: 'L' | 'R' | 'F' | 'B' | 'T' | 'D' | null;
+  viewAngle?: 'default' | 'topdown';
+  cameraHeading?: number;
+  orbitTargetSelected?: boolean;
+  isSelectingOrbitTarget?: boolean;
+  isOrbitingTarget?: boolean;
+  onSelectOrbitTarget?: () => void;
+  onStartOrbitTarget?: () => void;
+  onStopOrbitTarget?: () => void;
 
-  /* Optimizer toggle */
   isOptimizerOpen: boolean;
   onToggleOptimizer: () => void;
   showOptimizerControl?: boolean;
 
-  /* Layer visibility */
   showModel: boolean;
   setShowModel: (v: boolean) => void;
   showDom: boolean;
   setShowDom: (v: boolean) => void;
   showPointCloud: boolean;
   setShowPointCloud: (v: boolean) => void;
+  modelOpacity: number;
+  onModelOpacityChange: (v: number) => void;
+  pointCloudOpacity: number;
+  onPointCloudOpacityChange: (v: number) => void;
+  heatmapEnabled: boolean;
+  onHeatmapEnabledChange: (v: boolean) => void;
+  heatmapProperty: 'elevation';
+  onHeatmapPropertyChange: (v: 'elevation') => void;
+  heatmapMax: number;
+  heatmapRangeAvailable: boolean;
+  domOpacity: number;
+  onDomOpacityChange: (v: number) => void;
+  modelLoadStatus?: LayerLoadStatus;
+  pointCloudLoadStatus?: LayerLoadStatus;
+  domLoadStatus?: LayerLoadStatus;
+  modelLoadError?: string | null;
+  pointCloudLoadError?: string | null;
+  domLoadError?: string | null;
+  onRetryModel?: () => void;
+  onRetryPointCloud?: () => void;
+  onRetryDom?: () => void;
 
-  /* Appearance — core */
   pointSize: number;
   onPointSizeChange: (v: number) => void;
   fov: number;
   onFovChange: (v: number) => void;
 
-  /* Eye-Dome Lighting */
   edlEnabled: boolean;
+  edlSupported?: boolean;
   onEdlToggle: (v: boolean) => void;
   edlRadius: number;
   onEdlRadiusChange: (v: number) => void;
@@ -74,78 +165,322 @@ interface PotreeSidebarProps {
   edlOpacity: number;
   onEdlOpacityChange: (v: number) => void;
 
-  /* Background */
   background: BgMode;
   onBackgroundChange: (v: BgMode) => void;
 
-  /* Quality */
   quality: QualityMode;
   onQualityChange: (v: QualityMode) => void;
 
-  /* Point Budget */
   pointBudget: number;
   onPointBudgetChange: (v: number) => void;
   minPointBudget?: number;
   maxPointBudget?: number;
 
-  /* Min Node Size */
   minNodeSize: number;
   onMinNodeSizeChange: (v: number) => void;
 
-  /* Lock View */
   lockView: boolean;
   onLockViewChange: (v: boolean) => void;
 
-  /* Camera projection */
   isOrthographic: boolean;
   onProjectionChange: (v: boolean) => void;
 
-  /* Focus nav */
   onFocusProject: () => void;
   onFocusPointCloud?: () => void;
   onFocusDom: () => void;
-
-
 }
 
-/* ─── Styled range slider (inline CSS injection) ─── */
-const sliderStyle = `
-  .pt-slider {
+const viewerStyle = `
+  .saolatek-viewer-sidebar {
+    --vs-bg: rgba(8, 19, 33, .96);
+    --vs-bg-soft: rgba(15, 23, 42, .72);
+    --vs-bg-strong: #07111f;
+    --vs-surface: #0d1b2d;
+    --vs-surface-hover: #13243a;
+    --vs-segment: rgba(51, 65, 85, .58);
+    --vs-border: rgba(71, 85, 105, .58);
+    --vs-border-soft: rgba(51, 65, 85, .54);
+    --vs-text: #e2e8f0;
+    --vs-text-soft: #94a3b8;
+    --vs-muted: #64748b;
+    --vs-accent: #0ea5e9;
+    --vs-accent-soft: rgba(14, 165, 233, .10);
+    --vs-danger: #fb7185;
+    --vs-shadow: 12px 0 36px rgba(2, 6, 23, .18);
+  }
+
+  html[data-saolatek-theme='light'] .saolatek-viewer-sidebar {
+    --vs-bg: rgba(248, 250, 252, .97);
+    --vs-bg-soft: rgba(255, 255, 255, .88);
+    --vs-bg-strong: #ffffff;
+    --vs-surface: #ffffff;
+    --vs-surface-hover: #f1f5f9;
+    --vs-segment: #e8eef5;
+    --vs-border: rgba(148, 163, 184, .50);
+    --vs-border-soft: rgba(203, 213, 225, .82);
+    --vs-text: #0f172a;
+    --vs-text-soft: #475569;
+    --vs-muted: #64748b;
+    --vs-accent: #0284c7;
+    --vs-accent-soft: rgba(2, 132, 199, .08);
+    --vs-danger: #e11d48;
+    --vs-shadow: 10px 0 30px rgba(15, 23, 42, .10);
+  }
+
+  .viewer-slider {
     -webkit-appearance: none;
     appearance: none;
     width: 100%;
     height: 3px;
-    border-radius: 2px;
-    background: #1e2d3d;
+    border-radius: 999px;
+    background: var(--vs-border-soft);
     outline: none;
     cursor: pointer;
   }
-  .pt-slider::-webkit-slider-thumb {
+
+  .viewer-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 13px;
-    height: 13px;
-    border-radius: 50%;
-    background: #00aaff;
-    border: 2px solid #0d1b2a;
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    background: var(--vs-accent);
+    border: 2px solid var(--vs-bg-strong);
     cursor: pointer;
-    box-shadow: 0 0 4px rgba(0,170,255,0.5);
-    transition: box-shadow 0.15s;
+    box-shadow: 0 0 0 1px rgba(14,165,233,.24);
+    transition: transform .14s ease, box-shadow .14s ease;
   }
-  .pt-slider::-webkit-slider-thumb:hover {
-    box-shadow: 0 0 8px rgba(0,170,255,0.8);
-  }
-  .pt-slider::-moz-range-thumb {
-    width: 13px;
-    height: 13px;
-    border-radius: 50%;
-    background: #00aaff;
-    border: 2px solid #0d1b2a;
-    cursor: pointer;
-  }
-`;
 
-/* ─── Sub-components ─── */
+  .viewer-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 3px rgba(14,165,233,.10);
+  }
+
+  .viewer-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    background: var(--vs-accent);
+    border: 2px solid var(--vs-bg-strong);
+    cursor: pointer;
+  }
+
+  .viewer-sidebar-scroll::-webkit-scrollbar {
+    width: 5px;
+  }
+
+  .viewer-sidebar-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .viewer-sidebar-scroll::-webkit-scrollbar-thumb {
+    background: var(--vs-border);
+    border-radius: 999px;
+  }
+
+  .viewer-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+    background: var(--vs-muted);
+  }
+
+  .viewer-section-header {
+    color: var(--vs-muted);
+    border-color: var(--vs-border-soft);
+  }
+
+  .viewer-section-header:hover {
+    color: var(--vs-text-soft);
+    background: var(--vs-bg-soft);
+  }
+
+  .viewer-micro-title {
+    color: var(--vs-muted);
+    border-color: var(--vs-border-soft);
+  }
+
+  .viewer-slider-label {
+    color: var(--vs-text-soft);
+  }
+
+  .viewer-slider-value {
+    color: var(--vs-text);
+  }
+
+  .viewer-segment {
+    color: var(--vs-muted);
+  }
+
+  .viewer-segment:hover {
+    color: var(--vs-text);
+    background: var(--vs-bg-soft);
+  }
+
+  .viewer-segment.is-active {
+    color: var(--vs-text);
+    background: var(--vs-segment);
+  }
+
+  .viewer-check-label,
+  .viewer-scene-label {
+    color: var(--vs-text-soft);
+  }
+
+  .viewer-check-label:hover,
+  .viewer-scene-row:hover .viewer-scene-label {
+    color: var(--vs-text);
+  }
+
+  .viewer-quick-focus {
+    color: var(--vs-text-soft);
+    background: var(--vs-surface);
+    border-color: var(--vs-border-soft);
+  }
+
+  .viewer-quick-focus:hover {
+    color: var(--vs-text);
+    background: var(--vs-surface-hover);
+    border-color: var(--vs-border);
+  }
+
+  .viewer-tool-card {
+    display: flex;
+    min-height: 62px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid var(--vs-border-soft);
+    border-radius: 13px;
+    background: var(--vs-surface);
+    color: var(--vs-text-soft);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.025);
+    transition:
+      transform .16s ease,
+      border-color .16s ease,
+      background .16s ease,
+      color .16s ease,
+      box-shadow .16s ease;
+  }
+
+  .viewer-tool-card:hover {
+    transform: translateY(-1px);
+    border-color: rgba(14,165,233,.30);
+    background: var(--vs-surface-hover);
+    color: var(--vs-text);
+  }
+
+  .viewer-tool-card.is-active {
+    border-color: rgba(14,165,233,.46);
+    background: var(--vs-accent-soft);
+    color: var(--vs-accent);
+    box-shadow: 0 0 0 1px rgba(14,165,233,.08);
+  }
+
+  .viewer-tool-card.is-danger {
+    color: var(--vs-danger);
+    border-color: rgba(244,63,94,.18);
+    background: rgba(244,63,94,.035);
+  }
+
+  .viewer-tool-card.is-danger:hover {
+    border-color: rgba(244,63,94,.34);
+    background: rgba(244,63,94,.075);
+  }
+
+  .viewer-tool-label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9px;
+    font-weight: 650;
+    letter-spacing: .01em;
+  }
+
+  .viewer-section-shell {
+    border: 1px solid var(--vs-border-soft);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--vs-surface) 82%, transparent);
+    padding: 12px;
+  }
+
+  .viewer-control-strip {
+    overflow: hidden;
+    border: 1px solid var(--vs-border-soft);
+    border-radius: 10px;
+    background: var(--vs-bg-soft);
+  }
+
+  .viewer-camera-key {
+    border: 1px solid var(--vs-border-soft);
+    border-radius: 9px;
+    background: var(--vs-surface);
+    color: var(--vs-text-soft);
+    font-size: 10px;
+    font-weight: 700;
+    transition: .15s ease;
+  }
+
+  .viewer-camera-key:hover {
+    border-color: rgba(14,165,233,.32);
+    background: var(--vs-surface-hover);
+    color: var(--vs-accent);
+  }
+
+  .viewer-camera-key.is-active {
+    border-color: rgba(14,165,233,.52);
+    background: var(--vs-accent-soft);
+    color: var(--vs-accent);
+    box-shadow: inset 0 0 0 1px rgba(14,165,233,.08);
+  }
+
+  /* Calibration panel stays functional but follows the same light surface. */
+  html[data-saolatek-theme='light']
+    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80'] {
+    background: rgba(255,255,255,.96) !important;
+    border-color: rgba(148,163,184,.45) !important;
+    color: #475569 !important;
+    box-shadow: 0 18px 42px rgba(15,23,42,.14) !important;
+  }
+
+  html[data-saolatek-theme='light']
+    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
+    [class~='bg-slate-950'] {
+    background: #f8fafc !important;
+  }
+
+  html[data-saolatek-theme='light']
+    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
+    [class~='bg-slate-900'] {
+    background: #ffffff !important;
+  }
+
+  html[data-saolatek-theme='light']
+    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
+    [class~='border-slate-900'],
+  html[data-saolatek-theme='light']
+    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
+    [class~='border-slate-800'] {
+    border-color: #dbe4ef !important;
+  }
+
+  html[data-saolatek-theme='light']
+    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
+    [class~='text-[var(--vs-text)]'],
+  html[data-saolatek-theme='light']
+    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
+    [class~='text-[var(--vs-text-soft)]'] {
+    color: #475569 !important;
+  }
+
+  html[data-saolatek-theme='light']
+    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
+    input {
+    background: #ffffff !important;
+    border-color: #cbd5e1 !important;
+    color: #0f172a !important;
+  }
+`
+
 function SliderRow({
   label,
   value,
@@ -154,6 +489,7 @@ function SliderRow({
   max,
   step,
   onChange,
+  stepButtons,
 }: {
   label: string;
   value: number;
@@ -162,24 +498,64 @@ function SliderRow({
   max: number;
   step: number;
   onChange: (v: number) => void;
+  stepButtons?: {
+    amount: number;
+    decreaseAriaLabel: string;
+    increaseAriaLabel: string;
+  };
 }) {
+  const stepButtonClass =
+    'flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[var(--vs-border)] bg-[var(--vs-panel)] text-xs font-bold text-[var(--vs-text-soft)] transition hover:border-sky-500/50 hover:bg-sky-500/10 hover:text-sky-500 disabled:cursor-not-allowed disabled:opacity-35';
+
   return (
-    <div className="space-y-1.5">
-      <div className="flex justify-between items-center">
-        <span className="text-[#9aadbe] text-[11px]">{label}</span>
-        <span className="text-[#c8d8e8] text-[11px] min-w-[40px] text-right tabular-nums">
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <span className="viewer-slider-label text-[11px] font-medium">
+          {label}
+        </span>
+
+        <span className="viewer-slider-value min-w-[44px] text-right text-[11px] font-semibold tabular-nums">
           {displayValue ?? value}
         </span>
       </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={e => onChange(parseFloat(e.target.value))}
-        className="pt-slider"
-      />
+
+      <div className="flex min-w-0 items-center gap-1.5">
+        {stepButtons && (
+          <button
+            type="button"
+            aria-label={stepButtons.decreaseAriaLabel}
+            disabled={value <= min}
+            onClick={() => onChange(Math.max(min, value - stepButtons.amount))}
+            className={stepButtonClass}
+          >
+            −
+          </button>
+        )}
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(event) =>
+            onChange(
+              parseFloat(event.target.value)
+            )
+          }
+          className="viewer-slider min-w-0 flex-1"
+        />
+        {stepButtons && (
+          <button
+            type="button"
+            aria-label={stepButtons.increaseAriaLabel}
+            disabled={value >= max}
+            onClick={() => onChange(Math.min(max, value + stepButtons.amount))}
+            className={stepButtonClass}
+          >
+            +
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -197,13 +573,80 @@ function SectionHeader({
 }) {
   return (
     <button
+      type="button"
       onClick={onToggle}
-      className="w-full flex items-center gap-2 px-4 py-2.5 text-[#7a9ab5] hover:text-[#c0d4e8] text-[10px] font-bold uppercase tracking-[0.12em] transition-colors border-b border-[#1a2535] select-none cursor-pointer"
+      className="viewer-section-header group flex w-full items-center gap-2 border-b px-4 py-3 text-left text-[10px] font-bold uppercase tracking-[0.14em] transition"
     >
-      {isOpen ? <ChevronRight size={10} className="rotate-90 flex-shrink-0" /> : <ChevronRight size={10} className="flex-shrink-0" />}
-      {icon && <span className="flex-shrink-0">{icon}</span>}
+      <ChevronRight
+        size={11}
+        className={`shrink-0 transition-transform ${
+          isOpen ? 'rotate-90' : ''
+        }`}
+      />
+
+      {icon && (
+        <span className="shrink-0 text-sky-500">
+          {icon}
+        </span>
+      )}
+
       <span>{label}</span>
     </button>
+  );
+}
+
+function CheckMark() {
+  return (
+    <svg
+      width="9"
+      height="7"
+      viewBox="0 0 9 7"
+      fill="none"
+    >
+      <path
+        d="M1 3.5L3.2 6L8 1"
+        stroke="white"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function LayerStatus({ status, error, onRetry }: {
+  status: LayerLoadStatus;
+  error?: string | null;
+  onRetry?: () => void;
+}) {
+  const icon = status === 'ready'
+    ? <CheckCircle2 size={12} className="text-emerald-400" />
+    : status === 'loading'
+      ? <Loader2 size={12} className="animate-spin text-sky-400" />
+      : status === 'error'
+        ? <AlertTriangle size={12} className="text-rose-400" />
+        : <MinusCircle size={12} className="text-[var(--vs-muted)] opacity-65" />;
+
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-1.5" onClick={(event) => event.stopPropagation()}>
+      <span title={error || (status === 'unavailable' ? 'Không có dữ liệu' : status)} aria-label={error || `Layer status: ${status}`}>
+        {icon}
+      </span>
+      {status === 'error' && error && (
+        <span className="max-w-[70px] truncate text-[8px] text-rose-400" title={error}>{error}</span>
+      )}
+      {status === 'error' && onRetry && (
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={onRetry}
+          onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onRetry(); }}
+          className="rounded border border-rose-400/25 bg-rose-400/[0.08] px-1.5 py-0.5 text-[8px] font-semibold text-rose-400 transition hover:bg-rose-400/[0.14] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-400"
+        >
+          Thử lại
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -211,32 +654,295 @@ function PtCheckbox({
   label,
   checked,
   onChange,
+  disabled = false,
 }: {
   label: string;
   checked: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
-    <label className="flex items-center gap-2 cursor-pointer py-0.5 group">
-      <span
-        className="w-4 h-4 rounded-sm border border-[#2a3d52] flex items-center justify-center flex-shrink-0 transition-colors"
-        style={{ background: checked ? '#00aaff' : '#0d1b2a' }}
+    <label className={`group flex items-center gap-2.5 py-1 ${disabled ? 'cursor-not-allowed opacity-45' : 'cursor-pointer'}`}>
+      <button
+        type="button"
+        disabled={disabled}
         onClick={() => onChange(!checked)}
+        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${
+          checked
+            ? 'border-sky-500 bg-sky-500'
+            : 'border-[var(--vs-border)] bg-[var(--vs-surface)] group-hover:border-sky-500/35'
+        }`}
       >
-        {checked && (
-          <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
-            <path d="M1 3.5L3.2 6L8 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </span>
-      <span className="text-[#9aadbe] text-[11px] group-hover:text-[#c0d4e8] transition-colors select-none" onClick={() => onChange(!checked)}>
+        {checked && <CheckMark />}
+      </button>
+
+      <span
+        onClick={() => { if (!disabled) onChange(!checked); }}
+        className="viewer-check-label select-none text-[11px] transition"
+      >
         {label}
       </span>
     </label>
   );
 }
 
-/* ─── Main Component ─── */
+function MicroTitle({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="viewer-micro-title border-b pb-2 text-[10px] font-bold uppercase tracking-[0.14em]">
+      {children}
+    </div>
+  );
+}
+
+function Segment({
+  active,
+  children,
+  onClick,
+  first,
+  last,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+  first?: boolean;
+  last?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`viewer-segment min-w-0 flex-1 px-2 py-1.5 text-[9px] font-semibold transition ${
+        first ? 'rounded-l-md' : ''
+      } ${
+        last ? 'rounded-r-md' : ''
+      } ${active ? 'is-active' : ''}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+
+const SIDEBAR_COPY = {
+  vi: {
+    optimize: 'Tối ưu',
+    switchLight: 'Chuyển sang giao diện sáng',
+    switchDark: 'Chuyển sang giao diện tối',
+    tools: 'Công cụ',
+    measurements: 'Đo đạc',
+    clipping: 'Cắt dữ liệu',
+    navigation: 'Điều hướng',
+    appearance: 'Hiển thị',
+    scene: 'Lớp dữ liệu',
+    show: 'Hiện',
+    hide: 'Ẩn',
+    clipNone: 'Không',
+    clipHighlight: 'Nổi bật',
+    clipInside: 'Bên trong',
+    clipOutside: 'Bên ngoài',
+    insideAny: 'Trong bất kỳ',
+    insideAll: 'Trong tất cả',
+    perspective: 'Phối cảnh',
+    orthographic: 'Trực giao',
+    speed: 'Tốc độ',
+    pointBudget: 'Mật độ điểm',
+    fieldOfView: 'Góc nhìn',
+    pointSize: 'Kích thước điểm',
+    edl: 'Eye-Dome Lighting',
+    enable: 'Bật',
+    radius: 'Bán kính',
+    strength: 'Cường độ',
+    opacity: 'Độ mờ',
+    background: 'Nền',
+    sky: 'Bầu trời',
+    gradient: 'Chuyển sắc',
+    black: 'Đen',
+    white: 'Trắng',
+    none: 'Không',
+    quality: 'Chất lượng',
+    standard: 'Tiêu chuẩn',
+    highQuality: 'Chất lượng cao',
+    minNodeSize: 'Kích thước node tối thiểu',
+    lockView: 'Khóa góc nhìn',
+    quickFocus: 'Đi tới nhanh',
+    focusProject: 'Bay tới Dự án',
+    focusPointCloud: 'Bay tới Point Cloud',
+    focusDom: 'Bay tới Ảnh DOM',
+    pointCloud: 'Point Cloud',
+    model3d: '3D Model (GLB)',
+    dom: 'Ảnh DOM',
+    angle: 'Góc',
+    point: 'Điểm',
+    distance: 'Cự ly',
+    height: 'Cao độ',
+    circle: 'Đường tròn',
+    azimuth: 'Phương vị',
+    area: 'Diện tích',
+    volume: 'Thể tích',
+    sphere: 'Sphere',
+    profile: 'Trắc dọc',
+    annotation: 'Ghi chú',
+    clear: 'Xóa',
+    clipBox: 'Box',
+    clipPolygon: 'Đa giác',
+    clipPlane: 'Mặt phẳng',
+    navEarth: 'Earth',
+    navFly: 'Bay',
+    navOrbit: 'Orbit',
+    navHeli: 'Heli',
+    navFocus: 'Focus',
+    navProject: 'Dự án',
+    navNorth: 'Bắc',
+    navCamera: 'Camera',
+  },
+  en: {
+    optimize: 'Optimize',
+    switchLight: 'Switch to light mode',
+    switchDark: 'Switch to dark mode',
+    tools: 'Tools',
+    measurements: 'Measurements',
+    clipping: 'Clipping',
+    navigation: 'Navigation',
+    appearance: 'Appearance',
+    scene: 'Scene',
+    show: 'Show',
+    hide: 'Hide',
+    clipNone: 'None',
+    clipHighlight: 'Highlight',
+    clipInside: 'Inside',
+    clipOutside: 'Outside',
+    insideAny: 'Inside Any',
+    insideAll: 'Inside All',
+    perspective: 'Perspective',
+    orthographic: 'Orthographic',
+    speed: 'Speed',
+    pointBudget: 'Point budget',
+    fieldOfView: 'Field of view',
+    pointSize: 'Point size',
+    edl: 'Eye-Dome Lighting',
+    enable: 'Enable',
+    radius: 'Radius',
+    strength: 'Strength',
+    opacity: 'Opacity',
+    background: 'Background',
+    sky: 'Sky',
+    gradient: 'Gradient',
+    black: 'Black',
+    white: 'White',
+    none: 'None',
+    quality: 'Quality',
+    standard: 'Standard',
+    highQuality: 'High Quality',
+    minNodeSize: 'Min node size',
+    lockView: 'Lock view',
+    quickFocus: 'Quick Focus',
+    focusProject: 'Fly to Project',
+    focusPointCloud: 'Fly to Point Cloud',
+    focusDom: 'Fly to DOM',
+    pointCloud: 'Point Cloud',
+    model3d: '3D Model (GLB)',
+    dom: 'DOM Image',
+    angle: 'Angle',
+    point: 'Point',
+    distance: 'Distance',
+    height: 'Height',
+    circle: 'Circle',
+    azimuth: 'Azimuth',
+    area: 'Area',
+    volume: 'Volume',
+    sphere: 'Sphere',
+    profile: 'Profile',
+    annotation: 'Note',
+    clear: 'Clear',
+    clipBox: 'Box',
+    clipPolygon: 'Polygon',
+    clipPlane: 'Plane',
+    navEarth: 'Earth',
+    navFly: 'Fly',
+    navOrbit: 'Orbit',
+    navHeli: 'Heli',
+    navFocus: 'Focus',
+    navProject: 'Project',
+    navNorth: 'North',
+    navCamera: 'Camera',
+  },
+  zh: {
+    optimize: '优化',
+    switchLight: '切换到浅色模式',
+    switchDark: '切换到深色模式',
+    tools: '工具',
+    measurements: '测量',
+    clipping: '裁剪',
+    navigation: '导航',
+    appearance: '显示',
+    scene: '数据图层',
+    show: '显示',
+    hide: '隐藏',
+    clipNone: '无',
+    clipHighlight: '高亮',
+    clipInside: '内部',
+    clipOutside: '外部',
+    insideAny: '任一内部',
+    insideAll: '全部内部',
+    perspective: '透视',
+    orthographic: '正交',
+    speed: '速度',
+    pointBudget: '点密度',
+    fieldOfView: '视野',
+    pointSize: '点大小',
+    edl: '眼穹顶照明',
+    enable: '启用',
+    radius: '半径',
+    strength: '强度',
+    opacity: '透明度',
+    background: '背景',
+    sky: '天空',
+    gradient: '渐变',
+    black: '黑色',
+    white: '白色',
+    none: '无',
+    quality: '质量',
+    standard: '标准',
+    highQuality: '高质量',
+    minNodeSize: '最小节点大小',
+    lockView: '锁定视角',
+    quickFocus: '快速定位',
+    focusProject: '飞至项目',
+    focusPointCloud: '飞至点云',
+    focusDom: '飞至DOM',
+    pointCloud: '点云',
+    model3d: '3D 模型 (GLB)',
+    dom: 'DOM影像',
+    angle: '角度',
+    point: '点',
+    distance: '距离',
+    height: '高度',
+    circle: '圆',
+    azimuth: '方位角',
+    area: '面积',
+    volume: '体积',
+    sphere: '球体',
+    profile: '剖面',
+    annotation: '注释',
+    clear: '清除',
+    clipBox: '框选',
+    clipPolygon: '多边形',
+    clipPlane: '平面',
+    navEarth: '地球',
+    navFly: '飞行',
+    navOrbit: '环绕',
+    navHeli: '直升机',
+    navFocus: '聚焦',
+    navProject: '项目',
+    navNorth: '北向',
+    navCamera: '相机',
+  },
+} as const;
+
 export function PotreeSidebar({
   isOpen: controlledIsOpen,
   onToggleOpen,
@@ -246,34 +952,110 @@ export function PotreeSidebar({
   currentMode,
   onModeChange,
   onClear,
+  measurementManager,
+  onClipTool,
+  activeClipTool,
+  clipInstruction,
+  clipMode = 'highlight',
+  onClipModeChange,
+  clipFilter = 'any',
+  onClipFilterChange,
   showMeasurements = true,
   onToggleShowMeasurements,
-  cameraSpeed = 130.6,
+  cameraSpeed = 40,
   onCameraSpeedChange,
   onSetCameraView,
+  onNavigationAction,
+  isFocusPicking = false,
+  isReturningFocusOrigin = false,
+  onToggleFocusPick,
+  navigationMode = 'earth',
+  isCameraAnimating = false,
+  flightHeight = 60,
+  onFlightHeightChange,
+  orbitRadius = 35,
+  onOrbitRadiusChange,
+  flightPathPointCount = 0,
+  isDrawingFlightPath = false,
+  flightPathStatus = 'idle',
+  onDrawFlightPath,
+  onStartFlightPath,
+  onPauseFlightPath,
+  onResumeFlightPath,
+  onStopFlightPath,
+  onReplayFlightPath,
+  onDeleteFlightPath,
+  activeCameraView = null,
+  viewAngle = 'default',
+  cameraHeading = 0,
+  orbitTargetSelected = false,
+  isSelectingOrbitTarget = false,
+  isOrbitingTarget = false,
+  onSelectOrbitTarget,
+  onStartOrbitTarget,
+  onStopOrbitTarget,
   onToggleOptimizer,
   isOptimizerOpen,
-  showModel, setShowModel,
-  showDom, setShowDom,
-  showPointCloud, setShowPointCloud,
-  pointSize, onPointSizeChange,
-  fov, onFovChange,
-  edlEnabled, onEdlToggle,
-  edlRadius, onEdlRadiusChange,
-  edlStrength, onEdlStrengthChange,
-  edlOpacity, onEdlOpacityChange,
-  background, onBackgroundChange,
-  quality, onQualityChange,
-  pointBudget, onPointBudgetChange,
+  showModel,
+  setShowModel,
+  showDom,
+  setShowDom,
+  showPointCloud,
+  setShowPointCloud,
+  modelOpacity,
+  onModelOpacityChange,
+  pointCloudOpacity,
+  onPointCloudOpacityChange,
+  heatmapEnabled,
+  onHeatmapEnabledChange,
+  heatmapProperty,
+  onHeatmapPropertyChange,
+  heatmapMax,
+  heatmapRangeAvailable,
+  domOpacity,
+  onDomOpacityChange,
+  modelLoadStatus = 'idle',
+  pointCloudLoadStatus = 'idle',
+  domLoadStatus = 'idle',
+  modelLoadError,
+  pointCloudLoadError,
+  domLoadError,
+  onRetryModel,
+  onRetryPointCloud,
+  onRetryDom,
+  pointSize,
+  onPointSizeChange,
+  fov,
+  onFovChange,
+  edlEnabled,
+  edlSupported = false,
+  onEdlToggle,
+  edlRadius,
+  onEdlRadiusChange,
+  edlStrength,
+  onEdlStrengthChange,
+  edlOpacity,
+  onEdlOpacityChange,
+  background,
+  onBackgroundChange,
+  quality,
+  onQualityChange,
+  pointBudget,
+  onPointBudgetChange,
   minPointBudget = 100_000,
   maxPointBudget = 12_000_000,
-  minNodeSize, onMinNodeSizeChange,
-  lockView, onLockViewChange,
-  isOrthographic, onProjectionChange,
+  minNodeSize,
+  onMinNodeSizeChange,
+  lockView,
+  onLockViewChange,
+  isOrthographic,
+  onProjectionChange,
   onFocusProject,
   onFocusPointCloud,
   onFocusDom,
 }: PotreeSidebarProps) {
+  const { currentLang } = useLanguage('vi');
+  const c = SIDEBAR_COPY[currentLang];
 
   const [localIsOpen, setLocalIsOpen] =
     useState(true);
@@ -283,418 +1065,1066 @@ export function PotreeSidebar({
       ? controlledIsOpen
       : localIsOpen;
 
-  const [expandedSections, setExpandedSections] =
-    useState({
-      scene: true,
-      tools: true,
-      appearance: false,
-    });
+  const [isDarkMode, setIsDarkMode] =
+    useState(readInitialTheme);
+  useEffect(() => {
+    const savedTheme = isDarkMode
+      ? 'dark'
+      : 'light';
 
-  const handleToggle = () => {
-    if (onToggleOpen) onToggleOpen();
-    else setLocalIsOpen(v => !v);
+    document.documentElement.dataset.saolatekTheme =
+      savedTheme;
+
+    const syncTheme = (event: Event) => {
+      const detail = (
+        event as CustomEvent<'light' | 'dark'>
+      ).detail;
+
+      if (detail === 'dark') {
+        setIsDarkMode(true);
+      }
+
+      if (detail === 'light') {
+        setIsDarkMode(false);
+      }
+    };
+
+    const syncStorage = (
+      event: StorageEvent
+    ) => {
+      if (
+        event.key !== THEME_STORAGE_KEY
+      ) {
+        return;
+      }
+
+      if (event.newValue === 'dark') {
+        setIsDarkMode(true);
+      }
+
+      if (event.newValue === 'light') {
+        setIsDarkMode(false);
+      }
+    };
+
+    window.addEventListener(
+      THEME_CHANGE_EVENT,
+      syncTheme
+    );
+
+    window.addEventListener(
+      'storage',
+      syncStorage
+    );
+
+    return () => {
+      window.removeEventListener(
+        THEME_CHANGE_EVENT,
+        syncTheme
+      );
+
+      window.removeEventListener(
+        'storage',
+        syncStorage
+      );
+    };
+  }, []);
+
+  const applyTheme = (nextDark: boolean) => {
+    const theme = nextDark
+      ? 'dark'
+      : 'light';
+
+    setIsDarkMode(nextDark);
+
+    document.documentElement.dataset.saolatekTheme =
+      theme;
+
+    window.localStorage.setItem(
+      THEME_STORAGE_KEY,
+      theme
+    );
+
+    try {
+      window.dispatchEvent(
+        new StorageEvent('storage', {
+          key: THEME_STORAGE_KEY,
+          newValue: theme,
+        })
+      );
+    } catch {
+      // Custom event below handles same-tab sync.
+    }
+
+    window.dispatchEvent(
+      new CustomEvent(
+        THEME_CHANGE_EVENT,
+        { detail: theme }
+      )
+    );
   };
 
-  const [sOpen, setSOpen] = useState({
+  const handleToggle = () => {
+    if (onToggleOpen) {
+      onToggleOpen();
+    } else {
+      setLocalIsOpen((value) => !value);
+    }
+  };
+
+  const [sections, setSections] = useState({
     tools: true,
     appearance: true,
     scene: true,
   });
-  const toggle = (k: keyof typeof sOpen) => setSOpen(p => ({ ...p, [k]: !p[k] }));
 
-  const [clipMode, setClipMode] = useState<ClipMode>('highlight');
-  const [clipFilter, setClipFilter] = useState<ClipFilter>('any');
+  const toggleSection = (
+    key: keyof typeof sections
+  ) => {
+    setSections((current) => ({
+      ...current,
+      [key]: !current[key],
+    }));
+  };
 
-  const BG_OPTS: { key: BgMode; label: string }[] = [
-    { key: 'sky', label: 'Sky' },
-    { key: 'gradient', label: 'Gradient' },
-    { key: 'black', label: 'Black' },
-    { key: 'white', label: 'White' },
-    { key: 'none', label: 'None' },
+  const backgroundOptions: {
+    key: BgMode;
+    label: string;
+  }[] = [
+    { key: 'sky', label: c.sky },
+    {
+      key: 'gradient',
+      label: c.gradient,
+    },
+    { key: 'black', label: c.black },
+    { key: 'white', label: c.white },
+    { key: 'none', label: c.none },
   ];
 
   const getIconUrl = (filename: string) => {
-    const base = import.meta.env.BASE_URL || '/';
-    const cleanBase = base.endsWith('/') ? base : `${base}/`;
+    const base =
+      import.meta.env.BASE_URL || '/';
+
+    const cleanBase = base.endsWith('/')
+      ? base
+      : `${base}/`;
+
     return `${cleanBase}potree/resources/icons/${filename}`;
   };
 
-  /* Measurement icons definition matching Potree */
-  const MEASURE_TOOLS: { mode: ToolMode | 'clear'; icon: string; title: string }[] = [
-    { mode: 'angle', icon: getIconUrl('angle.svg'), title: 'Đo góc (Angle)' },
-    { mode: 'point', icon: getIconUrl('point.svg'), title: 'Tọa độ điểm (Point coordinates)' },
-    { mode: 'distance', icon: getIconUrl('distance.svg'), title: 'Đo khoảng cách liên tục (Distance)' },
-    { mode: 'height', icon: getIconUrl('height.svg'), title: 'Đo chiều cao đứng (Height)' },
-    { mode: 'circle', icon: getIconUrl('circle.svg'), title: 'Đo đường tròn & bán kính (Circle)' },
-    { mode: 'azimuth', icon: getIconUrl('azimuth.svg'), title: 'Đo góc phương vị Bắc (Azimuth)' },
-    { mode: 'area', icon: getIconUrl('area.svg'), title: 'Đo diện tích phẳng (Area)' },
-    { mode: 'volume', icon: getIconUrl('volume.svg'), title: 'Đo thể tích khối 3D (Volume)' },
-    { mode: 'distance', icon: getIconUrl('sphere.svg'), title: 'Đo khoảng cách cầu 3D (Sphere)' },
-    { mode: 'profile', icon: getIconUrl('profile.svg'), title: 'Cắt lát trắc dọc cao độ (Profile)' },
-    { mode: 'annotation', icon: getIconUrl('annotation.svg'), title: 'Thêm ghi chú 3D (Annotation)' },
-    { mode: 'clear', icon: getIconUrl('remove.svg'), title: 'Xóa toàn bộ các phép đo' },
+  const measureTools: {
+    mode: ToolMode | 'clear';
+    icon: string;
+    label: string;
+    title: string;
+  }[] = [
+    {
+      mode: 'angle',
+      icon: getIconUrl('angle.svg'),
+      label: c.angle,
+      title: 'Đo góc (Angle)',
+    },
+    {
+      mode: 'point',
+      icon: getIconUrl('point.svg'),
+      label: c.point,
+      title:
+        'Tọa độ điểm (Point coordinates)',
+    },
+    {
+      mode: 'distance',
+      icon: getIconUrl('distance.svg'),
+      label: c.distance,
+      title:
+        'Đo khoảng cách liên tục (Distance)',
+    },
+    {
+      mode: 'height',
+      icon: getIconUrl('height.svg'),
+      label: c.height,
+      title: 'Đo chiều cao đứng (Height)',
+    },
+    {
+      mode: 'circle',
+      icon: getIconUrl('circle.svg'),
+      label: c.circle,
+      title:
+        'Đo đường tròn & bán kính (Circle)',
+    },
+    {
+      mode: 'azimuth',
+      icon: getIconUrl('azimuth.svg'),
+      label: c.azimuth,
+      title:
+        'Đo góc phương vị Bắc (Azimuth)',
+    },
+    {
+      mode: 'area',
+      icon: getIconUrl('area.svg'),
+      label: c.area,
+      title: 'Đo diện tích phẳng (Area)',
+    },
+    {
+      mode: 'volume',
+      icon: getIconUrl('volume.svg'),
+      label: c.volume,
+      title: 'Đo thể tích khối 3D (Volume)',
+    },
+    {
+      mode: 'sphere',
+      icon: getIconUrl('sphere.svg'),
+      label: c.sphere,
+      title:
+        'Đo khoảng cách cầu 3D (Sphere)',
+    },
+    {
+      mode: 'profile',
+      icon: getIconUrl('profile.svg'),
+      label: c.profile,
+      title:
+        'Cắt lát trắc dọc cao độ (Profile)',
+    },
+    {
+      mode: 'annotation',
+      icon: getIconUrl('annotation.svg'),
+      label: c.annotation,
+      title: 'Thêm ghi chú 3D (Annotation)',
+    },
+    {
+      mode: 'clear',
+      icon: getIconUrl('remove.svg'),
+      label: c.clear,
+      title:
+        'Xóa toàn bộ các phép đo',
+    },
   ];
 
-  /* Clipping tool icons */
-  const CLIP_TOOLS = [
-    { id: 'box', icon: getIconUrl('clip_volume.svg'), title: 'Cắt khối Box (Volume Clip)' },
-    { id: 'polygon', icon: getIconUrl('clip-polygon.svg'), title: 'Cắt đa giác (Polygon Clip)' },
-    { id: 'plane', icon: getIconUrl('clip-plane-z.svg'), title: 'Cắt mặt phẳng Z (Plane Clip)' },
-    { id: 'clear', icon: getIconUrl('remove.svg'), title: 'Xóa tất cả mặt cắt' },
+  const clipTools = [
+    {
+      id: 'box',
+      icon: getIconUrl('clip_volume.svg'),
+      label: c.clipBox,
+      title: 'Cắt khối Box (Volume Clip)',
+    },
+    {
+      id: 'polygon',
+      icon: getIconUrl('clip-polygon.svg'),
+      label: c.clipPolygon,
+      title: 'Cắt đa giác (Polygon Clip)',
+    },
+    {
+      id: 'plane',
+      icon: getIconUrl('clip-plane-z.svg'),
+      label: c.clipPlane,
+      title:
+        'Cắt mặt phẳng Z (Plane Clip)',
+    },
+    {
+      id: 'clear',
+      icon: getIconUrl('remove.svg'),
+      label: c.clear,
+      title: 'Xóa tất cả mặt cắt',
+    },
   ];
 
-  /* Navigation tool icons */
-  const NAV_TOOLS = [
-    { id: 'earth', icon: getIconUrl('earth_controls.svg'), title: 'Điều khiển quả địa cầu (Earth)' },
-    { id: 'fps', icon: getIconUrl('fps_controls.svg'), title: 'Điều khiển bay tự do (FPS / Fly)' },
-    { id: 'orbit', icon: getIconUrl('orbit_controls.svg'), title: 'Quay quanh tâm (Orbit)' },
-    { id: 'heli', icon: getIconUrl('helicopter_controls.svg'), title: 'Góc nhìn trực thăng (Helicopter)' },
-    { id: 'focus', icon: getIconUrl('focus.svg'), title: 'Focus tới Point Cloud', action: onFocusPointCloud },
-    { id: 'cube', icon: getIconUrl('navigation_cube.svg'), title: 'Bay tới Dự án', action: onFocusProject },
-    { id: 'compass', icon: getIconUrl('azimuth.svg'), title: 'La bàn hướng Bắc' },
-    { id: 'anim', icon: getIconUrl('camera_animation.svg'), title: 'Tạo hoạt ảnh Camera' },
+  const navigationTools = [
+    {
+      id: 'earth',
+      icon: getIconUrl(
+        'earth_controls.svg'
+      ),
+      title:
+        'Điều khiển quả địa cầu (Earth)',
+      label: c.navEarth,
+    },
+    {
+      id: 'fps',
+      icon: getIconUrl('fps_controls.svg'),
+      title:
+        'Điều khiển bay tự do (FPS / Fly)',
+      label: c.navFly,
+    },
+    {
+      id: 'orbit',
+      icon: getIconUrl(
+        'orbit_controls.svg'
+      ),
+      title: 'Quay quanh tâm (Orbit)',
+      label: c.navOrbit,
+    },
+    {
+      id: 'heli',
+      icon: getIconUrl(
+        'helicopter_controls.svg'
+      ),
+      title:
+        'Góc nhìn trực thăng (Helicopter)',
+      label: c.navHeli,
+    },
+    {
+      id: 'focus',
+      icon: getIconUrl('focus.svg'),
+      title: isReturningFocusOrigin
+        ? 'Đang trở về góc nhìn trước Focus'
+        : isFocusPicking
+          ? 'Hủy chọn điểm Focus'
+          : 'Chọn một điểm để Focus',
+      label: c.navFocus,
+      action: onToggleFocusPick,
+    },
+    {
+      id: 'cube',
+      icon: getIconUrl(
+        'navigation_cube.svg'
+      ),
+      title: 'Bay tới Dự án',
+      label: c.navProject,
+      action: onFocusProject,
+    },
+    {
+      id: 'compass',
+      icon: getIconUrl('azimuth.svg'),
+      title: 'La bàn hướng Bắc',
+      label: c.navNorth,
+    },
+    {
+      id: 'anim',
+      icon: getIconUrl(
+        'camera_animation.svg'
+      ),
+      title: 'Tạo hoạt ảnh Camera',
+      label: c.navCamera,
+    },
   ];
 
-  /* Directional cube buttons */
-  const CUBE_VIEWS: ('L' | 'R' | 'F' | 'B' | 'T' | 'D')[] = ['L', 'R', 'F', 'B', 'T', 'D'];
+  const cubeViews: (
+    | 'L'
+    | 'R'
+    | 'F'
+    | 'B'
+    | 'T'
+    | 'D'
+  )[] = ['L', 'R', 'F', 'B', 'T', 'D'];
+
+  // Visual helpers only — handlers and tool behavior stay unchanged.
+  const baseToolButton =
+    'viewer-tool-card group relative';
+
+  const activeToolButton =
+    'is-active';
+
+  const amberToolButton =
+    'hover:border-amber-400/35';
+
+  const dangerToolButton =
+    'is-danger';
+
+  const neutralIconFilter =
+    'brightness(0) saturate(100%) invert(73%) sepia(12%) saturate(486%) hue-rotate(179deg) brightness(93%) contrast(86%)';
+
+  const activeIconFilter =
+    'brightness(0) saturate(100%) invert(61%) sepia(79%) saturate(2148%) hue-rotate(166deg) brightness(98%) contrast(92%)';
+
+  const amberIconFilter =
+    'brightness(0) saturate(100%) invert(74%) sepia(56%) saturate(1015%) hue-rotate(350deg) brightness(101%) contrast(95%)';
+
+  const dangerIconFilter =
+    'brightness(0) saturate(100%) invert(49%) sepia(66%) saturate(1922%) hue-rotate(318deg) brightness(95%) contrast(93%)';
 
   return (
     <>
-      {/* Inject slider CSS once */}
-      <style>{sliderStyle}</style>
+      <style>{viewerStyle}</style>
 
-      <div
-        className={`absolute top-0 left-0 z-20 h-screen flex flex-col transition-transform duration-300 ease-in-out select-none ${
-          isOpen ? 'translate-x-0' : '-translate-x-full'
+      <aside
+        className={`saolatek-viewer-sidebar absolute left-0 top-0 z-20 flex h-screen w-[292px] select-none flex-col border-r border-[var(--vs-border)] bg-[var(--vs-bg)] font-sans text-[var(--vs-text)] shadow-[var(--vs-shadow)] backdrop-blur-xl transition-transform duration-300 ease-in-out ${
+          isOpen
+            ? 'translate-x-0'
+            : '-translate-x-full'
         }`}
-        style={{
-          width: 256,
-          background: '#0d1b2a',
-          borderRight: '1px solid #1a2a3d',
-          fontFamily: "'Inter', 'Segoe UI', sans-serif",
-        }}
       >
-        {/* ── Header ── */}
-        <div
-          style={{ borderBottom: '1px solid #1a2a3d' }}
-          className="flex items-center justify-between px-4 py-3 flex-shrink-0"
-        >
-          <div className="flex items-center gap-2">
-            <div
-              className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
-              style={{ background: 'linear-gradient(135deg,#0070b8 0%,#00aaff 100%)' }}
-            >
-              <Globe size={13} color="white" />
-            </div>
-            <div>
-              <span className="text-[#00aaff] font-bold text-[11px] tracking-widest block uppercase">SaoLaTek</span>
-              <span className="text-[#4a6272] text-[9px] font-medium">v1.8.0</span>
+        <div className="flex shrink-0 items-center justify-between border-b border-[var(--vs-border)] bg-[var(--vs-bg-soft)] px-4 py-3.5">
+          <div className="flex min-w-0 flex-1 flex-col justify-center pr-2">
+            <img
+              src={logoImg}
+              alt="SAOLATEK"
+              draggable={false}
+              className="h-[27px] w-auto max-w-[126px] object-contain object-left"
+            />
+
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[8px] font-medium text-[var(--vs-muted)]">
+              <span className="shrink-0">v1.8.0</span>
+              <span className="shrink-0 text-[var(--vs-border)]">
+                ·
+              </span>
+              <span className="truncate">
+                {projectName}
+              </span>
             </div>
           </div>
-          <button
-            onClick={onToggleOptimizer}
-            title="Bộ tối ưu hóa dữ liệu 3D"
-            className={`text-[9px] font-bold uppercase px-2 py-1 rounded border transition-all ${
-              isOptimizerOpen
-                ? 'bg-[#00aaff]/15 border-[#00aaff]/50 text-[#00aaff]'
-                : 'border-[#1e2d3d] text-[#4a6272] hover:text-[#9aadbe] hover:border-[#2a3d52]'
-            }`}
-          >
-            Tối ưu
-          </button>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() =>
+                applyTheme(!isDarkMode)
+              }
+              title={
+                isDarkMode
+                  ? c.switchLight
+                  : c.switchDark
+              }
+              aria-label={
+                isDarkMode
+                  ? c.switchLight
+                  : c.switchDark
+              }
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--vs-border)] bg-[var(--vs-surface)] text-[var(--vs-text-soft)] transition hover:border-sky-500/35 hover:bg-[var(--vs-surface-hover)] hover:text-sky-500"
+            >
+              {isDarkMode ? (
+                <Sun size={14} />
+              ) : (
+                <Moon size={14} />
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={onToggleOptimizer}
+              title="Bộ tối ưu hóa dữ liệu 3D"
+              className={`rounded-lg border px-2.5 py-2 text-[9px] font-bold uppercase tracking-wide transition ${
+                isOptimizerOpen
+                  ? 'border-sky-500/45 bg-sky-500/10 text-sky-500'
+                  : 'border-[var(--vs-border)] bg-[var(--vs-surface)] text-[var(--vs-muted)] hover:border-sky-500/30 hover:bg-[var(--vs-surface-hover)] hover:text-[var(--vs-text)]'
+              }`}
+            >
+              {c.optimize}
+            </button>
+          </div>
         </div>
 
-        {/* ── Scrollable body ── */}
-        <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#1e2d3d #0d1b2a' }}>
-
-          {/* ══════════════════════════════════════════
-              TOOLS (BỘ ĐO ĐẠC & CẮT LÁT POTREE)
-          ══════════════════════════════════════════ */}
+        <div className="viewer-sidebar-scroll flex-1 overflow-y-auto">
           <SectionHeader
-            label="TOOLS"
-            icon={<Wrench size={11} color="#00aaff" />}
-            isOpen={sOpen.tools}
-            onToggle={() => toggle('tools')}
+            label={c.tools}
+            icon={<Wrench size={11} />}
+            isOpen={sections.tools}
+            onToggle={() =>
+              toggleSection('tools')
+            }
           />
 
-          {sOpen.tools && (
-            <div className="px-4 py-3 space-y-4" style={{ borderBottom: '1px solid #0f1c2b' }}>
+          {sections.tools && (
+            <div className="space-y-4 border-b border-[var(--vs-border-soft)] px-3.5 py-4">
+              <div className="viewer-section-shell space-y-3">
+                <MicroTitle>
+                  {c.measurements}
+                </MicroTitle>
 
-              {/* ── Section: Measurements ── */}
-              <div className="space-y-2">
-                <span className="text-[#5a7a94] text-[10px] uppercase tracking-widest font-semibold block">
-                  Measurements
-                </span>
+                <div className="grid grid-cols-3 gap-2">
+                  {measureTools.map(
+                    (tool, index) => {
+                      const isClear =
+                        tool.mode === 'clear';
 
-                {/* 12 Green tool icons grid */}
-                <div className="grid grid-cols-7 gap-1.5 pt-0.5">
-                  {MEASURE_TOOLS.map((tool, idx) => {
-                    const isClear = tool.mode === 'clear';
-                    const isActive = !isClear && currentMode === tool.mode;
+                      const isActive =
+                        !isClear &&
+                        currentMode ===
+                          tool.mode;
 
-                    return (
+                      return (
+                        <button
+                          type="button"
+                          key={`${tool.mode}-${index}`}
+                          onClick={() => {
+                            if (isClear) {
+                              onClear();
+                            } else {
+                              onModeChange(
+                                tool.mode as ToolMode
+                              );
+                            }
+                          }}
+                          title={tool.title}
+                          className={`${baseToolButton} ${
+                            isClear
+                              ? dangerToolButton
+                              : isActive
+                                ? activeToolButton
+                                : ''
+                          }`}
+                        >
+                          <img
+                            src={tool.icon}
+                            alt={tool.title}
+                            className="h-5 w-5 object-contain opacity-95"
+                            style={{
+                              filter: isClear
+                                ? dangerIconFilter
+                                : isActive
+                                  ? activeIconFilter
+                                  : neutralIconFilter,
+                            }}
+                          />
+
+                          <span className="viewer-tool-label">
+                            {tool.label}
+                          </span>
+                        </button>
+                      );
+                    }
+                  )}
+                </div>
+
+                <div className="viewer-control-strip flex">
+                  <Segment
+                    active={showMeasurements}
+                    first
+                    onClick={() => {
+                      if (
+                        !showMeasurements &&
+                        onToggleShowMeasurements
+                      ) {
+                        onToggleShowMeasurements();
+                      }
+                    }}
+                  >
+                    {c.show}
+                  </Segment>
+
+                  <div className="w-px bg-slate-700/65" />
+
+                  <Segment
+                    active={!showMeasurements}
+                    last
+                    onClick={() => {
+                      if (
+                        showMeasurements &&
+                        onToggleShowMeasurements
+                      ) {
+                        onToggleShowMeasurements();
+                      }
+                    }}
+                  >
+                    {c.hide}
+                  </Segment>
+                </div>
+
+                {measurementManager}
+              </div>
+
+              <div className="viewer-section-shell space-y-3">
+                <MicroTitle>
+                  {c.clipping}
+                </MicroTitle>
+
+                <div className="grid grid-cols-4 gap-2">
+                  {clipTools.map(
+                    (tool) => (
                       <button
-                        key={idx}
+                        type="button"
+                        key={tool.id}
                         onClick={() => {
-                          if (isClear) onClear();
-                          else onModeChange(tool.mode as ToolMode);
+                          onClipTool?.(tool.id as 'box' | 'polygon' | 'plane' | 'clear');
                         }}
                         title={tool.title}
-                        className={`w-7 h-7 rounded flex items-center justify-center p-1 transition-all cursor-pointer ${
-                          isActive
-                            ? 'bg-[#00d26a]/20 border border-[#00d26a] shadow-[0_0_8px_rgba(0,210,106,0.3)]'
-                            : 'bg-[#111e2c] border border-[#1e2d3d] hover:bg-[#1a2b3c] hover:border-[#2a3d52]'
+                        className={`${baseToolButton} ${
+                          tool.id === 'clear'
+                            ? dangerToolButton
+                            : `${amberToolButton} ${activeClipTool === tool.id ? 'ring-1 ring-amber-300 bg-amber-400/15' : ''}`
                         }`}
                       >
                         <img
                           src={tool.icon}
                           alt={tool.title}
-                          className="w-full h-full object-contain"
+                          className="h-5 w-5 object-contain opacity-95"
                           style={{
-                            filter: isClear
-                              ? 'invert(37%) sepia(85%) saturate(2280%) hue-rotate(334deg) brightness(98%) contrast(92%)' // Red
-                              : 'invert(56%) sepia(86%) saturate(1637%) hue-rotate(114deg) brightness(96%) contrast(102%)', // Green (#00d26a)
+                            filter:
+                              tool.id ===
+                              'clear'
+                                ? dangerIconFilter
+                                : amberIconFilter,
                           }}
                         />
+                        <span className="viewer-tool-label">
+                          {tool.label}
+                        </span>
                       </button>
-                    );
-                  })}
+                    )
+                  )}
                 </div>
 
-                {/* Show / Hide Toggle Buttons */}
-                <div
-                  className="flex rounded overflow-hidden mt-2"
-                  style={{ border: '1px solid #1e2d3d' }}
-                >
-                  <button
-                    onClick={() => {
-                      if (!showMeasurements && onToggleShowMeasurements) onToggleShowMeasurements();
-                    }}
-                    className="flex-1 py-1 text-[10px] font-bold transition-all cursor-pointer"
-                    style={{
-                      background: showMeasurements ? '#1e2d3d' : 'transparent',
-                      color: showMeasurements ? '#c8d8e8' : '#4a6272',
-                      borderRight: '1px solid #1e2d3d',
-                    }}
+                {clipInstruction && (
+                  <p className="text-[10px] leading-4 text-[var(--vs-text-soft)]" role="status">
+                    {clipInstruction}
+                  </p>
+                )}
+
+                <div className="grid grid-cols-4 overflow-hidden rounded-md border border-[var(--vs-border)] bg-[var(--vs-bg-soft)]">
+                  {(
+                    [
+                      'none',
+                      'highlight',
+                      'inside',
+                      'outside',
+                    ] as ClipMode[]
+                  ).map(
+                    (mode, index) => (
+                      <button
+                        type="button"
+                        key={mode}
+                        onClick={() =>
+                          onClipModeChange?.(mode)
+                        }
+                        className={`px-1 py-1.5 text-[9px] font-semibold capitalize transition ${
+                          clipMode === mode
+                            ? 'bg-[var(--vs-segment)] text-[var(--vs-text)]'
+                            : 'text-[var(--vs-muted)] hover:bg-[var(--vs-bg-soft)] hover:text-[var(--vs-text)]'
+                        } ${
+                          index < 3
+                            ? 'border-r border-[var(--vs-border)]'
+                            : ''
+                        }`}
+                      >
+                        {{
+                          none: c.clipNone,
+                          highlight: c.clipHighlight,
+                          inside: c.clipInside,
+                          outside: c.clipOutside,
+                        }[mode]}
+                      </button>
+                    )
+                  )}
+                </div>
+
+                <div className="flex overflow-hidden rounded-md border border-[var(--vs-border)] bg-[var(--vs-bg-soft)]">
+                  <Segment
+                    active={
+                      clipFilter === 'any'
+                    }
+                    first
+                    onClick={() =>
+                      onClipFilterChange?.('any')
+                    }
                   >
-                    Show
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (showMeasurements && onToggleShowMeasurements) onToggleShowMeasurements();
-                    }}
-                    className="flex-1 py-1 text-[10px] font-bold transition-all cursor-pointer"
-                    style={{
-                      background: !showMeasurements ? '#1e2d3d' : 'transparent',
-                      color: !showMeasurements ? '#c8d8e8' : '#4a6272',
-                    }}
+                    {c.insideAny}
+                  </Segment>
+
+                  <div className="w-px bg-slate-700/65" />
+
+                  <Segment
+                    active={
+                      clipFilter === 'all'
+                    }
+                    last
+                    onClick={() =>
+                      onClipFilterChange?.('all')
+                    }
                   >
-                    Hide
-                  </button>
+                    {c.insideAll}
+                  </Segment>
                 </div>
               </div>
 
-              {/* ── Section: Clipping ── */}
-              <div className="space-y-2 pt-2" style={{ borderTop: '1px solid #142130' }}>
-                <span className="text-[#5a7a94] text-[10px] uppercase tracking-widest font-semibold block">
-                  Clipping
-                </span>
-
-                {/* Orange Clipping Tool Icons */}
-                <div className="flex gap-1.5 pt-0.5">
-                  {CLIP_TOOLS.map((tool, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => {
-                        if (tool.id === 'clear') onClear();
-                      }}
-                      title={tool.title}
-                      className="w-7 h-7 rounded flex items-center justify-center p-1 bg-[#111e2c] border border-[#1e2d3d] hover:bg-[#1a2b3c] hover:border-[#2a3d52] transition-all cursor-pointer"
-                    >
-                      <img
-                        src={tool.icon}
-                        alt={tool.title}
-                        className="w-full h-full object-contain"
-                        style={{
-                          filter: tool.id === 'clear'
-                            ? 'invert(37%) sepia(85%) saturate(2280%) hue-rotate(334deg) brightness(98%) contrast(92%)' // Red
-                            : 'invert(65%) sepia(74%) saturate(1478%) hue-rotate(359deg) brightness(101%) contrast(96%)', // Orange/Amber
-                        }}
-                      />
-                    </button>
-                  ))}
-                </div>
-
-                {/* Clipping Mode: None | Highlight | Inside | Outside */}
-                <div
-                  className="grid grid-cols-4 rounded overflow-hidden text-center"
-                  style={{ border: '1px solid #1e2d3d' }}
-                >
-                  {(['none', 'highlight', 'inside', 'outside'] as ClipMode[]).map((mode, i) => (
-                    <button
-                      key={mode}
-                      onClick={() => setClipMode(mode)}
-                      className="py-1 text-[9px] font-bold capitalize transition-all cursor-pointer"
-                      style={{
-                        background: clipMode === mode ? '#1e2d3d' : 'transparent',
-                        color: clipMode === mode ? '#c8d8e8' : '#4a6272',
-                        borderRight: i < 3 ? '1px solid #1e2d3d' : 'none',
-                      }}
-                    >
-                      {mode}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Clipping Filter: Inside Any | Inside All */}
-                <div
-                  className="flex rounded overflow-hidden"
-                  style={{ border: '1px solid #1e2d3d' }}
-                >
-                  <button
-                    onClick={() => setClipFilter('any')}
-                    className="flex-1 py-1 text-[9px] font-bold transition-all cursor-pointer"
-                    style={{
-                      background: clipFilter === 'any' ? '#1e2d3d' : 'transparent',
-                      color: clipFilter === 'any' ? '#c8d8e8' : '#4a6272',
-                      borderRight: '1px solid #1e2d3d',
-                    }}
+              <div className="viewer-section-shell space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <MicroTitle>{c.navigation}</MicroTitle>
+                  <span
+                    className="inline-flex items-center gap-1 rounded-md border border-[var(--vs-border-soft)] bg-[var(--vs-bg-soft)] px-2 py-1 font-mono text-[9px] font-semibold tabular-nums text-[var(--vs-accent)]"
+                    title="Current camera heading"
+                    aria-label={`Current camera heading ${Math.round(cameraHeading) % 360} degrees`}
                   >
-                    Inside Any
-                  </button>
-                  <button
-                    onClick={() => setClipFilter('all')}
-                    className="flex-1 py-1 text-[9px] font-bold transition-all cursor-pointer"
-                    style={{
-                      background: clipFilter === 'all' ? '#1e2d3d' : 'transparent',
-                      color: clipFilter === 'all' ? '#c8d8e8' : '#4a6272',
-                    }}
-                  >
-                    Inside All
-                  </button>
+                    <NavIcon aria-hidden="true" className="h-3 w-3 transition-transform duration-150" style={{ transform: `rotate(${-cameraHeading}deg)` }} />
+                    {String(Math.round(cameraHeading) % 360).padStart(3, '0')}°
+                  </span>
                 </div>
-              </div>
 
-              {/* ── Section: Navigation ── */}
-              <div className="space-y-2 pt-2" style={{ borderTop: '1px solid #142130' }}>
-                <span className="text-[#5a7a94] text-[10px] uppercase tracking-widest font-semibold block">
-                  Navigation
-                </span>
-
-                {/* Blue Navigation Tool Icons */}
-                <div className="grid grid-cols-7 gap-1.5 pt-0.5">
-                  {NAV_TOOLS.map((tool, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => {
-                        if (tool.action) tool.action();
-                      }}
-                      title={tool.title}
-                      className="w-7 h-7 rounded flex items-center justify-center p-1 bg-[#111e2c] border border-[#1e2d3d] hover:bg-[#1a2b3c] hover:border-[#2a3d52] transition-all cursor-pointer"
-                    >
-                      <img
-                        src={tool.icon}
-                        alt={tool.title}
-                        className="w-full h-full object-contain"
-                        style={{
-                          filter: 'invert(52%) sepia(91%) saturate(2371%) hue-rotate(178deg) brightness(101%) contrast(105%)', // Blue (#00aaff)
+                <div className="grid grid-cols-4 gap-2">
+                  {navigationTools.map(
+                    (tool) => (
+                      <button
+                        type="button"
+                        key={tool.id}
+                        disabled={tool.id === 'focus' && isReturningFocusOrigin}
+                        onClick={() => {
+                          if (tool.action) {
+                            tool.action();
+                          } else {
+                            onNavigationAction?.(tool.id as 'earth' | 'fps' | 'orbit' | 'heli' | 'compass' | 'anim');
+                          }
                         }}
-                      />
-                    </button>
-                  ))}
+                        title={tool.title}
+                        className={`${baseToolButton} ${
+                          ((tool.id === 'earth' || tool.id === 'fps' || tool.id === 'orbit' || tool.id === 'heli') && navigationMode === tool.id) ||
+                          (tool.id === 'anim' && isCameraAnimating) ||
+                          (tool.id === 'focus' && (isFocusPicking || isReturningFocusOrigin))
+                            ? activeToolButton
+                            : ''
+                        } disabled:cursor-not-allowed disabled:opacity-40`}
+                      >
+                        <img
+                          src={tool.icon}
+                          alt={tool.title}
+                          className="h-5 w-5 object-contain opacity-95"
+                          style={{
+                            filter: (((tool.id === 'earth' || tool.id === 'fps' || tool.id === 'orbit' || tool.id === 'heli') && navigationMode === tool.id) ||
+                              (tool.id === 'anim' && isCameraAnimating))
+                              || (tool.id === 'focus' && (isFocusPicking || isReturningFocusOrigin))
+                              ? activeIconFilter
+                              : neutralIconFilter,
+                          }}
+                        />
+                        <span className="viewer-tool-label">
+                          {tool.label}
+                        </span>
+                      </button>
+                    )
+                  )}
                 </div>
 
-                {/* Directional Cube Buttons [L] [R] [F] [B] [T] [D] */}
-                <div className="grid grid-cols-6 gap-1 pt-1">
-                  {CUBE_VIEWS.map((view) => (
+                {navigationMode === 'orbit' && (
+                  <div className="sticky bottom-2 z-20 space-y-2.5 rounded-md border border-sky-500/30 bg-[var(--vs-panel)]/95 p-2.5 shadow-lg backdrop-blur">
+                    <div className="flex items-center justify-between text-[9px] font-bold uppercase tracking-[0.12em] text-sky-500">
+                      <span>Orbit</span>
+                      {orbitTargetSelected
+                        ? <span>Sẵn sàng bay</span>
+                        : isSelectingOrbitTarget
+                          ? <span>Đang tạo vòng</span>
+                          : null}
+                    </div>
+
                     <button
+                      type="button"
+                      onClick={onSelectOrbitTarget}
+                      className={`${baseToolButton} w-full flex-row justify-center gap-2 ${isSelectingOrbitTarget ? activeToolButton : ''}`}
+                    >
+                      {orbitTargetSelected ? 'Chọn lại tâm + bán kính' : 'Chọn tâm + bán kính'}
+                    </button>
+
+                    {isSelectingOrbitTarget && (
+                      <div className="rounded-md border border-sky-500/20 bg-sky-500/[0.05] px-2 py-1.5 text-[9px] leading-4 text-[var(--vs-text-soft)]">
+                        <div>1. Click điểm muốn focus.</div>
+                        <div>2. Di chuột để xem vòng → click mép vòng để chốt bán kính.</div>
+                        <div>3. Chỉnh Độ cao bay → vòng preview nâng/hạ realtime.</div>
+                      </div>
+                    )}
+
+                    {(orbitTargetSelected || isSelectingOrbitTarget) && (
+                      <div className="space-y-2">
+                        <SliderRow
+                          label="Độ cao bay"
+                          value={flightHeight}
+                          displayValue={`${flightHeight.toFixed(0)} m`}
+                          min={10}
+                          max={200}
+                          step={5}
+                          onChange={onFlightHeightChange || (() => {})}
+                          stepButtons={{
+                            amount: 5,
+                            decreaseAriaLabel: 'Giảm độ cao bay',
+                            increaseAriaLabel: 'Tăng độ cao bay',
+                          }}
+                        />
+                        <SliderRow
+                          label="Bán kính vòng"
+                          value={orbitRadius}
+                          displayValue={`${orbitRadius.toFixed(0)} m`}
+                          min={12}
+                          max={500}
+                          step={5}
+                          onChange={onOrbitRadiusChange || (() => {})}
+                          stepButtons={{
+                            amount: 5,
+                            decreaseAriaLabel: 'Giảm bán kính vòng',
+                            increaseAriaLabel: 'Tăng bán kính vòng',
+                          }}
+                        />
+                        <SliderRow
+                          label="Tốc độ bay"
+                          value={cameraSpeed}
+                          displayValue={`${cameraSpeed.toFixed(1)} m/s`}
+                          min={5}
+                          max={150}
+                          step={1}
+                          onChange={onCameraSpeedChange || (() => {})}
+                          stepButtons={{
+                            amount: 1,
+                            decreaseAriaLabel: 'Giảm tốc độ bay',
+                            increaseAriaLabel: 'Tăng tốc độ bay',
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    {orbitTargetSelected && !isOrbitingTarget && (
+                      <button
+                        type="button"
+                        onClick={onStartOrbitTarget}
+                        className={`${baseToolButton} ${activeToolButton} w-full flex-row justify-center gap-2 font-semibold`}
+                      >
+                        ▶ Bắt đầu bay
+                      </button>
+                    )}
+
+                    {orbitTargetSelected && isOrbitingTarget && (
+                      <button
+                        type="button"
+                        onClick={onStopOrbitTarget}
+                        className={`${baseToolButton} w-full flex-row justify-center gap-2`}
+                      >
+                        ■ Dừng bay
+                      </button>
+                    )}
+
+                    <p className="text-[9px] leading-4 text-[var(--vs-muted)]">
+                      Vòng bay giữ nguyên khi dừng. Khi đang bay, lăn chuột để co/giãn vòng; kéo camera để dừng.
+                    </p>
+                  </div>
+                )}
+
+                {navigationMode === 'fps' && (
+                  <div className="space-y-3 rounded-md border border-sky-500/20 bg-sky-500/[0.04] p-2.5">
+                    <div className="flex items-center justify-between text-[9px] font-bold uppercase tracking-[0.12em] text-sky-500">
+                      <span>Bay</span>
+                      {flightPathPointCount > 0 && <span>{flightPathPointCount} waypoint</span>}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onDrawFlightPath}
+                      disabled={isDrawingFlightPath}
+                      className={`${baseToolButton} w-full flex-row justify-center gap-2 ${isDrawingFlightPath ? activeToolButton : ''} disabled:cursor-not-allowed`}
+                    >
+                      {flightPathPointCount >= 2 ? 'Vẽ lại đường bay' : 'Vẽ đường bay'}
+                    </button>
+                    {isDrawingFlightPath && (
+                      <p className="text-[9px] leading-4 text-[var(--vs-text-soft)]">Click waypoint · Nhấp đúp để hoàn tất · Có thể zoom / xoay / pan khi vẽ</p>
+                    )}
+                    <SliderRow
+                      label="Độ cao bay"
+                      value={flightHeight}
+                      displayValue={`${Math.round(flightHeight)} m`}
+                      min={10}
+                      max={300}
+                      step={1}
+                      onChange={onFlightHeightChange || (() => {})}
+                      stepButtons={{
+                        amount: 5,
+                        decreaseAriaLabel: 'Giảm độ cao bay',
+                        increaseAriaLabel: 'Tăng độ cao bay',
+                      }}
+                    />
+                    <SliderRow
+                      label="Tốc độ bay"
+                      value={cameraSpeed}
+                      displayValue={`${cameraSpeed.toFixed(1)} m/s`}
+                      min={5}
+                      max={150}
+                      step={1}
+                      onChange={onCameraSpeedChange || (() => {})}
+                      stepButtons={{
+                        amount: 1,
+                        decreaseAriaLabel: 'Giảm tốc độ bay',
+                        increaseAriaLabel: 'Tăng tốc độ bay',
+                      }}
+                    />
+                    {flightPathPointCount >= 2 && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <button type="button" onClick={onStartFlightPath} disabled={flightPathStatus === 'flying'} className={`${baseToolButton} disabled:cursor-not-allowed disabled:opacity-40`}>▶ Bắt đầu</button>
+                        <button type="button" onClick={onReplayFlightPath} className={baseToolButton}>↻ Bay lại</button>
+                        <button
+                          type="button"
+                          onClick={flightPathStatus === 'paused' ? onResumeFlightPath : onPauseFlightPath}
+                          disabled={flightPathStatus === 'idle'}
+                          className={`${baseToolButton} disabled:cursor-not-allowed disabled:opacity-40`}
+                        >
+                          {flightPathStatus === 'paused' ? '▶ Tiếp tục' : '⏸ Tạm dừng'}
+                        </button>
+                        <button type="button" onClick={onStopFlightPath} disabled={flightPathStatus === 'idle'} className={`${baseToolButton} disabled:cursor-not-allowed disabled:opacity-40`}>■ Dừng</button>
+                        <button type="button" onClick={onDeleteFlightPath} className={`${baseToolButton} ${dangerToolButton} col-span-2`}>Xóa đường</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-6 gap-1">
+                  {cubeViews.map((view) => (
+                    <button
+                      type="button"
                       key={view}
-                      onClick={() => onSetCameraView && onSetCameraView(view)}
+                      onClick={() => {
+                        onSetCameraView?.(view);
+                      }}
                       title={`Góc nhìn ${view}`}
-                      className="py-1 rounded bg-[#111e2c] border border-[#1e2d3d] hover:bg-[#1a2b3c] hover:border-[#00aaff]/60 text-[#00aaff] text-[10px] font-bold transition-all cursor-pointer shadow-sm"
+                      aria-pressed={activeCameraView === view || (view === 'T' && viewAngle === 'topdown')}
+                      className={`viewer-camera-key py-2 ${
+                        activeCameraView === view || (view === 'T' && viewAngle === 'topdown')
+                          ? 'is-active'
+                          : ''
+                      }`}
                     >
                       {view}
                     </button>
                   ))}
                 </div>
 
-                {/* Projection Mode */}
-                <div
-                  className="flex rounded overflow-hidden mt-2"
-                  style={{ border: '1px solid #1e2d3d' }}
-                >
-                  <button
-                    onClick={() => onProjectionChange(false)}
-                    className="flex-1 py-1 text-[10px] font-bold transition-all cursor-pointer"
-                    style={{
-                      background: !isOrthographic ? '#1e2d3d' : 'transparent',
-                      color: !isOrthographic ? '#c8d8e8' : '#4a6272',
-                      borderRight: '1px solid #1e2d3d',
-                    }}
+                <div className="flex overflow-hidden rounded-md border border-[var(--vs-border)] bg-[var(--vs-bg-soft)]">
+                  <Segment
+                    active={!isOrthographic}
+                    first
+                    onClick={() =>
+                      onProjectionChange(false)
+                    }
                   >
-                    Perspective
-                  </button>
-                  <button
-                    onClick={() => onProjectionChange(true)}
-                    className="flex-1 py-1 text-[10px] font-bold transition-all cursor-pointer"
-                    style={{
-                      background: isOrthographic ? '#1e2d3d' : 'transparent',
-                      color: isOrthographic ? '#c8d8e8' : '#4a6272',
-                    }}
+                    {c.perspective}
+                  </Segment>
+
+                  <div className="w-px bg-slate-700/65" />
+
+                  <Segment
+                    active={isOrthographic}
+                    last
+                    onClick={() =>
+                      onProjectionChange(true)
+                    }
                   >
-                    Orthographic
-                  </button>
+                    {c.orthographic}
+                  </Segment>
                 </div>
 
-                {/* Speed Slider */}
-                <div className="pt-2">
-                  <SliderRow
-                    label="Speed"
-                    value={cameraSpeed}
-                    displayValue={cameraSpeed.toFixed(1)}
-                    min={10}
-                    max={500}
-                    step={1}
-                    onChange={onCameraSpeedChange || (() => {})}
-                  />
-                </div>
+                {navigationMode !== 'fps' && navigationMode !== 'orbit' && (
+                  <div className="pt-1">
+                    <SliderRow
+                      label={c.speed}
+                      value={cameraSpeed}
+                      displayValue={`${cameraSpeed.toFixed(1)} m/s`}
+                      min={10}
+                      max={300}
+                      step={1}
+                      onChange={
+                        onCameraSpeedChange ||
+                        (() => {})
+                      }
+                    />
+                  </div>
+                )}
               </div>
-
             </div>
           )}
 
-          {/* ══════════════════════════════════════════
-              APPEARANCE (NGOẠI QUAN MÂY ĐIỂM)
-          ══════════════════════════════════════════ */}
-          <SectionHeader label="Appearance" isOpen={sOpen.appearance} onToggle={() => toggle('appearance')} />
+          <SectionHeader
+            label={c.appearance}
+            isOpen={sections.appearance}
+            onToggle={() =>
+              toggleSection('appearance')
+            }
+          />
 
-          {sOpen.appearance && (
-            <div className="px-4 py-3 space-y-4" style={{ borderBottom: '1px solid #0f1c2b' }}>
+          {sections.appearance && (
+            <div className="space-y-4 border-b border-[var(--vs-border-soft)] px-3.5 py-4">
+              <div className="viewer-section-shell space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Flame size={13} className="text-orange-400" aria-hidden="true" />
+                    <MicroTitle>Heatmap</MicroTitle>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={heatmapEnabled}
+                    onClick={() => onHeatmapEnabledChange(!heatmapEnabled)}
+                    className={`rounded-md border px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide transition ${heatmapEnabled
+                      ? 'border-orange-400/45 bg-orange-400/10 text-orange-300'
+                      : 'border-[var(--vs-border)] bg-[var(--vs-bg-soft)] text-[var(--vs-muted)] hover:text-[var(--vs-text)]'
+                    }`}
+                  >
+                    {heatmapEnabled ? 'On' : 'Off'}
+                  </button>
+                </div>
 
-              {/* Point Budget (% Phần trăm) */}
+                <fieldset disabled={!heatmapEnabled} className="space-y-3 disabled:opacity-45">
+                  <label className="block space-y-1.5 text-[10px] text-[var(--vs-text-soft)]">
+                    <span>Thuộc tính</span>
+                    <select
+                      value={heatmapProperty}
+                      onChange={event => onHeatmapPropertyChange(event.target.value as 'elevation')}
+                      className="w-full rounded-md border border-[var(--vs-border)] bg-[var(--vs-surface)] px-2.5 py-2 text-[10px] text-[var(--vs-text)] outline-none focus-visible:border-sky-500"
+                    >
+                      <option value="elevation">Elevation / Height</option>
+                    </select>
+                  </label>
+
+                  {heatmapRangeAvailable && <div className="space-y-2">
+                    <MicroTitle>Độ cao</MicroTitle>
+                    <div>
+                      <div
+                        className="h-2.5 rounded-full border border-white/10 bg-[linear-gradient(90deg,#0066ff_0%,#00e5ff_20%,#00d45a_40%,#ffe600_60%,#ff8c00_80%,#ff2b20_100%)]"
+                        aria-label="Continuous elevation gradient from blue to red"
+                      />
+                      <div className="mt-1.5 flex justify-between text-[9px] tabular-nums text-[var(--vs-muted)]">
+                        <span>0.0 m</span>
+                        <span>{heatmapMax.toFixed(1)} m</span>
+                      </div>
+                    </div>
+                  </div>}
+                  {!heatmapRangeAvailable && (
+                    <p className="text-[9px] leading-4 text-amber-400">Độ cao sẽ được tính tự động khi point cloud sẵn sàng.</p>
+                  )}
+                </fieldset>
+              </div>
+
               {(() => {
-                const minB = minPointBudget || 0;
-                const maxB = maxPointBudget || 12_000_000;
-                const percent = Math.max(1, Math.min(100, Math.round(((pointBudget - minB) / Math.max(1, maxB - minB)) * 100)));
+                const minBudget =
+                  minPointBudget || 0;
+
+                const maxBudget =
+                  maxPointBudget ||
+                  12_000_000;
+
+                const percent = Math.max(
+                  1,
+                  Math.min(
+                    100,
+                    Math.round(
+                      ((pointBudget -
+                        minBudget) /
+                        Math.max(
+                          1,
+                          maxBudget -
+                            minBudget
+                        )) *
+                        100
+                    )
+                  )
+                );
+
                 return (
                   <SliderRow
-                    label="Point budget"
+                    label={c.pointBudget}
                     value={percent}
                     displayValue={`${percent}%`}
                     min={1}
                     max={100}
                     step={1}
-                    onChange={(newPercent) => {
-                      const newBudget = Math.round(minB + (newPercent / 100) * (maxB - minB));
-                      onPointBudgetChange(newBudget);
+                    onChange={(
+                      nextPercent
+                    ) => {
+                      const nextBudget =
+                        Math.round(
+                          minBudget +
+                            (nextPercent /
+                              100) *
+                              (maxBudget -
+                                minBudget)
+                        );
+
+                      onPointBudgetChange(
+                        nextBudget
+                      );
                     }}
                   />
                 );
               })()}
 
-              {/* Field of View */}
               <SliderRow
-                label="Field of view"
+                label={c.fieldOfView}
                 value={fov}
                 min={30}
                 max={120}
@@ -702,271 +2132,365 @@ export function PotreeSidebar({
                 onChange={onFovChange}
               />
 
-              {/* Point Size */}
               <SliderRow
-                label="Point size"
+                label={c.pointSize}
                 value={pointSize}
+                displayValue={pointSize.toFixed(1)}
                 min={1}
                 max={8}
                 step={0.5}
-                onChange={v => onPointSizeChange(Math.round(v * 2) / 2)}
+                onChange={(value) =>
+                  onPointSizeChange(
+                    Math.round(value * 2) / 2
+                  )
+                }
               />
 
-              {/* ── Eye-Dome Lighting ── */}
-              <div className="space-y-3 pt-1">
-                <div
-                  className="text-[10px] text-[#5a7a94] uppercase tracking-widest font-semibold pb-1"
-                  style={{ borderBottom: '1px solid #1a2535' }}
-                >
-                  Eye-Dome Lighting
-                </div>
+              <div className="space-y-3">
+                <MicroTitle>
+                  {c.edl}
+                </MicroTitle>
 
-                {/* EDL Enable */}
-                <PtCheckbox label="Enable" checked={edlEnabled} onChange={onEdlToggle} />
+                <PtCheckbox
+                  label={edlSupported ? c.enable : `${c.enable} (không hỗ trợ)`}
+                  checked={edlEnabled}
+                  onChange={onEdlToggle}
+                  disabled={!edlSupported}
+                />
 
                 {edlEnabled && (
-                  <div className="space-y-3 pl-1">
+                  <div className="space-y-4 pl-1">
                     <SliderRow
-                      label="Radius"
+                      label={c.radius}
                       value={edlRadius}
                       min={0}
                       max={4}
                       step={0.1}
-                      onChange={onEdlRadiusChange}
+                      onChange={
+                        onEdlRadiusChange
+                      }
                     />
+
                     <SliderRow
-                      label="Strength"
+                      label={c.strength}
                       value={edlStrength}
                       min={0}
                       max={5}
                       step={0.1}
-                      onChange={onEdlStrengthChange}
+                      onChange={
+                        onEdlStrengthChange
+                      }
                     />
+
                     <SliderRow
-                      label="Opacity"
+                      label={c.opacity}
                       value={edlOpacity}
                       min={0}
                       max={1}
                       step={0.05}
-                      onChange={onEdlOpacityChange}
+                      onChange={
+                        onEdlOpacityChange
+                      }
                     />
                   </div>
                 )}
               </div>
 
-              {/* ── Background ── */}
-              <div className="space-y-2 pt-1">
-                <div
-                  className="text-[10px] text-[#5a7a94] uppercase tracking-widest font-semibold pb-1"
-                  style={{ borderBottom: '1px solid #1a2535' }}
-                >
-                  Background
-                </div>
-                <div className="flex gap-1 flex-wrap">
-                  {BG_OPTS.map(({ key, label }) => (
-                    <button
-                      key={key}
-                      onClick={() => onBackgroundChange(key)}
-                      className="text-[10px] px-2.5 py-1 rounded font-medium transition-all cursor-pointer"
-                      style={{
-                        background: background === key ? '#1e2d3d' : 'transparent',
-                        color: background === key ? '#c8d8e8' : '#5a7a94',
-                        border: background === key ? '1px solid #2a4560' : '1px solid transparent',
-                        fontWeight: background === key ? 700 : 400,
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+              <div className="space-y-2.5">
+                <MicroTitle>
+                  {c.background}
+                </MicroTitle>
 
-              </div>
-
-              {/* ── Quality ── */}
-              <div className="space-y-2 pt-1">
-                <div
-                  className="text-[10px] text-[#5a7a94] uppercase tracking-widest font-semibold pb-1"
-                  style={{ borderBottom: '1px solid #1a2535' }}
-                >
-                  Quality
-                </div>
-                <div
-                  className="flex rounded overflow-hidden"
-                  style={{ border: '1px solid #1e2d3d' }}
-                >
-                  <button
-                    onClick={() => onQualityChange('standard')}
-                    className="flex-1 py-1.5 text-[10px] font-bold transition-all cursor-pointer"
-                    style={{
-                      background: quality === 'standard' ? '#1e2d3d' : 'transparent',
-                      color: quality === 'standard' ? '#c8d8e8' : '#4a6272',
-                      borderRight: '1px solid #1e2d3d',
-                    }}
-                  >
-                    Standard
-                  </button>
-                  <button
-                    onClick={() => onQualityChange('high')}
-                    className="flex-1 py-1.5 text-[10px] font-bold transition-all cursor-pointer"
-                    style={{
-                      background: quality === 'high' ? '#1e2d3d' : 'transparent',
-                      color: quality === 'high' ? '#c8d8e8' : '#4a6272',
-                    }}
-                  >
-                    High Quality
-                  </button>
+                <div className="flex flex-wrap gap-1">
+                  {backgroundOptions.map(
+                    ({ key, label }) => (
+                      <button
+                        type="button"
+                        key={key}
+                        onClick={() =>
+                          onBackgroundChange(key)
+                        }
+                        className={`rounded-md border px-2.5 py-1.5 text-[9px] font-semibold transition ${
+                          background === key
+                            ? 'border-sky-500/35 bg-sky-500/10 text-sky-300'
+                            : 'border-transparent text-[var(--vs-muted)] hover:border-slate-700 hover:bg-slate-800/55 hover:text-[var(--vs-text)]'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    )
+                  )}
                 </div>
               </div>
 
-              {/* Min Node Size */}
+              <div className="space-y-2.5">
+                <MicroTitle>
+                  {c.quality}
+                </MicroTitle>
+
+                <div className="flex overflow-hidden rounded-md border border-[var(--vs-border)] bg-[var(--vs-bg-soft)]">
+                  <Segment
+                    active={
+                      quality === 'standard'
+                    }
+                    first
+                    onClick={() =>
+                      onQualityChange(
+                        'standard'
+                      )
+                    }
+                  >
+                    {c.standard}
+                  </Segment>
+
+                  <div className="w-px bg-slate-700/65" />
+
+                  <Segment
+                    active={quality === 'high'}
+                    last
+                    onClick={() =>
+                      onQualityChange('high')
+                    }
+                  >
+                    {c.highQuality}
+                  </Segment>
+                </div>
+              </div>
+
               <SliderRow
-                label="Min node size"
+                label={c.minNodeSize}
                 value={minNodeSize}
                 min={0}
                 max={32}
                 step={1}
-                onChange={v => onMinNodeSizeChange(Math.round(v))}
+                onChange={(value) =>
+                  onMinNodeSizeChange(
+                    Math.round(value)
+                  )
+                }
               />
 
-              {/* Lock View */}
-              <div className="flex items-center gap-2 pt-1">
-                <PtCheckbox label="Lock view" checked={lockView} onChange={onLockViewChange} />
-                {lockView && <Lock size={11} color="#00aaff" />}
-                {!lockView && <Unlock size={11} color="#4a6272" />}
+              <div className="flex items-center gap-2">
+                <PtCheckbox
+                  label={c.lockView}
+                  checked={lockView}
+                  onChange={onLockViewChange}
+                />
+
+                {lockView ? (
+                  <Lock
+                    size={11}
+                    className="text-sky-400"
+                  />
+                ) : (
+                  <Unlock
+                    size={11}
+                    className="text-slate-600"
+                  />
+                )}
               </div>
             </div>
           )}
 
-          {/* ══════════════════════════════════════════
-              SCENE TREE (LỚP BẢN ĐỒ)
-          ══════════════════════════════════════════ */}
-          <SectionHeader label="Scene" isOpen={sOpen.scene} onToggle={() => toggle('scene')} />
+          <SectionHeader
+            label={c.scene}
+            isOpen={sections.scene}
+            onToggle={() =>
+              toggleSection('scene')
+            }
+          />
 
-          {sOpen.scene && (
-            <div className="px-4 py-3 space-y-2" style={{ borderBottom: '1px solid #0f1c2b' }}>
-
-              {/* Layer toggles */}
-              <div className="space-y-2">
-                <label
-                  className="flex items-center gap-2 cursor-pointer py-1 rounded px-1 transition-colors group hover:bg-[#131f2d]"
-                  onClick={() => setShowPointCloud(!showPointCloud)}
+          {sections.scene && (
+            <div className="space-y-3 border-b border-[var(--vs-border-soft)] px-3.5 py-4">
+              <div className="space-y-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowPointCloud(
+                      !showPointCloud
+                    )
+                  }
+                  className="viewer-scene-row group flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition hover:bg-[var(--vs-bg-soft)]"
                 >
                   <span
-                    className="w-4 h-4 rounded-sm border border-[#2a3d52] flex items-center justify-center flex-shrink-0 transition-colors"
-                    style={{ background: showPointCloud ? '#00aaff' : '#0d1b2a' }}
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                      showPointCloud
+                        ? 'border-sky-500 bg-sky-500'
+                        : 'border-slate-600 bg-slate-950/60'
+                    }`}
                   >
                     {showPointCloud && (
-                      <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
-                        <path d="M1 3.5L3.2 6L8 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
+                      <CheckMark />
                     )}
                   </span>
-                  <Layers size={12} color="#00aaff" />
-                  <span className="text-[#9aadbe] text-[11px] group-hover:text-[#c0d4e8] transition-colors">Point Cloud</span>
-                </label>
 
-                <label
-                  className="flex items-center gap-2 cursor-pointer py-1 rounded px-1 transition-colors group"
-                  onClick={() => setShowModel(!showModel)}
+                  <Layers
+                    size={13}
+                    className="text-sky-400"
+                  />
+
+                  <span className="viewer-scene-label text-[11px] transition">
+                    {c.pointCloud}
+                  </span>
+                  <LayerStatus status={pointCloudLoadStatus} error={pointCloudLoadError} onRetry={onRetryPointCloud} />
+                </button>
+                <div className="px-1.5 pb-2">
+                  <SliderRow
+                    label={`${c.pointCloud} · ${c.opacity}`}
+                    value={pointCloudOpacity}
+                    displayValue={`${Math.round(pointCloudOpacity * 100)}%`}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    onChange={onPointCloudOpacityChange}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowModel(!showModel)
+                  }
+                  className="viewer-scene-row group flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition hover:bg-[var(--vs-bg-soft)]"
                 >
                   <span
-                    className="w-4 h-4 rounded-sm border border-[#2a3d52] flex items-center justify-center flex-shrink-0 transition-colors"
-                    style={{ background: showModel ? '#00aaff' : '#0d1b2a' }}
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                      showModel
+                        ? 'border-sky-500 bg-sky-500'
+                        : 'border-slate-600 bg-slate-950/60'
+                    }`}
                   >
                     {showModel && (
-                      <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
-                        <path d="M1 3.5L3.2 6L8 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
+                      <CheckMark />
                     )}
                   </span>
-                  <Box size={12} color="#34d399" />
-                  <span className="text-[#9aadbe] text-[11px] group-hover:text-[#c0d4e8] transition-colors">3D Model (GLB)</span>
-                </label>
 
-                <label
-                  className="flex items-center gap-2 cursor-pointer py-1 rounded px-1 transition-colors group"
-                  onClick={() => setShowDom(!showDom)}
+                  <Box
+                    size={13}
+                    className="text-emerald-400"
+                  />
+
+                  <span className="viewer-scene-label text-[11px] transition">
+                    {c.model3d}
+                  </span>
+                  <LayerStatus status={modelLoadStatus} error={modelLoadError} onRetry={onRetryModel} />
+                </button>
+                <div className="px-1.5 pb-2">
+                  <SliderRow
+                    label={`${c.model3d} · ${c.opacity}`}
+                    value={modelOpacity}
+                    displayValue={`${Math.round(modelOpacity * 100)}%`}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    onChange={onModelOpacityChange}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowDom(!showDom)
+                  }
+                  className="viewer-scene-row group flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition hover:bg-[var(--vs-bg-soft)]"
                 >
                   <span
-                    className="w-4 h-4 rounded-sm border border-[#2a3d52] flex items-center justify-center flex-shrink-0 transition-colors"
-                    style={{ background: showDom ? '#00aaff' : '#0d1b2a' }}
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                      showDom
+                        ? 'border-sky-500 bg-sky-500'
+                        : 'border-slate-600 bg-slate-950/60'
+                    }`}
                   >
-                    {showDom && (
-                      <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
-                        <path d="M1 3.5L3.2 6L8 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
+                    {showDom && <CheckMark />}
                   </span>
-                  <ImageIcon size={12} color="#fbbf24" />
-                  <span className="text-[#9aadbe] text-[11px] group-hover:text-[#c0d4e8] transition-colors">Ảnh DOM</span>
-                </label>
+
+                  <ImageIcon
+                    size={13}
+                    className="text-amber-400"
+                  />
+
+                  <span className="viewer-scene-label text-[11px] transition">
+                    {c.dom}
+                  </span>
+                  <LayerStatus status={domLoadStatus} error={domLoadError} onRetry={onRetryDom} />
+                </button>
+                <div className="px-1.5 pb-1">
+                  <SliderRow
+                    label={`${c.dom} · ${c.opacity}`}
+                    value={domOpacity}
+                    displayValue={`${Math.round(domOpacity * 100)}%`}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    onChange={onDomOpacityChange}
+                  />
+                </div>
               </div>
 
-              {/* Navigation focus buttons */}
-              <div className="pt-2 space-y-1.5">
-                <div
-                  className="text-[10px] text-[#5a7a94] uppercase tracking-widest font-semibold pb-1 mb-2"
-                  style={{ borderBottom: '1px solid #1a2535' }}
-                >
-                  Quick Focus
-                </div>
+              <div className="space-y-2 pt-1">
+                <MicroTitle>
+                  {c.quickFocus}
+                </MicroTitle>
+
                 <button
+                  type="button"
                   onClick={onFocusProject}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded text-[11px] font-medium transition-all cursor-pointer"
-                  style={{ background: '#111e2c', border: '1px solid #1e2d3d', color: '#9aadbe' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#1a2b3c')}
-                  onMouseLeave={e => (e.currentTarget.style.background = '#111e2c')}
+                  className="viewer-quick-focus flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-[11px] font-medium transition"
                 >
-                  <NavIcon size={12} color="#00aaff" style={{ transform: 'rotate(45deg)' }} />
-                  Bay tới Dự án
+                  <NavIcon
+                    size={13}
+                    className="rotate-45 text-sky-400"
+                  />
+                  {c.focusProject}
                 </button>
 
                 {onFocusPointCloud && (
                   <button
+                    type="button"
                     onClick={onFocusPointCloud}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded text-[11px] font-medium transition-all cursor-pointer"
-                    style={{ background: '#111e2c', border: '1px solid #1e2d3d', color: '#9aadbe' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = '#1a2b3c')}
-                    onMouseLeave={e => (e.currentTarget.style.background = '#111e2c')}
+                    className="viewer-quick-focus flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-[11px] font-medium transition"
                   >
-                    <MapPin size={12} color="#00aaff" />
-                    Bay tới Point Cloud
+                    <MapPin
+                      size={13}
+                      className="text-sky-400"
+                    />
+                    {c.focusPointCloud}
                   </button>
                 )}
 
                 <button
+                  type="button"
                   onClick={onFocusDom}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded text-[11px] font-medium transition-all cursor-pointer"
-                  style={{ background: '#111e2c', border: '1px solid #1e2d3d', color: '#9aadbe' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#1a2b3c')}
-                  onMouseLeave={e => (e.currentTarget.style.background = '#111e2c')}
+                  className="viewer-quick-focus flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-[11px] font-medium transition"
                 >
-                  <Settings2 size={12} color="#fbbf24" />
-                  Bay tới Ảnh DOM
+                  <Settings2
+                    size={13}
+                    className="text-amber-400"
+                  />
+                  {c.focusDom}
                 </button>
               </div>
             </div>
           )}
         </div>
 
-        {/* ── Sidebar toggle handle ── */}
         <button
+          type="button"
           onClick={handleToggle}
-          className="absolute top-1/2 -translate-y-1/2 left-full flex items-center justify-center w-5 h-14 cursor-pointer transition-all group focus-visible:outline-none"
-          style={{
-            background: '#0d1b2a',
-            border: '1px solid #1a2a3d',
-            borderLeft: 'none',
-            borderRadius: '0 6px 6px 0',
-          }}
-          title={isOpen ? 'Thu gọn menu' : 'Mở rộng menu'}
-        >
-          {isOpen
-            ? <ChevronLeft size={13} color="#4a6272" className="group-hover:text-[#9aadbe] transition-colors" />
-            : <ChevronRight size={13} color="#4a6272" className="group-hover:text-[#9aadbe] transition-colors" />
+          title={
+            isOpen
+              ? 'Thu gọn menu'
+              : 'Mở rộng menu'
           }
+          className="group absolute left-full top-1/2 flex h-16 w-6 -translate-y-1/2 items-center justify-center rounded-r-lg border border-l-0 border-[var(--vs-border)] bg-[#081321]/95 text-slate-600 shadow-lg backdrop-blur-xl transition hover:bg-slate-900 hover:text-[var(--vs-text)] focus-visible:outline-none"
+        >
+          {isOpen ? (
+            <ChevronLeft size={13} />
+          ) : (
+            <ChevronRight size={13} />
+          )}
         </button>
-      </div>
+      </aside>
     </>
   );
 }

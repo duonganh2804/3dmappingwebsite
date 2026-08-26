@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Building2,
@@ -253,6 +253,21 @@ export const ContactConsultationPage: React.FC = () => {
   const { currentLang, setCurrentLang } = useLanguage('vi');
   const c = COPY[currentLang];
 
+  const readTheme = () => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+
+    return (
+      window.localStorage.getItem(
+        'saolatek_theme'
+      ) === 'dark'
+    );
+  };
+
+  const [isDarkMode, setIsDarkMode] =
+    useState(readTheme);
+
   const [formData, setFormData] = useState<FormData>({
     email: '',
     fullName: '',
@@ -267,6 +282,49 @@ export const ContactConsultationPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serverMessage, setServerMessage] = useState('');
 
+  useEffect(() => {
+    const syncTheme = () => {
+      setIsDarkMode(readTheme());
+    };
+
+    const syncCustomTheme = (
+      event: Event
+    ) => {
+      const detail = (
+        event as CustomEvent<
+          'light' | 'dark'
+        >
+      ).detail;
+
+      if (detail === 'dark') {
+        setIsDarkMode(true);
+      }
+
+      if (detail === 'light') {
+        setIsDarkMode(false);
+      }
+    };
+
+    window.addEventListener(
+      'storage',
+      syncTheme
+    );
+    window.addEventListener(
+      'saolatek-theme-change',
+      syncCustomTheme
+    );
+
+    return () => {
+      window.removeEventListener(
+        'storage',
+        syncTheme
+      );
+      window.removeEventListener(
+        'saolatek-theme-change',
+        syncCustomTheme
+      );
+    };
+  }, []);
 
   const validate = () => {
     const nextErrors: Record<string, string> = {};
@@ -332,11 +390,35 @@ export const ContactConsultationPage: React.FC = () => {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col overflow-x-hidden bg-[#080c14] text-white selection:bg-blue-600 selection:text-white">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_35%,rgba(37,99,235,0.18),transparent_50%),radial-gradient(circle_at_80%_80%,rgba(14,165,233,0.1),transparent_50%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:4rem_4rem] opacity-[0.15]" />
+    <div
+      className={`relative flex min-h-screen flex-col overflow-x-hidden selection:bg-blue-600 selection:text-white ${
+        isDarkMode
+          ? 'bg-[#080c14] text-white'
+          : 'bg-[#f3f6fa] text-slate-900'
+      }`}
+    >
+      <div
+        className={`pointer-events-none absolute inset-0 ${
+          isDarkMode
+            ? 'bg-[radial-gradient(circle_at_20%_35%,rgba(37,99,235,0.18),transparent_50%),radial-gradient(circle_at_80%_80%,rgba(14,165,233,0.1),transparent_50%)]'
+            : 'bg-[radial-gradient(circle_at_18%_30%,rgba(2,132,199,0.10),transparent_44%),radial-gradient(circle_at_82%_78%,rgba(14,165,233,0.06),transparent_42%)]'
+        }`}
+      />
+      <div
+        className={`pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,currentColor_1px,transparent_1px),linear-gradient(to_bottom,currentColor_1px,transparent_1px)] bg-[size:4rem_4rem] ${
+          isDarkMode
+            ? 'text-slate-800 opacity-[0.15]'
+            : 'text-slate-300 opacity-[0.20]'
+        }`}
+      />
 
-      <header className="relative z-20 w-full border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-md">
+      <header
+        className={`relative z-20 w-full border-b backdrop-blur-md ${
+          isDarkMode
+            ? 'border-slate-800/80 bg-slate-950/70'
+            : 'border-slate-200/90 bg-white/90'
+        }`}
+      >
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6">
           <Link to="/" className="flex shrink-0 items-center">
             <img
@@ -356,7 +438,11 @@ export const ContactConsultationPage: React.FC = () => {
             <button
               type="button"
               onClick={() => navigate('/')}
-              className="hidden items-center gap-1.5 text-xs font-semibold text-slate-300 transition hover:text-white sm:flex"
+              className={`hidden items-center gap-1.5 text-xs font-semibold transition sm:flex ${
+                isDarkMode
+                  ? 'text-slate-300 hover:text-white'
+                  : 'text-slate-600 hover:text-slate-950'
+              }`}
             >
               {c.home}
             </button>
@@ -368,22 +454,38 @@ export const ContactConsultationPage: React.FC = () => {
 
       <main className="relative z-10 mx-auto grid w-full max-w-7xl flex-grow grid-cols-1 items-start gap-12 px-5 py-9 sm:px-6 sm:py-12 lg:grid-cols-12">
         <section className="space-y-8 pt-2 lg:col-span-6 lg:pt-5">
-          <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-950/60 px-3 py-1 text-xs font-mono text-blue-400">
+          <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-mono ${
+            isDarkMode
+              ? 'border-blue-500/30 bg-blue-950/60 text-blue-400'
+              : 'border-sky-200 bg-sky-50 text-sky-700'
+          }`}>
             <span className="h-2 w-2 rounded-full bg-blue-500" />
             <span>{c.eyebrow}</span>
           </div>
 
           <div>
-            <h1 className="max-w-[760px] text-4xl font-extrabold leading-[1.08] tracking-[-.045em] text-white sm:text-5xl lg:text-[58px]">
+            <h1 className={`max-w-[760px] text-4xl font-extrabold leading-[1.08] tracking-[-.045em] sm:text-5xl lg:text-[58px] ${
+              isDarkMode
+                ? 'text-white'
+                : 'text-slate-950'
+            }`}>
               {c.title}
             </h1>
 
-            <p className="mt-6 max-w-xl text-base leading-7 text-slate-300 sm:text-lg sm:leading-8">
+            <p className={`mt-6 max-w-xl text-base leading-7 sm:text-lg sm:leading-8 ${
+              isDarkMode
+                ? 'text-slate-300'
+                : 'text-slate-600'
+            }`}>
               {c.body}
             </p>
           </div>
 
-          <div className="space-y-5 border-t border-slate-800/80 pt-7">
+          <div className={`space-y-5 border-t pt-7 ${
+            isDarkMode
+              ? 'border-slate-800/80'
+              : 'border-slate-200'
+          }`}>
             {[
               {
                 Icon: Map,
@@ -402,14 +504,26 @@ export const ContactConsultationPage: React.FC = () => {
               }
             ].map(({ Icon, title, body }) => (
               <div key={title} className="flex items-start gap-3">
-                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-blue-500/35 bg-blue-950 text-blue-400">
+                <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${
+                  isDarkMode
+                    ? 'border-blue-500/35 bg-blue-950 text-blue-400'
+                    : 'border-sky-200 bg-sky-50 text-sky-700'
+                }`}>
                   <Icon size={17} />
                 </div>
                 <div>
-                  <h2 className="text-sm font-bold text-white">
+                  <h2 className={`text-sm font-bold ${
+                    isDarkMode
+                      ? 'text-white'
+                      : 'text-slate-900'
+                  }`}>
                     {title}
                   </h2>
-                  <p className="mt-1 max-w-lg text-xs leading-5 text-slate-400">
+                  <p className={`mt-1 max-w-lg text-xs leading-5 ${
+                    isDarkMode
+                      ? 'text-slate-400'
+                      : 'text-slate-500'
+                  }`}>
                     {body}
                   </p>
                 </div>
@@ -420,13 +534,25 @@ export const ContactConsultationPage: React.FC = () => {
         </section>
 
         <section className="scroll-mt-24 lg:col-span-6">
-          <div className="rounded-3xl border border-slate-100 bg-white p-7 text-slate-900 shadow-2xl sm:p-10">
+          <div className={`rounded-3xl border p-7 shadow-2xl sm:p-10 ${
+            isDarkMode
+              ? 'border-slate-700/70 bg-slate-900/95 text-slate-100 shadow-black/30'
+              : 'border-slate-200 bg-white text-slate-900 shadow-slate-300/40'
+          }`}>
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
-                <h2 className="text-2xl font-bold tracking-tight text-slate-900">
+                <h2 className={`text-2xl font-bold tracking-tight ${
+                  isDarkMode
+                    ? 'text-white'
+                    : 'text-slate-900'
+                }`}>
                   {c.formTitle}
                 </h2>
-                <p className="mt-2 text-sm leading-6 text-slate-500">
+                <p className={`mt-2 text-sm leading-6 ${
+                  isDarkMode
+                    ? 'text-slate-400'
+                    : 'text-slate-500'
+                }`}>
                   {c.formBody}
                 </p>
               </div>
@@ -442,7 +568,11 @@ export const ContactConsultationPage: React.FC = () => {
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between gap-3">
-                  <label className="block text-xs font-mono font-bold text-slate-700">
+                  <label className={`block text-xs font-mono font-bold ${
+                    isDarkMode
+                      ? 'text-slate-300'
+                      : 'text-slate-700'
+                  }`}>
                     {c.email} <span className="text-red-500">*</span>
                   </label>
                   {errors.email && (
@@ -462,10 +592,14 @@ export const ContactConsultationPage: React.FC = () => {
                       email: event.target.value
                     }))
                   }
-                  className={`w-full border-b bg-transparent py-2 text-sm text-slate-900 outline-none transition ${
+                  className={`w-full border-b bg-transparent py-2 text-sm outline-none transition ${
                     errors.email
-                      ? 'border-red-500'
-                      : 'border-slate-300 focus:border-blue-600'
+                      ? isDarkMode
+                        ? 'border-red-500 text-red-100 placeholder:text-red-300/60'
+                        : 'border-red-500 text-slate-900'
+                      : isDarkMode
+                        ? 'border-slate-700 text-slate-100 placeholder:text-slate-600 focus:border-sky-400'
+                        : 'border-slate-300 text-slate-900 focus:border-blue-600'
                   }`}
                 />
               </div>
@@ -473,7 +607,11 @@ export const ContactConsultationPage: React.FC = () => {
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                 <div className="space-y-1">
                   <div className="flex items-center justify-between gap-3">
-                    <label className="block text-xs font-mono font-bold text-slate-700">
+                    <label className={`block text-xs font-mono font-bold ${
+                    isDarkMode
+                      ? 'text-slate-300'
+                      : 'text-slate-700'
+                  }`}>
                       {c.fullName} <span className="text-red-500">*</span>
                     </label>
                     {errors.fullName && (
@@ -502,7 +640,11 @@ export const ContactConsultationPage: React.FC = () => {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="block text-xs font-mono font-bold text-slate-700">
+                  <label className={`block text-xs font-mono font-bold ${
+                    isDarkMode
+                      ? 'text-slate-300'
+                      : 'text-slate-700'
+                  }`}>
                     {c.jobTitle}
                   </label>
                   <input
@@ -515,14 +657,22 @@ export const ContactConsultationPage: React.FC = () => {
                         jobTitle: event.target.value
                       }))
                     }
-                    className="w-full border-b border-slate-300 bg-transparent py-2 text-sm text-slate-900 outline-none transition focus:border-blue-600"
+                    className={`w-full border-b bg-transparent py-2 text-sm outline-none transition ${
+                      isDarkMode
+                        ? 'border-slate-700 text-slate-100 placeholder:text-slate-600 focus:border-sky-400'
+                        : 'border-slate-300 text-slate-900 focus:border-blue-600'
+                    }`}
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                 <div className="space-y-1">
-                  <label className="block text-xs font-mono font-bold text-slate-700">
+                  <label className={`block text-xs font-mono font-bold ${
+                    isDarkMode
+                      ? 'text-slate-300'
+                      : 'text-slate-700'
+                  }`}>
                     {c.company}
                   </label>
                   <input
@@ -535,12 +685,20 @@ export const ContactConsultationPage: React.FC = () => {
                         company: event.target.value
                       }))
                     }
-                    className="w-full border-b border-slate-300 bg-transparent py-2 text-sm text-slate-900 outline-none transition focus:border-blue-600"
+                    className={`w-full border-b bg-transparent py-2 text-sm outline-none transition ${
+                      isDarkMode
+                        ? 'border-slate-700 text-slate-100 placeholder:text-slate-600 focus:border-sky-400'
+                        : 'border-slate-300 text-slate-900 focus:border-blue-600'
+                    }`}
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="block text-xs font-mono font-bold text-slate-700">
+                  <label className={`block text-xs font-mono font-bold ${
+                    isDarkMode
+                      ? 'text-slate-300'
+                      : 'text-slate-700'
+                  }`}>
                     {c.phone}
                   </label>
                   <input
@@ -553,14 +711,22 @@ export const ContactConsultationPage: React.FC = () => {
                         phone: event.target.value
                       }))
                     }
-                    className="w-full border-b border-slate-300 bg-transparent py-2 text-sm text-slate-900 outline-none transition focus:border-blue-600"
+                    className={`w-full border-b bg-transparent py-2 text-sm outline-none transition ${
+                      isDarkMode
+                        ? 'border-slate-700 text-slate-100 placeholder:text-slate-600 focus:border-sky-400'
+                        : 'border-slate-300 text-slate-900 focus:border-blue-600'
+                    }`}
                   />
                 </div>
               </div>
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between gap-3">
-                  <label className="block text-xs font-mono font-bold text-slate-700">
+                  <label className={`block text-xs font-mono font-bold ${
+                    isDarkMode
+                      ? 'text-slate-300'
+                      : 'text-slate-700'
+                  }`}>
                     {c.topic} <span className="text-red-500">*</span>
                   </label>
                   {errors.topic && (
@@ -578,15 +744,36 @@ export const ContactConsultationPage: React.FC = () => {
                       topic: event.target.value
                     }))
                   }
-                  className={`w-full border-b bg-transparent py-2 text-sm text-slate-900 outline-none transition ${
+                  className={`w-full border-b bg-transparent py-2 text-sm outline-none transition ${
                     errors.topic
-                      ? 'border-red-500'
-                      : 'border-slate-300 focus:border-blue-600'
+                      ? isDarkMode
+                        ? 'border-red-500 text-red-100'
+                        : 'border-red-500 text-slate-900'
+                      : isDarkMode
+                        ? 'border-slate-700 text-slate-100 focus:border-sky-400'
+                        : 'border-slate-300 text-slate-900 focus:border-blue-600'
                   }`}
                 >
-                  <option value="">{c.topicPlaceholder}</option>
+                  <option
+                    value=""
+                    className={
+                      isDarkMode
+                        ? 'bg-slate-900 text-slate-100'
+                        : 'bg-white text-slate-900'
+                    }
+                  >
+                    {c.topicPlaceholder}
+                  </option>
                   {c.topicOptions.map((option) => (
-                    <option key={option} value={option}>
+                    <option
+                      key={option}
+                      value={option}
+                      className={
+                        isDarkMode
+                          ? 'bg-slate-900 text-slate-100'
+                          : 'bg-white text-slate-900'
+                      }
+                    >
                       {option}
                     </option>
                   ))}
@@ -595,7 +782,11 @@ export const ContactConsultationPage: React.FC = () => {
 
               <div className="space-y-1 pt-1">
                 <div className="flex items-center justify-between gap-3">
-                  <label className="block text-xs font-mono font-bold text-slate-700">
+                  <label className={`block text-xs font-mono font-bold ${
+                    isDarkMode
+                      ? 'text-slate-300'
+                      : 'text-slate-700'
+                  }`}>
                     {c.message} <span className="text-red-500">*</span>
                   </label>
                   {errors.message && (
@@ -615,15 +806,23 @@ export const ContactConsultationPage: React.FC = () => {
                       message: event.target.value
                     }))
                   }
-                  className={`w-full rounded-xl border p-3 text-sm text-slate-900 outline-none transition ${
+                  className={`w-full rounded-xl border p-3 text-sm outline-none transition ${
                     errors.message
-                      ? 'border-red-500 bg-red-50/50'
-                      : 'border-slate-200 bg-slate-50 focus:border-blue-600'
+                      ? isDarkMode
+                        ? 'border-red-500/70 bg-red-950/30 text-red-100 placeholder:text-red-300/60'
+                        : 'border-red-500 bg-red-50/50 text-slate-900'
+                      : isDarkMode
+                        ? 'border-slate-700 bg-slate-950/60 text-slate-100 placeholder:text-slate-600 focus:border-sky-400'
+                        : 'border-slate-200 bg-slate-50 text-slate-900 focus:border-blue-600'
                   }`}
                 />
               </div>
 
-              <p className="text-[11px] leading-5 text-slate-500">
+              <p className={`text-[11px] leading-5 ${
+                isDarkMode
+                  ? 'text-slate-500'
+                  : 'text-slate-500'
+              }`}>
                 {c.privacy}
               </p>
 
@@ -649,7 +848,11 @@ export const ContactConsultationPage: React.FC = () => {
         </section>
       </main>
 
-      <footer className="relative z-10 border-t border-slate-900 py-6 text-center text-xs text-slate-500">
+      <footer className={`relative z-10 border-t py-6 text-center text-xs ${
+        isDarkMode
+          ? 'border-slate-900 text-slate-500'
+          : 'border-slate-200 text-slate-500'
+      }`}>
         © 2026 SAOLATEK · {c.footer}
       </footer>
     </div>

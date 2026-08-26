@@ -7,6 +7,7 @@ import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { register, login, googleLogin, refresh, logout, me, forgotPassword, resetPassword } from './controllers/authController';
 import { getProjectMembers, addProjectMember, updateProjectMemberRole, removeProjectMember } from './controllers/memberController';
+import { clearMeasurements, createMeasurement, deleteMeasurement, listMeasurements, updateMeasurement } from './controllers/measurementController';
 import { authenticateToken, optionalAuth, requireProjectRole, AuthRequest } from './middlewares/authMiddleware';
 import { translateTileset } from './utils/translator';
 import { parseAndUnifyCoordinates } from './utils/coordinateConverter';
@@ -64,6 +65,12 @@ app.get('/api/projects/:id/members', authenticateToken, requireProjectRole('VIEW
 app.post('/api/projects/:id/members', authenticateToken, requireProjectRole('OWNER'), addProjectMember);
 app.patch('/api/projects/:id/members/:userId', authenticateToken, requireProjectRole('OWNER'), updateProjectMemberRole);
 app.delete('/api/projects/:id/members/:userId', authenticateToken, requireProjectRole('OWNER'), removeProjectMember);
+
+app.get('/api/projects/:projectId/measurements', optionalAuth, requireProjectRole('VIEWER'), listMeasurements);
+app.post('/api/projects/:projectId/measurements', authenticateToken, requireProjectRole('EDITOR'), createMeasurement);
+app.patch('/api/projects/:projectId/measurements/:measurementId', authenticateToken, requireProjectRole('EDITOR'), updateMeasurement);
+app.delete('/api/projects/:projectId/measurements/:measurementId', authenticateToken, requireProjectRole('EDITOR'), deleteMeasurement);
+app.delete('/api/projects/:projectId/measurements', authenticateToken, requireProjectRole('EDITOR'), clearMeasurements);
 
 // ─── Pipeline State ────────────────────────────────────────────────────────
 // Tracking trạng thái xử lý ngầm để frontend biết được tiến độ

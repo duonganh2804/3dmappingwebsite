@@ -616,34 +616,34 @@ export const AdminLeadsModal: React.FC<
       className={
         isPage
           ? 'flex min-h-full w-full flex-col font-sans'
-          : 'fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-4 font-sans backdrop-blur-[2px]'
+          : 'fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-0 font-sans backdrop-blur-[2px] sm:p-4'
       }
     >
       <div
         className={
           isPage
             ? 'flex min-h-[calc(100vh-104px)] w-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-[#f7f9fc] shadow-sm'
-            : 'flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-[#f7f9fc] shadow-[0_24px_70px_rgba(15,23,42,.18)]'
+            : 'flex h-dvh max-h-dvh w-full max-w-7xl flex-col overflow-hidden border border-slate-200 bg-[#f7f9fc] shadow-[0_24px_70px_rgba(15,23,42,.18)] sm:h-auto sm:max-h-[92vh] sm:rounded-2xl'
         }
       >
-        <div className="flex flex-col gap-4 border-b border-slate-200 bg-white px-6 py-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 text-blue-600">
+        <div className="flex flex-col gap-3 border-b border-slate-200 bg-white px-3 py-3 sm:px-6 sm:py-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex min-w-0 items-start gap-2.5 sm:items-center sm:gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 text-blue-600">
               <Users size={19} />
             </div>
 
-            <div>
-              <h3 className="text-lg font-extrabold tracking-tight text-slate-900">
+            <div className="min-w-0 flex-1">
+              <h3 className="text-base font-extrabold leading-5 tracking-tight text-slate-900 sm:text-lg sm:leading-normal">
                 Quản lý thông tin khách hàng
               </h3>
-              <p className="font-mono text-xs text-slate-500">
+              <p className="mt-1 text-[11px] leading-4 text-slate-500 sm:mt-0 sm:font-mono sm:text-xs">
                 Tài khoản · Đăng ký Demo · Liên hệ tư vấn
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          <div className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 md:flex md:w-auto md:flex-wrap">
+            <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
               Tổng khách hàng:{' '}
               <strong className="text-slate-900">
                 {uniqueCustomers.length}
@@ -654,7 +654,7 @@ export const AdminLeadsModal: React.FC<
               type="button"
               onClick={exportCustomerData}
               disabled={uniqueCustomers.length === 0}
-              className="inline-flex items-center gap-2 rounded-lg border border-emerald-600 bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 sm:px-3.5"
               title="Xuất file Excel (.xlsx)"
             >
               <Download size={15} />
@@ -664,7 +664,7 @@ export const AdminLeadsModal: React.FC<
             <button
               type="button"
               onClick={loadData}
-              className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+              className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
               title="Làm mới"
             >
               <RefreshCw
@@ -694,11 +694,11 @@ export const AdminLeadsModal: React.FC<
           </div>
         )}
 
-        <div className="flex flex-wrap gap-2 border-b border-slate-200 bg-white px-6 pt-4">
+        <div className="flex flex-nowrap gap-1 overflow-x-auto border-b border-slate-200 bg-white px-3 pt-2 sm:gap-2 sm:px-6 sm:pt-4">
           <button
             type="button"
             onClick={() => setActiveTab('ACCOUNTS')}
-            className={`inline-flex items-center gap-2 rounded-t-xl border-x border-t px-4 py-2.5 text-xs font-bold transition ${
+            className={`inline-flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-t-lg border-x border-t px-3 py-2 text-xs font-bold transition sm:gap-2 sm:rounded-t-xl sm:px-4 sm:py-2.5 ${
               activeTab === 'ACCOUNTS'
                 ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
                 : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-900'
@@ -714,7 +714,7 @@ export const AdminLeadsModal: React.FC<
           <button
             type="button"
             onClick={() => setActiveTab('DEMO')}
-            className={`inline-flex items-center gap-2 rounded-t-xl border-x border-t px-4 py-2.5 text-xs font-bold transition ${
+            className={`inline-flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-t-lg border-x border-t px-3 py-2 text-xs font-bold transition sm:gap-2 sm:rounded-t-xl sm:px-4 sm:py-2.5 ${
               activeTab === 'DEMO'
                 ? 'border-blue-300 bg-blue-50 text-blue-700'
                 : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-900'
@@ -732,7 +732,7 @@ export const AdminLeadsModal: React.FC<
             onClick={() =>
               setActiveTab('CONSULTATION')
             }
-            className={`inline-flex items-center gap-2 rounded-t-xl border-x border-t px-4 py-2.5 text-xs font-bold transition ${
+            className={`inline-flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-t-lg border-x border-t px-3 py-2 text-xs font-bold transition sm:gap-2 sm:rounded-t-xl sm:px-4 sm:py-2.5 ${
               activeTab === 'CONSULTATION'
                 ? 'border-cyan-300 bg-cyan-50 text-cyan-700'
                 : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-900'
@@ -746,9 +746,9 @@ export const AdminLeadsModal: React.FC<
           </button>
         </div>
 
-        <div className="flex flex-col gap-3 border-b border-slate-200 bg-[#f8fafc] px-6 py-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-2 border-b border-slate-200 bg-[#f8fafc] px-3 py-3 sm:px-6 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-1 flex-wrap items-center gap-2">
-            <div className="relative min-w-[250px] flex-1 md:max-w-md">
+            <div className="relative w-full min-w-0 flex-1 md:max-w-md">
               <Search
                 size={14}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
@@ -807,7 +807,7 @@ export const AdminLeadsModal: React.FC<
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-grow grid-cols-1 gap-6 overflow-y-auto p-6 lg:grid-cols-12">
+        <div className="grid min-h-0 flex-grow grid-cols-1 gap-3 overflow-y-auto p-3 sm:gap-6 sm:p-6 lg:grid-cols-12">
           {activeTab === 'ACCOUNTS' ? (
             <>
               <div
@@ -833,7 +833,7 @@ export const AdminLeadsModal: React.FC<
                       onClick={() =>
                         setSelectedAccount(account)
                       }
-                      className={`flex w-full items-center justify-between gap-4 rounded-2xl border p-4 text-left transition ${
+                      className={`flex w-full flex-col items-stretch gap-3 rounded-xl border p-3 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:rounded-2xl sm:p-4 ${
                         selectedAccount?.id === account.id
                           ? 'border-emerald-300 bg-emerald-50'
                           : 'border-slate-200 bg-white hover:border-blue-300 hover:shadow-sm'
@@ -844,7 +844,7 @@ export const AdminLeadsModal: React.FC<
                           {account.fullName || account.email}
                         </div>
                         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 font-mono text-xs text-slate-500">
-                          <span>{account.email}</span>
+                          <span className="min-w-0 break-all">{account.email}</span>
                           <span className="text-emerald-600">
                             {account.authProvider === 'GOOGLE'
                               ? 'Google'
@@ -853,11 +853,11 @@ export const AdminLeadsModal: React.FC<
                         </div>
                       </div>
 
-                      <div className="flex-shrink-0 text-right">
+                      <div className="flex shrink-0 items-center justify-between gap-3 text-left sm:block sm:text-right">
                         <div className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 font-mono text-[9px] font-bold text-slate-600">
                           USER
                         </div>
-                        <div className="mt-2 font-mono text-[10px] text-slate-400">
+                        <div className="font-mono text-[10px] text-slate-400 sm:mt-2">
                           {dateText(account.createdAt)}
                         </div>
                       </div>
@@ -967,7 +967,7 @@ export const AdminLeadsModal: React.FC<
                       onClick={() =>
                         setSelectedLead(lead)
                       }
-                      className={`flex cursor-pointer items-start justify-between gap-4 rounded-2xl border p-4 transition-all ${
+                      className={`flex cursor-pointer flex-col items-stretch gap-3 rounded-xl border p-3 transition-all sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:rounded-2xl sm:p-4 ${
                         selectedLead?.id === lead.id
                           ? 'border-blue-300 bg-blue-50'
                           : 'border-slate-200 bg-white hover:border-blue-300 hover:shadow-sm'
@@ -993,7 +993,7 @@ export const AdminLeadsModal: React.FC<
                         </div>
 
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-slate-500">
-                          <span>{lead.email}</span>
+                          <span className="min-w-0 break-all">{lead.email}</span>
 
                           {lead.company && (
                             <span>🏢 {lead.company}</span>
@@ -1019,7 +1019,7 @@ export const AdminLeadsModal: React.FC<
                         </p>
                       </div>
 
-                      <div className="flex-shrink-0 space-y-2 text-right">
+                      <div className="flex shrink-0 items-center justify-between gap-3 text-left sm:block sm:space-y-2 sm:text-right">
                         <div className="font-mono text-[10px] text-slate-400">
                           {dateText(lead.createdAt)}
                         </div>
@@ -1035,7 +1035,7 @@ export const AdminLeadsModal: React.FC<
                               );
                             }
                           }}
-                          className="rounded p-1 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                          className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-600 sm:h-auto sm:w-auto sm:p-1"
                           title="Xóa"
                         >
                           <Trash2 size={14} />
@@ -1076,7 +1076,7 @@ export const AdminLeadsModal: React.FC<
                       <span className="block font-mono text-[10px] uppercase text-slate-400">
                         Email
                       </span>
-                      <span className="text-sm font-bold text-blue-600">
+                      <span className="break-all text-sm font-bold text-blue-600">
                         {selectedLead.email}
                       </span>
                     </div>

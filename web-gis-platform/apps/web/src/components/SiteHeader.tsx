@@ -75,18 +75,12 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
     zh: '中文',
   };
 
-  const accountRoute = isAuthenticated ? '/dashboard' : '/login';
-
   const openAccount = () => {
     if (!isAuthenticated) {
       navigate('/login');
       return;
     }
-
-    // Đã đăng nhập:
-    // - có Demo access -> openDemo() đưa vào project Demo
-    // - chưa có Demo access -> openDemo() đưa sang /book-demo
-    openDemo();
+    navigate('/dashboard');
   };
 
   const logoutLabel: Record<Language, string> = {

@@ -3,7 +3,6 @@ import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, X, ShieldAlert, Loader2, ArrowLeft } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
 import { useAuthStore, type UserProfile } from '../store/useAuthStore';
-import { fetchDemoAccess } from '../services/api';
 import logoImg from '../assets/logo.webp';
 
 export const LoginPage: React.FC = () => {
@@ -23,16 +22,8 @@ export const LoginPage: React.FC = () => {
       return;
     }
 
-    // Login xuất phát từ nút Demo:
-    // - đã đăng ký Demo -> vào Dashboard để tự chọn Demo Showcase
-    // - chưa đăng ký    -> mở Book Demo
-    const demoAccess = await fetchDemoAccess();
-
-    if (demoAccess.success && demoAccess.hasAccess) {
-      navigate('/dashboard', { replace: true });
-      return;
-    }
-
+    // Demo intent always continues through Book Demo. Its guard owns the
+    // entitlement check and redirects existing Demo accounts to the Viewer.
     navigate('/book-demo', { replace: true });
   };
 

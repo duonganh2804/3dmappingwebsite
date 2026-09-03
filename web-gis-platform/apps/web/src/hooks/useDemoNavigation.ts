@@ -73,9 +73,10 @@ export const useDemoNavigation = () => {
        */
       if (
         demoAccess.success &&
-        demoAccess.hasAccess
+        demoAccess.hasAccess &&
+        demoAccess.demoProjectId
       ) {
-        navigate('/dashboard?tab=demo');
+        navigate(`/viewer/${demoAccess.demoProjectId}`);
 
         return;
       }

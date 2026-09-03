@@ -1,6 +1,7 @@
 /**
- * PotreeSidebar — SAOLATEK visual refresh
+ * PotreeSidebar — SAOLATEK engineering/GIS visual refresh
  * UI-only redesign. Functional props / handlers are intentionally preserved.
+ * Dense inspector-style layout: less dashboard/card-like, more GIS/CAD tooling.
  */
 import React, { useEffect, useState } from 'react';
 import {
@@ -15,6 +16,7 @@ import {
   MapPin,
   Navigation as NavIcon,
   Settings2,
+  ScanSearch,
   Moon,
   MinusCircle,
   Sun,
@@ -89,6 +91,8 @@ interface PotreeSidebarProps {
     view: 'L' | 'R' | 'F' | 'B' | 'T' | 'D'
   ) => void;
   onNavigationAction?: (action: 'earth' | 'fps' | 'orbit' | 'heli' | 'compass' | 'anim') => void;
+  isZoomAreaSelecting?: boolean;
+  onToggleZoomArea?: () => void;
   isFocusPicking?: boolean;
   isReturningFocusOrigin?: boolean;
   onToggleFocusPick?: () => void;
@@ -117,10 +121,6 @@ interface PotreeSidebarProps {
   onSelectOrbitTarget?: () => void;
   onStartOrbitTarget?: () => void;
   onStopOrbitTarget?: () => void;
-
-  isOptimizerOpen: boolean;
-  onToggleOptimizer: () => void;
-  showOptimizerControl?: boolean;
 
   showModel: boolean;
   setShowModel: (v: boolean) => void;
@@ -410,6 +410,83 @@ const viewerStyle = `
     background: var(--vs-bg-soft);
   }
 
+  .saolatek-viewer-sidebar {
+    width: min(86vw, 292px);
+    height: 100%;
+    overscroll-behavior: contain;
+  }
+
+  .viewer-sidebar-scroll {
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+  }
+
+  .viewer-sidebar-toggle-icon {
+    display: none;
+  }
+
+  @media (min-width: 64rem) {
+    .saolatek-viewer-sidebar {
+      position: relative !important;
+      width: clamp(260px, 21vw, 320px);
+      flex: 0 0 clamp(260px, 21vw, 320px);
+      transition-property: width, flex-basis, transform;
+    }
+
+    .saolatek-viewer-sidebar[data-open='false'] {
+      position: absolute !important;
+    }
+  }
+
+  @media (max-width: 63.999rem) {
+    .saolatek-viewer-sidebar {
+      z-index: 50 !important;
+      box-shadow: 18px 0 44px rgba(2, 6, 23, .42);
+    }
+
+    .viewer-sidebar-toggle {
+      width: 40px !important;
+      height: 48px !important;
+    }
+
+    .saolatek-viewer-sidebar[data-open='false'] .viewer-sidebar-toggle {
+      width: auto !important;
+      min-width: 104px;
+      gap: 7px;
+      padding-inline: 12px;
+    }
+
+    .saolatek-viewer-sidebar[data-open='false'] .viewer-sidebar-toggle-label {
+      display: inline;
+    }
+
+    .saolatek-viewer-sidebar[data-open='false'] .viewer-sidebar-toggle-icon {
+      display: block;
+    }
+
+    .viewer-slider {
+      min-height: 40px;
+      touch-action: none;
+    }
+
+  }
+
+  @media (max-width: 47.999rem) {
+    .viewer-sidebar-toggle,
+    .saolatek-viewer-sidebar[data-open='false'] .viewer-sidebar-toggle {
+      width: 44px !important;
+      min-width: 44px;
+      height: 44px !important;
+      gap: 0;
+      padding-inline: 0;
+    }
+
+    .saolatek-viewer-sidebar[data-open='false'] .viewer-sidebar-toggle-label,
+    .saolatek-viewer-sidebar[data-open='false'] .viewer-sidebar-toggle-icon {
+      display: none;
+    }
+  }
+
   .viewer-camera-key {
     border: 1px solid var(--vs-border-soft);
     border-radius: 9px;
@@ -433,52 +510,287 @@ const viewerStyle = `
     box-shadow: inset 0 0 0 1px rgba(14,165,233,.08);
   }
 
-  /* Calibration panel stays functional but follows the same light surface. */
-  html[data-saolatek-theme='light']
-    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80'] {
-    background: rgba(255,255,255,.96) !important;
-    border-color: rgba(148,163,184,.45) !important;
-    color: #475569 !important;
-    box-shadow: 0 18px 42px rgba(15,23,42,.14) !important;
+  /* ==============================================================
+     ENGINEERING / GIS DENSITY PASS
+     Visual-only overrides. Intentionally does not alter handlers,
+     layer state, camera behavior, measurements, clipping or loaders.
+     ============================================================== */
+
+  html[data-saolatek-theme='light'] .saolatek-viewer-sidebar {
+    --vs-bg: #f4f7fa;
+    --vs-bg-soft: #fbfcfd;
+    --vs-bg-strong: #ffffff;
+    --vs-surface: #ffffff;
+    --vs-surface-hover: #edf3f7;
+    --vs-segment: #e5edf3;
+    --vs-border: #b9c6d2;
+    --vs-border-soft: #d7e0e7;
+    --vs-text: #1f2937;
+    --vs-text-soft: #526273;
+    --vs-muted: #748395;
+    --vs-accent: #0787bd;
+    --vs-accent-soft: rgba(7, 135, 189, .09);
+    --vs-danger: #d6425d;
+    --vs-shadow: 5px 0 18px rgba(15, 23, 42, .08);
   }
 
-  html[data-saolatek-theme='light']
-    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
-    [class~='bg-slate-950'] {
-    background: #f8fafc !important;
+  .saolatek-viewer-sidebar {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 
-  html[data-saolatek-theme='light']
-    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
-    [class~='bg-slate-900'] {
-    background: #ffffff !important;
+  .viewer-sidebar-scroll {
+    background: var(--vs-bg);
   }
 
-  html[data-saolatek-theme='light']
-    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
-    [class~='border-slate-900'],
-  html[data-saolatek-theme='light']
-    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
-    [class~='border-slate-800'] {
-    border-color: #dbe4ef !important;
+  .viewer-sidebar-scroll::-webkit-scrollbar {
+    width: 4px;
   }
 
-  html[data-saolatek-theme='light']
-    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
-    [class~='text-[var(--vs-text)]'],
-  html[data-saolatek-theme='light']
-    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
-    [class~='text-[var(--vs-text-soft)]'] {
-    color: #475569 !important;
+  .viewer-section-header {
+    min-height: 31px;
+    letter-spacing: .11em !important;
+    background: color-mix(in srgb, var(--vs-bg-soft) 92%, transparent);
   }
 
-  html[data-saolatek-theme='light']
-    [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
-    input {
-    background: #ffffff !important;
-    border-color: #cbd5e1 !important;
-    color: #0f172a !important;
+  .viewer-section-header:hover {
+    background: var(--vs-surface-hover);
   }
+
+  .viewer-section-shell {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+  }
+
+  .viewer-section-shell + .viewer-section-shell {
+    border-top: 1px solid var(--vs-border-soft);
+    padding-top: 11px;
+  }
+
+  .viewer-micro-title {
+    min-height: 20px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--vs-border-soft);
+    letter-spacing: .105em !important;
+    font-size: 9px !important;
+  }
+
+  .viewer-tool-card {
+    min-height: 48px;
+    gap: 4px;
+    border-radius: 5px;
+    border-color: var(--vs-border-soft);
+    background: var(--vs-surface);
+    box-shadow: none;
+    transform: none !important;
+  }
+
+  .viewer-tool-card:hover {
+    transform: none !important;
+    border-color: color-mix(in srgb, var(--vs-accent) 34%, var(--vs-border-soft));
+    box-shadow: inset 0 0 0 1px rgba(14,165,233,.035);
+  }
+
+  .viewer-tool-card.is-active {
+    border-color: color-mix(in srgb, var(--vs-accent) 56%, var(--vs-border-soft));
+    background: var(--vs-accent-soft);
+    box-shadow: inset 3px 0 0 var(--vs-accent);
+  }
+
+  .viewer-tool-card.is-danger {
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--vs-danger) 62%, transparent);
+  }
+
+  .viewer-tool-label {
+    font-size: 8.5px;
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+
+  .viewer-control-strip {
+    border-radius: 4px;
+  }
+
+  .viewer-segment {
+    padding-top: 6px !important;
+    padding-bottom: 6px !important;
+  }
+
+  .viewer-camera-key {
+    min-height: 29px;
+    border-radius: 4px;
+    box-shadow: none !important;
+  }
+
+  .viewer-quick-focus {
+    min-height: 34px;
+    padding: 7px 9px !important;
+    border-radius: 4px !important;
+    box-shadow: none;
+  }
+
+  .viewer-scene-row {
+    min-height: 31px;
+    border-radius: 3px !important;
+  }
+
+  .viewer-scene-row + div {
+    padding-bottom: 7px !important;
+  }
+
+  .viewer-heatmap-panel {
+    border-left: 2px solid rgba(249, 115, 22, .55);
+    padding-left: 9px;
+  }
+
+  .viewer-slider {
+    height: 2px;
+  }
+
+  .viewer-slider::-webkit-slider-thumb {
+    width: 11px;
+    height: 11px;
+    border-width: 2px;
+  }
+
+  .viewer-slider::-moz-range-thumb {
+    width: 11px;
+    height: 11px;
+  }
+
+  @media (max-width: 63.999rem) {
+    .viewer-slider::-webkit-slider-thumb {
+      width: 18px;
+      height: 18px;
+    }
+
+    .viewer-slider::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+    }
+  }
+
+  .viewer-slider-label,
+  .viewer-slider-value,
+  .viewer-check-label,
+  .viewer-scene-label {
+    font-size: 10.5px !important;
+  }
+
+  .viewer-sidebar-toggle {
+    border-radius: 0 5px 5px 0 !important;
+    box-shadow: 2px 2px 8px rgba(15, 23, 42, .12) !important;
+  }
+
+  @media (min-width: 64rem) {
+    .saolatek-viewer-sidebar {
+      width: clamp(276px, 20vw, 304px);
+      flex-basis: clamp(276px, 20vw, 304px);
+    }
+  }
+
+
+  .viewer-nav-mode-panel {
+    position: relative;
+    margin-top: 2px;
+    padding: 10px 0 9px;
+    border-top: 1px solid var(--vs-border-soft);
+    border-bottom: 1px solid var(--vs-border-soft);
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .viewer-nav-mode-panel::before {
+    content: '';
+    position: absolute;
+    left: -12px;
+    top: 10px;
+    bottom: 10px;
+    width: 2px;
+    border-radius: 999px;
+    background: var(--vs-accent);
+    opacity: .82;
+  }
+
+  .viewer-nav-mode-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--vs-text-soft);
+    font-size: 9px;
+    font-weight: 750;
+    letter-spacing: .11em;
+    text-transform: uppercase;
+  }
+
+  .viewer-nav-mode-status {
+    color: var(--vs-accent);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    white-space: nowrap;
+  }
+
+  .viewer-nav-primary,
+  .viewer-nav-action {
+    width: 100%;
+    border: 1px solid var(--vs-border-soft);
+    border-radius: 4px;
+    background: var(--vs-surface);
+    color: var(--vs-text-soft);
+    transition: border-color .14s ease, background .14s ease, color .14s ease;
+  }
+
+  .viewer-nav-primary {
+    min-height: 34px;
+    padding: 7px 10px;
+    font-size: 10px;
+    font-weight: 650;
+  }
+
+  .viewer-nav-action {
+    min-height: 31px;
+    padding: 6px 8px;
+    font-size: 9px;
+    font-weight: 650;
+  }
+
+  .viewer-nav-primary:hover,
+  .viewer-nav-action:hover {
+    border-color: rgba(14,165,233,.34);
+    background: var(--vs-surface-hover);
+    color: var(--vs-text);
+  }
+
+  .viewer-nav-primary.is-active,
+  .viewer-nav-action.is-active {
+    border-color: rgba(14,165,233,.44);
+    background: var(--vs-accent-soft);
+    color: var(--vs-accent);
+  }
+
+  .viewer-nav-action.is-danger {
+    border-color: rgba(244,63,94,.20);
+    color: var(--vs-danger);
+    background: transparent;
+  }
+
+  .viewer-nav-action.is-danger:hover {
+    border-color: rgba(244,63,94,.34);
+    background: rgba(244,63,94,.06);
+  }
+
+  .viewer-nav-hint {
+    border-left: 2px solid var(--vs-border-soft);
+    padding: 2px 0 2px 8px;
+    color: var(--vs-muted);
+    font-size: 9px;
+    line-height: 1.55;
+  }
+
 `
 
 function SliderRow({
@@ -505,10 +817,10 @@ function SliderRow({
   };
 }) {
   const stepButtonClass =
-    'flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[var(--vs-border)] bg-[var(--vs-panel)] text-xs font-bold text-[var(--vs-text-soft)] transition hover:border-sky-500/50 hover:bg-sky-500/10 hover:text-sky-500 disabled:cursor-not-allowed disabled:opacity-35';
+    'flex h-6 w-6 shrink-0 items-center justify-center rounded border border-[var(--vs-border)] bg-[var(--vs-surface)] text-xs font-bold text-[var(--vs-text-soft)] transition hover:border-sky-500/50 hover:bg-sky-500/10 hover:text-sky-500 disabled:cursor-not-allowed disabled:opacity-35';
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-3">
         <span className="viewer-slider-label text-[11px] font-medium">
           {label}
@@ -575,7 +887,7 @@ function SectionHeader({
     <button
       type="button"
       onClick={onToggle}
-      className="viewer-section-header group flex w-full items-center gap-2 border-b px-4 py-3 text-left text-[10px] font-bold uppercase tracking-[0.14em] transition"
+      className="viewer-section-header group flex w-full items-center gap-2 border-b px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-[0.12em] transition"
     >
       <ChevronRight
         size={11}
@@ -794,6 +1106,7 @@ const SIDEBAR_COPY = {
     navFly: 'Bay',
     navOrbit: 'Orbit',
     navHeli: 'Heli',
+    navZoomArea: 'Zoom vùng',
     navFocus: 'Focus',
     navProject: 'Dự án',
     navNorth: 'Bắc',
@@ -865,6 +1178,7 @@ const SIDEBAR_COPY = {
     navFly: 'Fly',
     navOrbit: 'Orbit',
     navHeli: 'Heli',
+    navZoomArea: 'Zoom Area',
     navFocus: 'Focus',
     navProject: 'Project',
     navNorth: 'North',
@@ -936,10 +1250,44 @@ const SIDEBAR_COPY = {
     navFly: '飞行',
     navOrbit: '环绕',
     navHeli: '直升机',
+    navZoomArea: '框选缩放',
     navFocus: '聚焦',
     navProject: '项目',
     navNorth: '北向',
     navCamera: '相机',
+  },
+} as const;
+
+const HEATMAP_COPY = {
+  vi: {
+    title: 'Heatmap',
+    on: 'Bật',
+    off: 'Tắt',
+    property: 'Thuộc tính',
+    elevationHeight: 'Cao độ / Chiều cao',
+    elevation: 'Độ cao',
+    gradientLabel: 'Dải màu cao độ liên tục từ xanh lam đến đỏ',
+    rangePending: 'Độ cao sẽ được tính tự động khi point cloud sẵn sàng.',
+  },
+  en: {
+    title: 'Heatmap',
+    on: 'ON',
+    off: 'OFF',
+    property: 'Property',
+    elevationHeight: 'Elevation / Height',
+    elevation: 'Elevation',
+    gradientLabel: 'Continuous elevation gradient from blue to red',
+    rangePending: 'Elevation will be calculated automatically when the point cloud is ready.',
+  },
+  zh: {
+    title: '热力图',
+    on: '开启',
+    off: '关闭',
+    property: '属性',
+    elevationHeight: '高程 / 高度',
+    elevation: '高程',
+    gradientLabel: '从蓝色到红色的连续高程渐变',
+    rangePending: '点云就绪后将自动计算高程。',
   },
 } as const;
 
@@ -970,6 +1318,8 @@ export function PotreeSidebar({
   isReturningFocusOrigin = false,
   onToggleFocusPick,
   navigationMode = 'earth',
+  isZoomAreaSelecting = false,
+  onToggleZoomArea,
   isCameraAnimating = false,
   flightHeight = 60,
   onFlightHeightChange,
@@ -994,8 +1344,6 @@ export function PotreeSidebar({
   onSelectOrbitTarget,
   onStartOrbitTarget,
   onStopOrbitTarget,
-  onToggleOptimizer,
-  isOptimizerOpen,
   showModel,
   setShowModel,
   showDom,
@@ -1056,6 +1404,7 @@ export function PotreeSidebar({
 }: PotreeSidebarProps) {
   const { currentLang } = useLanguage('vi');
   const c = SIDEBAR_COPY[currentLang];
+  const heatmapCopy = HEATMAP_COPY[currentLang];
 
   const [localIsOpen, setLocalIsOpen] =
     useState(true);
@@ -1353,13 +1702,12 @@ export function PotreeSidebar({
       label: c.navOrbit,
     },
     {
-      id: 'heli',
-      icon: getIconUrl(
-        'helicopter_controls.svg'
-      ),
-      title:
-        'Góc nhìn trực thăng (Helicopter)',
-      label: c.navHeli,
+      id: 'zoom-area',
+      icon: '',
+      isLucide: true,
+      title: 'Kéo khung để zoom vào vùng cần xem',
+      label: c.navZoomArea,
+      action: onToggleZoomArea,
     },
     {
       id: 'focus',
@@ -1436,13 +1784,14 @@ export function PotreeSidebar({
       <style>{viewerStyle}</style>
 
       <aside
-        className={`saolatek-viewer-sidebar absolute left-0 top-0 z-20 flex h-screen w-[292px] select-none flex-col border-r border-[var(--vs-border)] bg-[var(--vs-bg)] font-sans text-[var(--vs-text)] shadow-[var(--vs-shadow)] backdrop-blur-xl transition-transform duration-300 ease-in-out ${
+        data-open={isOpen}
+        className={`saolatek-viewer-sidebar absolute left-0 top-0 z-20 flex select-none flex-col border-r border-[var(--vs-border)] bg-[var(--vs-bg)] font-sans text-[var(--vs-text)] shadow-[var(--vs-shadow)] backdrop-blur-xl transition-transform duration-300 ease-in-out ${
           isOpen
             ? 'translate-x-0'
             : '-translate-x-full'
         }`}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-[var(--vs-border)] bg-[var(--vs-bg-soft)] px-4 py-3.5">
+        <div className="flex shrink-0 items-center justify-between border-b border-[var(--vs-border)] bg-[var(--vs-bg-soft)] px-3 py-2.5">
           <div className="flex min-w-0 flex-1 flex-col justify-center pr-2">
             <img
               src={logoImg}
@@ -1486,19 +1835,6 @@ export function PotreeSidebar({
                 <Moon size={14} />
               )}
             </button>
-
-            <button
-              type="button"
-              onClick={onToggleOptimizer}
-              title="Bộ tối ưu hóa dữ liệu 3D"
-              className={`rounded-lg border px-2.5 py-2 text-[9px] font-bold uppercase tracking-wide transition ${
-                isOptimizerOpen
-                  ? 'border-sky-500/45 bg-sky-500/10 text-sky-500'
-                  : 'border-[var(--vs-border)] bg-[var(--vs-surface)] text-[var(--vs-muted)] hover:border-sky-500/30 hover:bg-[var(--vs-surface-hover)] hover:text-[var(--vs-text)]'
-              }`}
-            >
-              {c.optimize}
-            </button>
           </div>
         </div>
 
@@ -1513,13 +1849,13 @@ export function PotreeSidebar({
           />
 
           {sections.tools && (
-            <div className="space-y-4 border-b border-[var(--vs-border-soft)] px-3.5 py-4">
+            <div className="space-y-3 border-b border-[var(--vs-border-soft)] px-3 py-3">
               <div className="viewer-section-shell space-y-3">
                 <MicroTitle>
                   {c.measurements}
                 </MicroTitle>
 
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-1.5">
                   {measureTools.map(
                     (tool, index) => {
                       const isClear =
@@ -1743,7 +2079,7 @@ export function PotreeSidebar({
                       <button
                         type="button"
                         key={tool.id}
-                        disabled={tool.id === 'focus' && isReturningFocusOrigin}
+                        disabled={(tool.id === 'focus' && isReturningFocusOrigin) || (tool.id === 'zoom-area' && !onToggleZoomArea)}
                         onClick={() => {
                           if (tool.action) {
                             tool.action();
@@ -1755,23 +2091,32 @@ export function PotreeSidebar({
                         className={`${baseToolButton} ${
                           ((tool.id === 'earth' || tool.id === 'fps' || tool.id === 'orbit' || tool.id === 'heli') && navigationMode === tool.id) ||
                           (tool.id === 'anim' && isCameraAnimating) ||
-                          (tool.id === 'focus' && (isFocusPicking || isReturningFocusOrigin))
+                          (tool.id === 'focus' && (isFocusPicking || isReturningFocusOrigin)) ||
+                          (tool.id === 'zoom-area' && isZoomAreaSelecting)
                             ? activeToolButton
                             : ''
                         } disabled:cursor-not-allowed disabled:opacity-40`}
                       >
-                        <img
-                          src={tool.icon}
-                          alt={tool.title}
-                          className="h-5 w-5 object-contain opacity-95"
-                          style={{
-                            filter: (((tool.id === 'earth' || tool.id === 'fps' || tool.id === 'orbit' || tool.id === 'heli') && navigationMode === tool.id) ||
-                              (tool.id === 'anim' && isCameraAnimating))
-                              || (tool.id === 'focus' && (isFocusPicking || isReturningFocusOrigin))
-                              ? activeIconFilter
-                              : neutralIconFilter,
-                          }}
-                        />
+                        {tool.id === 'zoom-area' ? (
+                          <ScanSearch
+                            size={20}
+                            aria-hidden="true"
+                            className={isZoomAreaSelecting ? 'text-sky-500' : 'text-[var(--vs-muted)]'}
+                          />
+                        ) : (
+                          <img
+                            src={tool.icon}
+                            alt={tool.title}
+                            className="h-5 w-5 object-contain opacity-95"
+                            style={{
+                              filter: (((tool.id === 'earth' || tool.id === 'fps' || tool.id === 'orbit' || tool.id === 'heli') && navigationMode === tool.id) ||
+                                (tool.id === 'anim' && isCameraAnimating))
+                                || (tool.id === 'focus' && (isFocusPicking || isReturningFocusOrigin))
+                                ? activeIconFilter
+                                : neutralIconFilter,
+                            }}
+                          />
+                        )}
                         <span className="viewer-tool-label">
                           {tool.label}
                         </span>
@@ -1780,27 +2125,33 @@ export function PotreeSidebar({
                   )}
                 </div>
 
+                {isZoomAreaSelecting && (
+                  <div className="border-l-2 border-sky-500 px-2.5 py-1.5 text-[9px] leading-4 text-[var(--vs-text-soft)]">
+                    Kéo chuột trên bản đồ để khoanh vùng cần zoom · Esc để hủy
+                  </div>
+                )}
+
                 {navigationMode === 'orbit' && (
-                  <div className="sticky bottom-2 z-20 space-y-2.5 rounded-md border border-sky-500/30 bg-[var(--vs-panel)]/95 p-2.5 shadow-lg backdrop-blur">
-                    <div className="flex items-center justify-between text-[9px] font-bold uppercase tracking-[0.12em] text-sky-500">
+                  <div className="viewer-nav-mode-panel space-y-2.5">
+                    <div className="viewer-nav-mode-head">
                       <span>Orbit</span>
                       {orbitTargetSelected
-                        ? <span>Sẵn sàng bay</span>
+                        ? <span className="viewer-nav-mode-status">Sẵn sàng bay</span>
                         : isSelectingOrbitTarget
-                          ? <span>Đang tạo vòng</span>
+                          ? <span className="viewer-nav-mode-status">Đang tạo vòng</span>
                           : null}
                     </div>
 
                     <button
                       type="button"
                       onClick={onSelectOrbitTarget}
-                      className={`${baseToolButton} w-full flex-row justify-center gap-2 ${isSelectingOrbitTarget ? activeToolButton : ''}`}
+                      className={`viewer-nav-primary ${isSelectingOrbitTarget ? 'is-active' : ''}`}
                     >
                       {orbitTargetSelected ? 'Chọn lại tâm + bán kính' : 'Chọn tâm + bán kính'}
                     </button>
 
                     {isSelectingOrbitTarget && (
-                      <div className="rounded-md border border-sky-500/20 bg-sky-500/[0.05] px-2 py-1.5 text-[9px] leading-4 text-[var(--vs-text-soft)]">
+                      <div className="viewer-nav-hint">
                         <div>1. Click điểm muốn focus.</div>
                         <div>2. Di chuột để xem vòng → click mép vòng để chốt bán kính.</div>
                         <div>3. Chỉnh Độ cao bay → vòng preview nâng/hạ realtime.</div>
@@ -1858,7 +2209,7 @@ export function PotreeSidebar({
                       <button
                         type="button"
                         onClick={onStartOrbitTarget}
-                        className={`${baseToolButton} ${activeToolButton} w-full flex-row justify-center gap-2 font-semibold`}
+                        className="viewer-nav-primary is-active"
                       >
                         ▶ Bắt đầu bay
                       </button>
@@ -1868,34 +2219,34 @@ export function PotreeSidebar({
                       <button
                         type="button"
                         onClick={onStopOrbitTarget}
-                        className={`${baseToolButton} w-full flex-row justify-center gap-2`}
+                        className="viewer-nav-primary"
                       >
                         ■ Dừng bay
                       </button>
                     )}
 
-                    <p className="text-[9px] leading-4 text-[var(--vs-muted)]">
+                    <p className="viewer-nav-hint">
                       Vòng bay giữ nguyên khi dừng. Khi đang bay, lăn chuột để co/giãn vòng; kéo camera để dừng.
                     </p>
                   </div>
                 )}
 
                 {navigationMode === 'fps' && (
-                  <div className="space-y-3 rounded-md border border-sky-500/20 bg-sky-500/[0.04] p-2.5">
-                    <div className="flex items-center justify-between text-[9px] font-bold uppercase tracking-[0.12em] text-sky-500">
+                  <div className="viewer-nav-mode-panel space-y-2.5">
+                    <div className="viewer-nav-mode-head">
                       <span>Bay</span>
-                      {flightPathPointCount > 0 && <span>{flightPathPointCount} waypoint</span>}
+                      {flightPathPointCount > 0 && <span className="viewer-nav-mode-status">{flightPathPointCount} waypoint</span>}
                     </div>
                     <button
                       type="button"
                       onClick={onDrawFlightPath}
                       disabled={isDrawingFlightPath}
-                      className={`${baseToolButton} w-full flex-row justify-center gap-2 ${isDrawingFlightPath ? activeToolButton : ''} disabled:cursor-not-allowed`}
+                      className={`viewer-nav-primary ${isDrawingFlightPath ? 'is-active' : ''} disabled:cursor-not-allowed disabled:opacity-45`}
                     >
                       {flightPathPointCount >= 2 ? 'Vẽ lại đường bay' : 'Vẽ đường bay'}
                     </button>
                     {isDrawingFlightPath && (
-                      <p className="text-[9px] leading-4 text-[var(--vs-text-soft)]">Click waypoint · Nhấp đúp để hoàn tất · Có thể zoom / xoay / pan khi vẽ</p>
+                      <p className="viewer-nav-hint">Click waypoint · Nhấp đúp để hoàn tất · Có thể zoom / xoay / pan khi vẽ</p>
                     )}
                     <SliderRow
                       label="Độ cao bay"
@@ -1927,18 +2278,18 @@ export function PotreeSidebar({
                     />
                     {flightPathPointCount >= 2 && (
                       <div className="grid grid-cols-2 gap-2">
-                        <button type="button" onClick={onStartFlightPath} disabled={flightPathStatus === 'flying'} className={`${baseToolButton} disabled:cursor-not-allowed disabled:opacity-40`}>▶ Bắt đầu</button>
-                        <button type="button" onClick={onReplayFlightPath} className={baseToolButton}>↻ Bay lại</button>
+                        <button type="button" onClick={onStartFlightPath} disabled={flightPathStatus === 'flying'} className="viewer-nav-action disabled:cursor-not-allowed disabled:opacity-40">▶ Bắt đầu</button>
+                        <button type="button" onClick={onReplayFlightPath} className="viewer-nav-action">↻ Bay lại</button>
                         <button
                           type="button"
                           onClick={flightPathStatus === 'paused' ? onResumeFlightPath : onPauseFlightPath}
                           disabled={flightPathStatus === 'idle'}
-                          className={`${baseToolButton} disabled:cursor-not-allowed disabled:opacity-40`}
+                          className="viewer-nav-action disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           {flightPathStatus === 'paused' ? '▶ Tiếp tục' : '⏸ Tạm dừng'}
                         </button>
-                        <button type="button" onClick={onStopFlightPath} disabled={flightPathStatus === 'idle'} className={`${baseToolButton} disabled:cursor-not-allowed disabled:opacity-40`}>■ Dừng</button>
-                        <button type="button" onClick={onDeleteFlightPath} className={`${baseToolButton} ${dangerToolButton} col-span-2`}>Xóa đường</button>
+                        <button type="button" onClick={onStopFlightPath} disabled={flightPathStatus === 'idle'} className="viewer-nav-action disabled:cursor-not-allowed disabled:opacity-40">■ Dừng</button>
+                        <button type="button" onClick={onDeleteFlightPath} className="viewer-nav-action is-danger col-span-2">Xóa đường</button>
                       </div>
                     )}
                   </div>
@@ -2018,12 +2369,12 @@ export function PotreeSidebar({
           />
 
           {sections.appearance && (
-            <div className="space-y-4 border-b border-[var(--vs-border-soft)] px-3.5 py-4">
-              <div className="viewer-section-shell space-y-3">
+            <div className="space-y-3 border-b border-[var(--vs-border-soft)] px-3 py-3">
+              <div className="viewer-section-shell viewer-heatmap-panel space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <Flame size={13} className="text-orange-400" aria-hidden="true" />
-                    <MicroTitle>Heatmap</MicroTitle>
+                    <MicroTitle>{heatmapCopy.title}</MicroTitle>
                   </div>
                   <button
                     type="button"
@@ -2035,28 +2386,28 @@ export function PotreeSidebar({
                       : 'border-[var(--vs-border)] bg-[var(--vs-bg-soft)] text-[var(--vs-muted)] hover:text-[var(--vs-text)]'
                     }`}
                   >
-                    {heatmapEnabled ? 'On' : 'Off'}
+                    {heatmapEnabled ? heatmapCopy.on : heatmapCopy.off}
                   </button>
                 </div>
 
                 <fieldset disabled={!heatmapEnabled} className="space-y-3 disabled:opacity-45">
                   <label className="block space-y-1.5 text-[10px] text-[var(--vs-text-soft)]">
-                    <span>Thuộc tính</span>
+                    <span>{heatmapCopy.property}</span>
                     <select
                       value={heatmapProperty}
                       onChange={event => onHeatmapPropertyChange(event.target.value as 'elevation')}
                       className="w-full rounded-md border border-[var(--vs-border)] bg-[var(--vs-surface)] px-2.5 py-2 text-[10px] text-[var(--vs-text)] outline-none focus-visible:border-sky-500"
                     >
-                      <option value="elevation">Elevation / Height</option>
+                      <option value="elevation">{heatmapCopy.elevationHeight}</option>
                     </select>
                   </label>
 
                   {heatmapRangeAvailable && <div className="space-y-2">
-                    <MicroTitle>Độ cao</MicroTitle>
+                    <MicroTitle>{heatmapCopy.elevation}</MicroTitle>
                     <div>
                       <div
                         className="h-2.5 rounded-full border border-white/10 bg-[linear-gradient(90deg,#0066ff_0%,#00e5ff_20%,#00d45a_40%,#ffe600_60%,#ff8c00_80%,#ff2b20_100%)]"
-                        aria-label="Continuous elevation gradient from blue to red"
+                        aria-label={heatmapCopy.gradientLabel}
                       />
                       <div className="mt-1.5 flex justify-between text-[9px] tabular-nums text-[var(--vs-muted)]">
                         <span>0.0 m</span>
@@ -2065,7 +2416,7 @@ export function PotreeSidebar({
                     </div>
                   </div>}
                   {!heatmapRangeAvailable && (
-                    <p className="text-[9px] leading-4 text-amber-400">Độ cao sẽ được tính tự động khi point cloud sẵn sàng.</p>
+                    <p className="text-[9px] leading-4 text-amber-400">{heatmapCopy.rangePending}</p>
                   )}
                 </fieldset>
               </div>
@@ -2301,7 +2652,7 @@ export function PotreeSidebar({
           />
 
           {sections.scene && (
-            <div className="space-y-3 border-b border-[var(--vs-border-soft)] px-3.5 py-4">
+            <div className="space-y-2.5 border-b border-[var(--vs-border-soft)] px-3 py-3">
               <div className="space-y-1">
                 <button
                   type="button"
@@ -2482,12 +2833,18 @@ export function PotreeSidebar({
               ? 'Thu gọn menu'
               : 'Mở rộng menu'
           }
-          className="group absolute left-full top-1/2 flex h-16 w-6 -translate-y-1/2 items-center justify-center rounded-r-lg border border-l-0 border-[var(--vs-border)] bg-[#081321]/95 text-slate-600 shadow-lg backdrop-blur-xl transition hover:bg-slate-900 hover:text-[var(--vs-text)] focus-visible:outline-none"
+          className="viewer-sidebar-toggle group absolute left-full top-1/2 flex h-16 w-6 -translate-y-1/2 items-center justify-center rounded-r-lg border border-l-0 border-[var(--vs-border)] bg-[#081321]/95 text-slate-400 shadow-lg backdrop-blur-xl transition hover:bg-slate-900 hover:text-[var(--vs-text)] focus-visible:outline-none"
         >
           {isOpen ? (
             <ChevronLeft size={13} />
           ) : (
-            <ChevronRight size={13} />
+            <>
+              <Wrench className="viewer-sidebar-toggle-icon" size={16} aria-hidden="true" />
+              <span className="viewer-sidebar-toggle-label hidden whitespace-nowrap text-[11px] font-bold">
+                {c.tools}
+              </span>
+              <ChevronRight size={13} aria-hidden="true" />
+            </>
           )}
         </button>
       </aside>

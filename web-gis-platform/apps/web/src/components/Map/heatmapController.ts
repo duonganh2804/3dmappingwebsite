@@ -121,6 +121,25 @@ function cleanRangeOutliers(samples: VerticalExtent[]) {
   };
 }
 
+function selectCredibleUpperSamples(samples: VerticalExtent[]) {
+  const widths = samples.map(sample => sample.high - sample.low);
+  const widthStats = mad(widths);
+  const K = 3.5;
+  const rejectedReasons = { coarseInterval: 0, rootOrSphere: 0, shallowTile: 0 };
+  const credible = samples.filter((sample, index) => {
+    const coarseInterval = widthStats.scaledMad > EPSILON
+      ? widths[index] > widthStats.median + K * widthStats.scaledMad
+      : widthStats.median > EPSILON && widths[index] > widthStats.median * 4;
+    const rootOrSphere = sample.quality === 'root' || sample.quality === 'sphere' || sample.type === 'sphere';
+    const shallowTile = sample.quality === 'tile' && sample.depth < 2;
+    if (coarseInterval) rejectedReasons.coarseInterval += 1;
+    if (rootOrSphere) rejectedReasons.rootOrSphere += 1;
+    if (shallowTile) rejectedReasons.shallowTile += 1;
+    return !coarseInterval && !rootOrSphere && !shallowTile;
+  });
+  return { samples: credible, rejectedReasons };
+}
+
 function continuousColorConditions(value: string, min: number, max: number, alpha: number): Array<[string, string]> {
   const safeMax = max > min ? max : min + EPSILON;
   const span = safeMax - min;
@@ -197,7 +216,7 @@ export class HeatmapController {
     return this.apply();
   }
 
-  autoRange(force = false): { min: number; max: number } | null {
+  autoRange(force = false, viewer?: Cesium.Viewer | null): { min: number; max: number } | null {
     if (!this.origin || !this.up) return null;
     const allSamples: VerticalExtent[] = [];
     for (const target of this.targets) {
@@ -236,10 +255,39 @@ export class HeatmapController {
       cleanup.removedLowOutliers > 0 || cleanup.removedHighOutliers > 0;
     const fallbackEstimate = hasOutliers ? estimateRange(cleanup.samples) : null;
     const fallbackSanity = fallbackEstimate ? rangeSanity(cleanup.samples, fallbackEstimate) : null;
-    const useFallback = Boolean(fallbackEstimate && (hasOutliers || !primarySanity.passed));
-    const finalEstimate = useFallback ? fallbackEstimate! : primary;
-    const { ground, top, span } = finalEstimate;
-    if (useFallback && fallbackSanity && fallbackSanity.above80Percent >= 0.8) {
+    // Lower and upper bounds have different failure modes. Keep the existing
+    // robust cleanup for ground, but never reject a detailed upper bound merely
+    // because its high value is far above the majority (a tower/stack is sparse).
+    const useGroundFallback = Boolean(fallbackEstimate && (
+      cleanup.removedCoarseIntervals > 0 || cleanup.removedLowOutliers > 0 || !primarySanity.passed
+    ));
+    const ground = useGroundFallback ? fallbackEstimate!.ground : primary.ground;
+    const upperCandidatePool = valid.filter(sample =>
+      sample.type !== 'sphere'
+      && sample.quality !== 'root'
+      && (sample.quality !== 'tile' || sample.depth >= 2)
+    );
+    const upperSelection = selectCredibleUpperSamples(upperCandidatePool.length > 0 ? upperCandidatePool : selected);
+    const credibleHighs = upperSelection.samples.map(sample => sample.high).sort((a, b) => a - b);
+    const credibleMax = credibleHighs.length > 0 ? credibleHighs[credibleHighs.length - 1] : NaN;
+    const upperEnvelopeExtended = Number.isFinite(credibleMax) && credibleMax > primary.top + EPSILON;
+    let top = Math.max(primary.top, Number.isFinite(credibleMax) ? credibleMax : primary.top);
+    if (upperEnvelopeExtended) top += (top - ground) * 0.03;
+
+    const visibleBefore = this.sampleVisibleHeights(viewer, ground, top - ground);
+    if (
+      visibleBefore.count >= 8
+      && visibleBefore.saturationAbove95Percent >= 0.15
+      && Number.isFinite(visibleBefore.p98)
+      && ground + visibleBefore.p98 > top
+    ) {
+      top = ground + visibleBefore.p98 * 1.03;
+    }
+    const span = top - ground;
+    const finalEstimate = { ground, top, span };
+    const finalSanity = rangeSanity(selected, finalEstimate);
+    const visibleAfter = this.summarizeVisibleHeights(visibleBefore.values, span);
+    if (useGroundFallback && fallbackSanity && fallbackSanity.above80Percent >= 0.8 && !upperEnvelopeExtended) {
       console.error('[Heatmap] Elevation bounds remain top-skewed after robust fallback; original RGB retained.');
       return null;
     }
@@ -274,7 +322,7 @@ export class HeatmapController {
           : null,
         primary: { ...primary, sanity: primarySanity },
         fallback: {
-          used: useFallback,
+          usedForGround: useGroundFallback,
           removedCoarseIntervals: cleanup.removedCoarseIntervals,
           removedLowOutliers: cleanup.removedLowOutliers,
           removedHighOutliers: cleanup.removedHighOutliers,
@@ -286,13 +334,29 @@ export class HeatmapController {
           ? 'P05 after conservative 3xIQR fence'
           : selected.length > 2 ? 'sparse P10' : 'sparse minimum',
         topMethod: selected.length >= MIN_PREFERRED_SAMPLES
-          ? 'P98 after conservative 3xIQR fence'
-          : selected.length > 2 ? 'sparse P90' : 'sparse maximum',
+          ? 'max(P98 robust, credible detailed upper envelope)'
+          : selected.length > 2 ? 'max(sparse P90, credible detailed upper envelope)' : 'sparse maximum',
+        topDiagnostics: {
+          selectedHighCount: upperCandidatePool.length > 0 ? upperCandidatePool.length : selected.length,
+          credibleHighCount: credibleHighs.length,
+          ...this.summarizeValues(selected.map(sample => sample.high)),
+          credibleMax,
+          rejectedUpperCandidates: (upperCandidatePool.length > 0 ? upperCandidatePool.length : selected.length) - credibleHighs.length,
+          rejectedReasons: upperSelection.rejectedReasons,
+          visibleSampleCount: visibleAfter.count,
+          visibleSampleP90: visibleAfter.p90,
+          visibleSampleP98: visibleAfter.p98,
+          visibleSampleMax: visibleAfter.max,
+          saturationAbove95PercentBefore: visibleBefore.saturationAbove95Percent,
+          saturationAbove95Percent: visibleAfter.saturationAbove95Percent,
+          finalTop: top,
+          finalSpan: span,
+        },
         groundDatum: ground,
         topEstimate: top,
         verticalSpan: span,
         step: span / 6,
-        estimatorPass: useFallback ? fallbackSanity?.passed : primarySanity.passed,
+        estimatorPass: finalSanity.passed,
       });
     }
     return { min: 0, max: span };
@@ -408,6 +472,58 @@ export class HeatmapController {
     return Cesium.Cartesian3.dot(offset, this.up);
   }
 
+  private sampleVisibleHeights(viewer: Cesium.Viewer | null | undefined, ground: number, span: number) {
+    const empty = { count: 0, p90: NaN, p98: NaN, max: NaN, saturationAbove95Percent: NaN, values: [] as number[] };
+    if (!viewer || viewer.isDestroyed() || !viewer.scene.pickPositionSupported || span <= EPSILON) return empty;
+    const scene = viewer.scene;
+    const width = Math.max(1, scene.canvas.clientWidth);
+    const height = Math.max(1, scene.canvas.clientHeight);
+    const heights: number[] = [];
+    for (let row = 1; row <= 7; row++) {
+      for (let column = 1; column <= 7; column++) {
+        try {
+          const point = scene.pickPosition(new Cesium.Cartesian2(width * column / 8, height * row / 8));
+          if (!Cesium.defined(point)) continue;
+          const relativeHeight = this.toProjectUp(point) - ground;
+          if (Number.isFinite(relativeHeight)) heights.push(relativeHeight);
+        } catch { /* depth buffer may not be ready during initial range estimation */ }
+      }
+    }
+    heights.sort((a, b) => a - b);
+    if (heights.length === 0) return empty;
+    return this.summarizeVisibleHeights(heights, span);
+  }
+
+  private summarizeVisibleHeights(sortedHeights: number[], span: number) {
+    if (sortedHeights.length === 0 || span <= EPSILON) {
+      return { count: 0, p90: NaN, p98: NaN, max: NaN, saturationAbove95Percent: NaN, values: sortedHeights };
+    }
+    return {
+      count: sortedHeights.length,
+      p90: quantile(sortedHeights, 0.9),
+      p98: quantile(sortedHeights, 0.98),
+      max: sortedHeights[sortedHeights.length - 1],
+      saturationAbove95Percent: sortedHeights.filter(value => value / span >= 0.95).length / sortedHeights.length,
+      values: sortedHeights,
+    };
+  }
+
+  private summarizeValues(values: number[]) {
+    const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+    if (sorted.length === 0) {
+      return { highMin: NaN, highP50: NaN, highP75: NaN, highP90: NaN, highP95: NaN, highP98: NaN, highMax: NaN };
+    }
+    return {
+      highMin: sorted[0],
+      highP50: quantile(sorted, 0.5),
+      highP75: quantile(sorted, 0.75),
+      highP90: quantile(sorted, 0.9),
+      highP95: quantile(sorted, 0.95),
+      highP98: quantile(sorted, 0.98),
+      highMax: sorted[sorted.length - 1],
+    };
+  }
+
   private summarizeExtents(samples: VerticalExtent[]) {
     const summarize = (values: number[]) => {
       const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
@@ -415,7 +531,11 @@ export class HeatmapController {
       return {
         min: sorted[0],
         p05: quantile(sorted, 0.05),
+        p10: quantile(sorted, 0.1),
         median: quantile(sorted, 0.5),
+        p75: quantile(sorted, 0.75),
+        p90: quantile(sorted, 0.9),
+        p95: quantile(sorted, 0.95),
         p98: quantile(sorted, 0.98),
         max: sorted[sorted.length - 1],
       };

@@ -22,6 +22,7 @@ interface BoxState {
   center: Cesium.Cartesian3;
   dimensions: Cesium.Cartesian3;
   heading: number;
+  minHeight: number;
 }
 
 interface PlaneState {
@@ -99,7 +100,7 @@ export class ClippingController {
     const center = Cesium.Cartesian3.clone(sphere.center);
     const size = Math.max(1, sphere.radius * 1.1);
     if (tool === 'box') {
-      this.shape = { tool, center, dimensions: new Cesium.Cartesian3(size, size, size), heading: 0 };
+      this.shape = this.createGroundAnchoredBox(sphere);
       this.selected = true;
       this.createVisuals();
       this.rebuildCollections();
@@ -153,6 +154,99 @@ export class ClippingController {
   private getBoundingSphere() {
     const targets = this.getTargets();
     return targets.map(target => target.boundingSphere).find(Boolean);
+  }
+
+  private createGroundAnchoredBox(sphere: Cesium.BoundingSphere): BoxState {
+    const cameraDistance = Math.max(1, Cesium.Cartesian3.distance(this.viewer.camera.positionWC, sphere.center));
+    const localLimit = Math.max(2, Math.min(sphere.radius * 0.55, cameraDistance * 0.22));
+    const samples = this.getVisibleGeometrySamples(sphere);
+    const reference = samples.length >= 3
+      ? Cesium.BoundingSphere.fromPoints(samples).center
+      : sphere.center;
+    const frame = Cesium.Transforms.eastNorthUpToFixedFrame(reference);
+    const inverseFrame = Cesium.Matrix4.inverse(frame, new Cesium.Matrix4());
+    const local = samples.map(point => Cesium.Matrix4.multiplyByPoint(inverseFrame, point, new Cesium.Cartesian3()));
+
+    let centerX = 0;
+    let centerY = 0;
+    let groundZ = 0;
+    let width = localLimit;
+    let depth = localLimit;
+    let height = Math.max(1, localLimit * 0.7);
+
+    if (local.length >= 3) {
+      const xs = local.map(point => point.x).sort((a, b) => a - b);
+      const ys = local.map(point => point.y).sort((a, b) => a - b);
+      const zs = local.map(point => point.z).sort((a, b) => a - b);
+      const lowX = this.quantile(xs, 0.1);
+      const highX = this.quantile(xs, 0.9);
+      const lowY = this.quantile(ys, 0.1);
+      const highY = this.quantile(ys, 0.9);
+      const lowZ = this.quantile(zs, 0.1);
+      const highZ = this.quantile(zs, 0.9);
+      const xSpan = Math.max(0, highX - lowX);
+      const ySpan = Math.max(0, highY - lowY);
+      const zSpan = Math.max(0, highZ - lowZ);
+      const horizontalFloor = Math.max(1, localLimit * 0.18);
+
+      centerX = (lowX + highX) / 2;
+      centerY = (lowY + highY) / 2;
+      groundZ = lowZ;
+      width = Cesium.Math.clamp(xSpan * 1.16, horizontalFloor, localLimit);
+      depth = Cesium.Math.clamp(ySpan * 1.16, horizontalFloor, localLimit);
+      const minHeight = Math.max(0.75, Math.min(width, depth) * 0.12);
+      const heightMargin = Math.max(minHeight * 0.5, zSpan * 0.12);
+      height = Cesium.Math.clamp(zSpan + heightMargin, minHeight, Math.max(minHeight, localLimit * 1.5));
+    } else {
+      const cartographic = Cesium.Cartographic.fromCartesian(reference);
+      const terrainHeight = this.viewer.scene.globe.getHeight(cartographic) ?? 0;
+      const groundPoint = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, terrainHeight);
+      groundZ = Cesium.Matrix4.multiplyByPoint(inverseFrame, groundPoint, new Cesium.Cartesian3()).z;
+    }
+
+    const minHeight = Math.max(0.5, Math.min(width, depth) * 0.08);
+    height = Math.max(minHeight, height);
+    const center = Cesium.Matrix4.multiplyByPoint(
+      frame,
+      new Cesium.Cartesian3(centerX, centerY, groundZ + height / 2),
+      new Cesium.Cartesian3(),
+    );
+
+    return {
+      tool: 'box',
+      center,
+      dimensions: new Cesium.Cartesian3(width, depth, height),
+      heading: 0,
+      minHeight,
+    };
+  }
+
+  private getVisibleGeometrySamples(sphere: Cesium.BoundingSphere) {
+    const canvas = this.viewer.scene.canvas;
+    const width = Math.max(1, canvas.clientWidth);
+    const height = Math.max(1, canvas.clientHeight);
+    const fractions = [0.22, 0.36, 0.5, 0.64, 0.78];
+    const samples: Cesium.Cartesian3[] = [];
+    for (const y of fractions) {
+      for (const x of fractions) {
+        const point = this.pickWorld(new Cesium.Cartesian2(width * x, height * y));
+        if (
+          point
+          && [point.x, point.y, point.z].every(Number.isFinite)
+          && Cesium.Cartesian3.distance(point, sphere.center) <= sphere.radius * 1.2
+        ) samples.push(point);
+      }
+    }
+    return samples;
+  }
+
+  private quantile(sorted: number[], ratio: number) {
+    if (!sorted.length) return 0;
+    const index = (sorted.length - 1) * ratio;
+    const lower = Math.floor(index);
+    const upper = Math.ceil(index);
+    if (lower === upper) return sorted[lower];
+    return Cesium.Math.lerp(sorted[lower], sorted[upper], index - lower);
   }
 
   private installEvents() {
@@ -268,7 +362,8 @@ export class ClippingController {
         const axis = this.boxWorldAxis(start, metadata.axis);
         const faceDistance = this.dragDistanceAlongAxis(this.drag.start, position, start, metadata.axis);
         const oldSize = start.dimensions[metadata.axis];
-        const newSize = Math.max(0.5, oldSize + metadata.direction * faceDistance);
+        const minimumSize = metadata.axis === 'z' ? start.minHeight : 0.5;
+        const newSize = Math.max(minimumSize, oldSize + metadata.direction * faceDistance);
         const effectiveFaceDistance = metadata.direction * (newSize - oldSize);
         this.shape.dimensions[metadata.axis] = newSize;
         this.shape.center = Cesium.Cartesian3.add(
@@ -383,12 +478,14 @@ export class ClippingController {
     if (!this.shape || !this.selected) return;
     if (this.shape.tool === 'box') {
       this.addMoveHandle();
-      (['x', 'y', 'z'] as Axis[]).forEach(axis => {
+      (['x', 'y'] as Axis[]).forEach(axis => {
         this.addResizeFace(axis, -1);
         this.addResizeFace(axis, 1);
         this.addResizeHandle(axis, -1);
         this.addResizeHandle(axis, 1);
       });
+      this.addResizeFace('z', 1);
+      this.addResizeHandle('z', 1);
       this.addRotateRing();
     } else if (this.shape.tool === 'plane') {
       this.addHandle('plane-move', () => this.shape && this.shape.tool === 'plane' ? this.shape.center : undefined, 10, COLOR);
@@ -489,9 +586,8 @@ export class ClippingController {
         const metersPerPixel = this.metersPerPixel(faceCenter);
         const faceSize = Math.min(this.shape.dimensions.x, this.shape.dimensions.y);
         const maxOffset = Math.max(0.5, faceSize * 0.12);
-        const arrowStartOffset = Cesium.Math.clamp(metersPerPixel * 24, 0.3, maxOffset * 0.72);
-        const arrowEndOffset = Cesium.Math.clamp(metersPerPixel * 34, arrowStartOffset + 0.12, maxOffset);
-        startDistance = faceDistance + direction * arrowStartOffset;
+        const arrowEndOffset = Cesium.Math.clamp(metersPerPixel * 30, 0.35, maxOffset);
+        startDistance = faceDistance;
         endDistance = faceDistance + direction * arrowEndOffset;
       }
 

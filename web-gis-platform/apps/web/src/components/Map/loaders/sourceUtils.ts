@@ -42,5 +42,7 @@ export const getPointCloudIndexBaseUrl = (indexUrl: string): string =>
 export const resolvePointCloudTileUrl = (baseUrl: string, tileName: unknown): string =>
   baseUrl + tileName;
 
-export const appendDomCacheBust = (source: string, timestamp: number): string =>
-  source + '?cb=' + timestamp;
+export const appendDomAssetVersion = (source: string, version: string): string => {
+  const separator = source.includes('?') ? '&' : '?';
+  return `${source}${separator}v=${encodeURIComponent(version)}`;
+};

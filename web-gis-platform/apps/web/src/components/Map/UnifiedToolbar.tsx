@@ -35,9 +35,6 @@ interface UnifiedToolbarProps {
     angle: ViewAngle
   ) => void;
 
-  // Reserve the fixed top-right area occupied by Calibration Panel (Admin).
-  reserveAdminPanel?: boolean;
-  reserveSidebar?: boolean;
 }
 
 const toolbarStyle = `
@@ -135,6 +132,59 @@ const toolbarStyle = `
     color: var(--bar-text);
   }
 
+  .viewer-command-bar {
+    left: 12px;
+    width: calc(100% - 24px);
+    max-width: calc(100% - 24px);
+    scrollbar-width: none;
+    overscroll-behavior-inline: contain;
+  }
+
+  @media (min-width: 48rem) {
+    .viewer-command-bar {
+      left: 50%;
+      width: max-content;
+      max-width: calc(100% - 32px);
+      transform: translateX(-50%);
+    }
+  }
+
+  @media (max-width: 63.999rem) {
+    .viewer-command-bar {
+      gap: 2px;
+      padding: 5px;
+    }
+
+    .viewer-command-group {
+      gap: 1px;
+    }
+
+    .viewer-command-btn {
+      min-width: 0;
+      min-height: 40px;
+      gap: 4px;
+      padding-inline: 7px;
+    }
+
+    .viewer-command-divider {
+      margin-inline: 2px;
+    }
+
+    .viewer-command-label--desktop {
+      display: none;
+    }
+
+    .viewer-command-view-label {
+      display: none;
+    }
+  }
+
+  @media (min-width: 64rem) {
+    .viewer-command-label--mobile {
+      display: none;
+    }
+  }
+
 `;
 
 
@@ -224,26 +274,16 @@ export const UnifiedToolbar: React.FC<
   onDisplayModeChange,
   viewAngle,
   onViewAngleChange,
-  reserveAdminPanel = false,
-  reserveSidebar = true,
 }) => {
   const { currentLang } =
     useLanguage('vi');
   const c = TOOLBAR_COPY[currentLang];
-  const leftReserve = reserveSidebar ? 308 : 16;
-  const rightReserve = reserveAdminPanel ? 352 : 16;
-
   return (
     <>
       <style>{toolbarStyle}</style>
 
       <div
-        className="viewer-command-bar fixed top-3 z-30 flex w-max max-w-full flex-nowrap items-center overflow-x-auto rounded-2xl border border-[var(--bar-border)] bg-[var(--bar-bg)] p-1.5 shadow-[var(--bar-shadow)] backdrop-blur-xl select-none"
-        style={{
-          left: `calc(${leftReserve}px + (100vw - ${leftReserve + rightReserve}px) / 2)`,
-          maxWidth: `calc(100vw - ${leftReserve + rightReserve}px)`,
-          transform: 'translateX(-50%)',
-        }}
+        className="viewer-command-bar absolute top-3 z-30 flex flex-nowrap items-center overflow-x-auto rounded-2xl border border-[var(--bar-border)] bg-[var(--bar-bg)] p-1.5 shadow-[var(--bar-shadow)] backdrop-blur-xl select-none"
       >
         <div className="viewer-command-group">
           {LAYER_BUTTONS.map(
@@ -279,7 +319,10 @@ export const UnifiedToolbar: React.FC<
                         : iconColor
                     }
                   />
-                  <span>{c[labelKey]}</span>
+                  <span className="viewer-command-label--desktop">{c[labelKey]}</span>
+                  <span className="viewer-command-label--mobile">
+                    {{ fullMap: c.fullMap, pointCloud: 'Cloud', model3d: 'Model', dom: 'DOM' }[labelKey]}
+                  </span>
                 </button>
               );
             }
@@ -321,7 +364,7 @@ export const UnifiedToolbar: React.FC<
                         : ''
                     }
                   />
-                  <span>{c[labelKey]}</span>
+                  <span className="viewer-command-view-label">{c[labelKey]}</span>
                 </button>
               );
             }

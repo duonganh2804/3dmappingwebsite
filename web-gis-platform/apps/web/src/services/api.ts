@@ -110,15 +110,17 @@ export const fetchProjects = async (): Promise<Project[]> => {
   }
 };
 
-export const fetchProjectById = async (id: string): Promise<Project | null> => {
+export const fetchProjectById = async (id: string, signal?: AbortSignal): Promise<Project | null> => {
   try {
     const response = await fetch(`${API_BASE_URL}/projects/${id}`, {
       headers: getAuthHeaders(),
-      credentials: 'include'
+      credentials: 'include',
+      signal
     });
     if (!response.ok) throw new Error('Failed to fetch project');
     return await response.json();
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return null;
     console.error(`Error fetching project ${id}:`, error);
     return null;
   }
@@ -204,9 +206,9 @@ const throwMeasurementApiError = async (operation: string, response: Response): 
   );
 };
 
-export const fetchProjectMeasurements = async (projectId: string): Promise<PersistedMeasurement[]> => {
+export const fetchProjectMeasurements = async (projectId: string, signal?: AbortSignal): Promise<PersistedMeasurement[]> => {
   const response = await fetch(`${API_BASE_URL}/projects/${projectId}/measurements`, {
-    headers: getAuthHeaders(), credentials: 'include'
+    headers: getAuthHeaders(), credentials: 'include', signal
   });
   if (!response.ok) return throwMeasurementApiError(`GET project ${projectId}`, response);
   return response.json();
@@ -302,10 +304,14 @@ export const fetchDemoAccess = async (): Promise<DemoAccessResult> => {
 
     const hasAccess =
       localStorage.getItem(mockKey) === 'true';
+    const demoProjectId = hasAccess
+      ? (await fetchProjects()).find(project => project.isPublic)?.id
+      : undefined;
 
     return {
       success: true,
       hasAccess,
+      demoProjectId,
       message: hasAccess
         ? 'Frontend demo mock access granted for current account.'
         : undefined
@@ -375,10 +381,12 @@ export const submitDemoLead = async (
     );
 
     localStorage.setItem(mockKey, 'true');
+    const demoProjectId = (await fetchProjects()).find(project => project.isPublic)?.id;
 
     return {
       success: true,
       hasAccess: true,
+      demoProjectId,
       message:
         'Frontend demo mock submitted successfully for current account.'
     };

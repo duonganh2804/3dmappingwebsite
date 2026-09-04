@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import { PotreeSidebar, type LayerLoadStatus } from './PotreeSidebar';
-import { OptimizerPanel } from './OptimizerPanel';
 import { UnifiedToolbar, type DisplayMode, type ViewAngle } from './UnifiedToolbar';
 import { MeasurementManager, type MeasurementManagerItem } from './MeasurementManager';
 import {
@@ -11,10 +10,8 @@ import {
   deleteProjectMeasurement,
   fetchProjectById,
   fetchProjectMeasurements,
-  updateProject,
   updateProjectMeasurement,
 } from '../../services/api';
-import { useAuthStore } from '../../store/useAuthStore';
 import type { MeasurementRecord, ProfileResult, ProfileSample } from './measurementTypes';
 import { deserializeMeasurement, serializeMeasurementRecord } from './measurementPersistence';
 import {
@@ -37,7 +34,6 @@ import {
 import { ClippingController, type ClipTool } from './clippingController';
 import { useCameraNavigation } from './navigation/useCameraNavigation';
 import { useHeatmap } from './heatmap/useHeatmap';
-import { CalibNumberInput } from './viewer/CalibNumberInput';
 import {
   AREA_SURFACE_PLANE_MAX_DISTANCE,
   DEFAULT_POINT_SIZE,
@@ -45,30 +41,191 @@ import {
 } from './viewer/constants';
 import { isFiniteCartesian } from './viewer/geometry';
 import { usePointCloudAppearance } from './pointCloud/usePointCloudAppearance';
+import { useLanguage } from '../../hooks/useLanguage';
 import {
-  appendDomCacheBust,
+  appendDomAssetVersion,
   classifyPointCloudSource,
   getPointCloudIndexBaseUrl,
   isCopcTilesIndex,
-  isDirectTilesetUrl,
   resolvePointCloudTileUrl,
 } from './loaders/sourceUtils';
+import type { Project } from '../../store/useProjectStore';
 
 export type { MeasurementRecord, MeasureTarget, ProfileResult, ProfileSample, ToolMode } from './measurementTypes';
 import type { ToolMode } from './measurementTypes';
 type ClipMode = 'none' | 'highlight' | 'inside' | 'outside';
 type ClipFilter = 'any' | 'all';
+type ViewerPhase = 'initializing' | 'waiting-project' | 'flying-to-project' | 'ready' | 'error';
+type InitialBoundsSource = 'point-cloud-root' | 'dom-metadata' | 'glb' | 'project-extent' | 'project-center';
+type PrimaryVisualType = 'point-cloud' | 'dom' | 'model' | 'fallback';
+type InitialCameraRun = {
+  projectId?: string;
+  generation: number;
+  startedAt: number;
+  boundsSource?: InitialBoundsSource;
+  boundsReadyMs?: number;
+  bounds?: Cesium.BoundingSphere;
+  boundsCandidates?: Partial<Record<InitialBoundsSource, Cesium.BoundingSphere>>;
+  primaryVisualType?: PrimaryVisualType;
+  primaryVisualRootReadyMs?: number;
+  primaryVisualReadyMs?: number;
+  earthIntroMs?: number;
+  viewerReadyMs?: number;
+  flyStartMs?: number;
+  flyDuration?: number;
+  flyCompleteMs?: number;
+  fitRadius?: number;
+  fitRange?: number;
+  userInteracted: boolean;
+  cancelled: boolean;
+  started: boolean;
+  completed: boolean;
+  finalized: boolean;
+};
+type ViewerPerfMilestone = 'cesiumReadyMs' | 'firstUsableMs' | 'modelReadyMs' | 'pointCloudReadyMs' | 'domReadyMs';
+type ViewerPerfTiming = {
+  projectId?: string;
+  startedAt: number;
+  cesiumReadyMs?: number;
+  firstUsableMs?: number;
+  modelReadyMs?: number;
+  pointCloudReadyMs?: number;
+  domReadyMs?: number;
+};
+
+type SharedJsonRequest = {
+  url: string;
+  controller: AbortController;
+  promise: Promise<any>;
+};
+
+const isAbortError = (error: unknown) =>
+  (error instanceof DOMException && error.name === 'AbortError') ||
+  (!!error && typeof error === 'object' && (error as { name?: string }).name === 'AbortError');
+
+const hashStableString = (value: string) => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+};
+
+const getStableProjectAssetVersion = (project: any, assetUrl: string) => {
+  const candidates = [
+    project?.domVersion,
+    project?.domUpdatedAt,
+    project?.assetsUpdatedAt,
+    project?.updatedAt,
+    project?.version,
+    project?.createdAt,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) return Math.max(1, Math.round(candidate));
+    if (typeof candidate === 'string' && candidate.trim()) {
+      const timestamp = Date.parse(candidate);
+      if (Number.isFinite(timestamp)) return Math.max(1, timestamp);
+      const numeric = Number(candidate);
+      if (Number.isFinite(numeric)) return Math.max(1, Math.round(numeric));
+    }
+  }
+
+  // Stable fallback: same project + same asset URL keeps the same browser/CDN key
+  // across warm re-entry instead of producing a brand-new ?cb=Date.now() URL.
+  return Math.max(1, hashStableString(`${project?.id ?? 'project'}|${assetUrl}`));
+};
+
+
+const buildAdaptiveProjectCameraSphere = (
+  geographicBounds: Cesium.BoundingSphere,
+  modelBounds?: Cesium.BoundingSphere,
+) => {
+  const geographicRadius = Math.max(10, geographicBounds.radius);
+  if (!modelBounds || !Number.isFinite(modelBounds.radius) || modelBounds.radius <= 0) {
+    return Cesium.BoundingSphere.clone(geographicBounds);
+  }
+
+  // Keep the calibrated DOM/project center as the geographic truth, but let the
+  // model size tighten the overview. Small-footprint projects otherwise inherit
+  // a large DOM radius and look unnecessarily far away (e.g. SHTP / Quy Nhon).
+  // The factor is continuous by relative model coverage, not by project ID.
+  const coverageRatio = Cesium.Math.clamp(modelBounds.radius / geographicRadius, 0, 1);
+  const geographicFloorFactor = coverageRatio < 0.2
+    ? 0.36
+    : coverageRatio < 0.4
+      ? 0.40
+      : 0.44;
+  const framingRadius = Math.min(
+    geographicRadius,
+    Math.max(modelBounds.radius * 1.8, geographicRadius * geographicFloorFactor, 30),
+  );
+
+  return new Cesium.BoundingSphere(geographicBounds.center, framingRadius);
+};
+
+const markViewerPerf = (
+  timingRef: React.RefObject<ViewerPerfTiming>,
+  milestone: ViewerPerfMilestone,
+) => {
+  if (!import.meta.env.DEV || timingRef.current[milestone] !== undefined) return;
+  timingRef.current[milestone] = Math.round(performance.now() - timingRef.current.startedAt);
+  console.info('[ViewerPerf]', {
+    projectId: timingRef.current.projectId,
+    cesiumReadyMs: timingRef.current.cesiumReadyMs,
+    firstUsableMs: timingRef.current.firstUsableMs,
+    modelReadyMs: timingRef.current.modelReadyMs,
+    pointCloudReadyMs: timingRef.current.pointCloudReadyMs,
+    domReadyMs: timingRef.current.domReadyMs,
+  });
+};
+
+const VIEWER_LOADING_COPY = {
+  vi: {
+    loadingProject: 'Đang tải dữ liệu dự án...',
+    loadingProjectHint: 'Vui lòng chờ trong giây lát',
+    positioningProject: 'Đang định vị khu vực dự án...',
+    loadingModel: 'Đang tải mô hình...',
+    loadingPointCloud: 'Đang tải Point Cloud...',
+    loadingDom: 'Đang tải ảnh trực giao...',
+    loadError: 'Không thể tải dữ liệu dự án',
+  },
+  en: {
+    loadingProject: 'Loading project data...',
+    loadingProjectHint: 'Please wait a moment',
+    positioningProject: 'Positioning project area...',
+    loadingModel: 'Loading 3D model...',
+    loadingPointCloud: 'Loading Point Cloud...',
+    loadingDom: 'Loading orthophoto...',
+    loadError: 'Unable to load project data',
+  },
+  zh: {
+    loadingProject: '正在加载项目数据...',
+    loadingProjectHint: '请稍候',
+    positioningProject: '正在定位项目区域...',
+    loadingModel: '正在加载三维模型...',
+    loadingPointCloud: '正在加载点云...',
+    loadingDom: '正在加载正射影像...',
+    loadError: '无法加载项目数据',
+  },
+} as const;
+
 export const CesiumViewer: React.FC<{
   projectId?: string;
   projectName?: string;
+  project?: Project;
   isSidebarOpen?: boolean;
   onToggleSidebar?: (open: boolean) => void;
 }> = ({
   projectId,
   projectName = 'Dự án 3D',
+  project: suppliedProject,
   isSidebarOpen = true,
   onToggleSidebar
 }) => {
+    const { currentLang } = useLanguage('vi');
+    const loadingCopy = VIEWER_LOADING_COPY[currentLang];
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
 
     const cesiumContainer = useRef<HTMLDivElement>(null);
@@ -91,18 +248,16 @@ export const CesiumViewer: React.FC<{
     // Lazy load: track whether PC đã được load (tránh load lại nhiều lần)
     const pointCloudLoadedRef = useRef(false);
 
-    const { user } = useAuthStore();
-    const isAdmin = user?.role === 'SUPERADMIN';
-
-    const [project, setProject] = useState<any>(null);
+    const [project, setProject] = useState<any>(suppliedProject ?? null);
     const [toolMode, setToolMode] = useState<ToolMode>('none');
     const [measurementPoints, setMeasurementPoints] = useState<Cesium.Cartesian3[]>([]);
     const [measurementRevision, setMeasurementRevision] = useState(0);
-    const [isOptimizerOpen, setIsOptimizerOpen] = useState(false);
     const [displayMode, setDisplayMode] = useState<DisplayMode>('full');
     const [viewAngle, setViewAngle] = useState<ViewAngle>('default');
     const [activeCameraView, setActiveCameraView] = useState<'L' | 'R' | 'F' | 'B' | 'T' | 'D' | null>(null);
     const [isFocusPicking, setIsFocusPicking] = useState(false);
+    const [isZoomAreaSelecting, setIsZoomAreaSelecting] = useState(false);
+    const [zoomAreaRect, setZoomAreaRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
     const [isReturningFocusOrigin, setIsReturningFocusOrigin] = useState(false);
     const [hasFocusedTarget, setHasFocusedTarget] = useState(false);
     const focusOriginRef = useRef<{
@@ -170,19 +325,234 @@ export const CesiumViewer: React.FC<{
     const [modelLoadStatus, setModelLoadStatus] = useState<LayerLoadStatus>('idle');
     const [pointCloudLoadStatus, setPointCloudLoadStatus] = useState<LayerLoadStatus>('idle');
     const [domLoadStatus, setDomLoadStatus] = useState<LayerLoadStatus>('idle');
+    const [viewerPhase, setViewerPhase] = useState<ViewerPhase>('initializing');
+    const [cesiumReady, setCesiumReady] = useState(false);
+    const [firstProjectBoundsReady, setFirstProjectBoundsReady] = useState(false);
+    const [primaryVisualReady, setPrimaryVisualReady] = useState(false);
+    const [earthRotationActive, setEarthRotationActive] = useState(false);
+    const [initialFlyStarted, setInitialFlyStarted] = useState(false);
+    const [initialFlyCompleted, setInitialFlyCompleted] = useState(false);
     const [modelLoadError, setModelLoadError] = useState<string | null>(null);
     const [pointCloudLoadError, setPointCloudLoadError] = useState<string | null>(null);
     const [domLoadError, setDomLoadError] = useState<string | null>(null);
     const [domLoadAttempt, setDomLoadAttempt] = useState(0);
     const modelLoadGenerationRef = useRef(0);
     const pointCloudLoadGenerationRef = useRef(0);
+    const lastLoggedViewerPhaseRef = useRef<ViewerPhase | null>(null);
+    const viewerPerfRef = useRef<ViewerPerfTiming>({ projectId, startedAt: performance.now() });
     const domLoadGenerationRef = useRef(0);
+    const metadataRequestRef = useRef<SharedJsonRequest | null>(null);
+    const domImageAbortRef = useRef<AbortController | null>(null);
+    const pointCloudIndexAbortRef = useRef<AbortController | null>(null);
+    const terrainLoadStartedRef = useRef(false);
     const retryModelRef = useRef<() => void>(() => undefined);
     const retryPointCloudRef = useRef<() => void>(() => undefined);
     const activeLayerProjectRef = useRef<string | null>(null);
+    const initialCameraGenerationRef = useRef(0);
+    const stopEarthRotationRef = useRef<() => void>(() => undefined);
+    const initialVisualCleanupRef = useRef<Array<() => void>>([]);
+    const initialCameraRunRef = useRef<InitialCameraRun>({
+      projectId,
+      generation: 0,
+      startedAt: performance.now(),
+      boundsCandidates: {},
+      userInteracted: false,
+      cancelled: false,
+      started: false,
+      completed: false,
+      finalized: false,
+    });
+
+    const getProjectMetadata = (url: string) => {
+      const existing = metadataRequestRef.current;
+      if (existing?.url === url) return existing.promise;
+
+      existing?.controller.abort();
+      const controller = new AbortController();
+      const request: SharedJsonRequest = {
+        url,
+        controller,
+        promise: Promise.resolve(null),
+      };
+      request.promise = fetch(url, {
+        signal: controller.signal,
+        cache: 'default',
+      })
+        .then(response => {
+          if (!response.ok) throw new Error(`Metadata request failed: HTTP ${response.status}`);
+          return response.json();
+        })
+        .catch(error => {
+          if (metadataRequestRef.current === request) metadataRequestRef.current = null;
+          throw error;
+        });
+      metadataRequestRef.current = request;
+      return request.promise;
+    };
+
+    const logInitialCamera = (run: InitialCameraRun) => {
+      if (!import.meta.env.DEV) return;
+      console.info('[ViewerStartup]', {
+        projectId: run.projectId,
+        generation: run.generation,
+        boundsSource: run.boundsSource,
+        boundsReadyMs: run.boundsReadyMs,
+        primaryVisualType: run.primaryVisualType,
+        primaryVisualRootReadyMs: run.primaryVisualRootReadyMs,
+        primaryVisualReadyMs: run.primaryVisualReadyMs,
+        earthIntroMs: run.earthIntroMs,
+        viewerReadyMs: run.viewerReadyMs,
+        flyStartMs: run.flyStartMs,
+        flyDuration: run.flyDuration,
+        flyCompleteMs: run.flyCompleteMs,
+        fitRadius: run.fitRadius,
+        fitRange: run.fitRange,
+        userInteracted: run.userInteracted,
+        cancelled: run.cancelled,
+        finalized: run.finalized,
+      });
+    };
+
+    const finalizeInitialCameraAfterFrame = (
+      run: InitialCameraRun,
+      completed: boolean,
+      cancelled: boolean,
+    ) => {
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed() || initialCameraRunRef.current !== run || run.finalized) return;
+      run.completed = completed;
+      run.cancelled = cancelled;
+      run.flyCompleteMs = Math.round(performance.now() - run.startedAt);
+      const removePostRender = viewer.scene.postRender.addEventListener(() => {
+        removePostRender();
+        if (viewer.isDestroyed() || initialCameraRunRef.current !== run || run.finalized) return;
+        run.finalized = true;
+        run.viewerReadyMs = Math.round(performance.now() - run.startedAt);
+        setInitialFlyCompleted(completed);
+        markViewerPerf(viewerPerfRef, 'firstUsableMs');
+        setViewerPhase('ready');
+        logInitialCamera(run);
+      });
+      viewer.scene.requestRender();
+    };
+
+    const selectInitialCameraBounds = (run: InitialCameraRun) => {
+      const candidates = run.boundsCandidates ?? {};
+      const priorityByVisual: Record<PrimaryVisualType, InitialBoundsSource[]> = {
+        'point-cloud': ['point-cloud-root', 'dom-metadata', 'project-extent', 'glb', 'project-center'],
+        dom: ['dom-metadata', 'project-extent', 'point-cloud-root', 'glb', 'project-center'],
+        model: ['dom-metadata', 'project-extent', 'glb', 'project-center', 'point-cloud-root'],
+        fallback: ['project-extent', 'dom-metadata', 'point-cloud-root', 'glb', 'project-center'],
+      };
+      const priority: InitialBoundsSource[] = run.primaryVisualType
+        ? priorityByVisual[run.primaryVisualType]
+        : ['point-cloud-root', 'dom-metadata', 'glb', 'project-extent', 'project-center'];
+      const source = priority.find(candidate => candidates[candidate]);
+      if (!source) return false;
+      run.boundsSource = source;
+      run.bounds = Cesium.BoundingSphere.clone(candidates[source]!);
+      return true;
+    };
+
+    const startInitialCameraIfReady = (run: InitialCameraRun) => {
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed() || run.started || run.finalized || !run.primaryVisualType) return false;
+      if (!selectInitialCameraBounds(run) || !run.bounds) return false;
+      const bounds = run.bounds;
+
+      if (run.userInteracted) {
+        finalizeInitialCameraAfterFrame(run, false, true);
+        return true;
+      }
+
+      const selectedRadius = Math.max(10, bounds.radius);
+      const glbBounds = run.boundsCandidates?.glb;
+
+      // Keep the calibrated DOM/project center, then adapt only the framing SIZE.
+      // This preserves the correct target fixed in v9 while moving small-footprint
+      // projects closer without hardcoding SHTP, Quy Nhon, Long Phu, or any ID.
+      const cameraBounds = run.primaryVisualType === 'model' && glbBounds
+        ? buildAdaptiveProjectCameraSphere(bounds, glbBounds)
+        : Cesium.BoundingSphere.clone(bounds);
+      const framingRadius = Math.max(10, cameraBounds.radius);
+
+      // Slightly tighter final framing: keep the same calibrated target and adaptive
+      // project radius, but move the camera about 10% closer than v10.
+      const fitRange = Math.min(50000, Math.max(30, framingRadius * 1.72));
+      run.fitRadius = Math.round(framingRadius * 100) / 100;
+      run.fitRange = Math.round(fitRange * 100) / 100;
+      run.started = true;
+      run.flyStartMs = Math.round(performance.now() - run.startedAt);
+      run.flyDuration = 1.4;
+      stopEarthRotationRef.current();
+      setInitialFlyStarted(true);
+      setViewerPhase('flying-to-project');
+      viewer.camera.flyToBoundingSphere(cameraBounds, {
+        duration: run.flyDuration,
+        offset: new Cesium.HeadingPitchRange(viewer.camera.heading, Cesium.Math.toRadians(-30), fitRange),
+        complete: () => finalizeInitialCameraAfterFrame(run, true, false),
+        cancel: () => finalizeInitialCameraAfterFrame(run, false, true),
+      });
+      return true;
+    };
+
+    const offerInitialCameraBounds = (
+      source: InitialBoundsSource,
+      bounds: Cesium.BoundingSphere,
+    ) => {
+      const viewer = viewerRef.current;
+      const run = initialCameraRunRef.current;
+      if (
+        !viewer || viewer.isDestroyed() || run.projectId !== projectId || run.started || run.finalized ||
+        !bounds || !Number.isFinite(bounds.radius) || bounds.radius < 0
+      ) return false;
+
+      run.boundsCandidates ??= {};
+      run.boundsCandidates[source] = Cesium.BoundingSphere.clone(bounds);
+      run.boundsReadyMs ??= Math.round(performance.now() - run.startedAt);
+      setFirstProjectBoundsReady(true);
+      // Do not let fast-but-coarse metadata permanently win the camera.  Once
+      // the primary visual is known, select the bounds that best represent it.
+      if (run.primaryVisualType) {
+        selectInitialCameraBounds(run);
+        startInitialCameraIfReady(run);
+      }
+      return true;
+    };
+
+    const markPrimaryVisualReady = (type: PrimaryVisualType) => {
+      const run = initialCameraRunRef.current;
+      if (run.projectId !== projectId || run.finalized || run.primaryVisualType) return;
+      run.primaryVisualType = type;
+      run.primaryVisualReadyMs = Math.round(performance.now() - run.startedAt);
+      setPrimaryVisualReady(true);
+      selectInitialCameraBounds(run);
+      startInitialCameraIfReady(run);
+    };
+
+    const watchPointCloudCoarseContent = (tileset: Cesium.Cesium3DTileset) => {
+      const run = initialCameraRunRef.current;
+      run.primaryVisualRootReadyMs ??= Math.round(performance.now() - run.startedAt);
+      const remove = tileset.tileVisible.addEventListener(() => {
+        remove();
+        markPrimaryVisualReady('point-cloud');
+      });
+      initialVisualCleanupRef.current.push(remove);
+      viewerRef.current?.scene.requestRender();
+    };
+
+    const markInitialCameraInteraction = () => {
+      const viewer = viewerRef.current;
+      const run = initialCameraRunRef.current;
+      if (run.finalized) return;
+      run.userInteracted = true;
+      stopEarthRotationRef.current();
+      if (run.started && viewer && !viewer.isDestroyed()) viewer.camera.cancelFlight();
+    };
 
     // States quản lý bật tắt layer
-    // Mặc định: chỉ hiện Model 3D, ẩn Point Cloud và DOM để tránh flash khi load
+    // Initial "Toàn cảnh": chỉ Model 3D + DOM. Point Cloud là opt-in và chỉ tải
+    // sau khi người dùng chủ động mở tab Point Cloud để giảm startup bandwidth/GPU.
     const [showModel, setShowModel] = useState(true);
     const [showDom, setShowDom] = useState(false);
     const [showPointCloud, setShowPointCloud] = useState(false);
@@ -246,20 +616,128 @@ export const CesiumViewer: React.FC<{
       );
     };
 
-    // Fetch thông tin dự án khi projectId thay đổi
+    // Abort only app-owned fetches. Cesium Model/3D Tiles requests keep their
+    // existing generation guards because Cesium does not expose the same AbortSignal
+    // lifecycle safely for every loader.
     useEffect(() => {
+      return () => {
+        metadataRequestRef.current?.controller.abort();
+        metadataRequestRef.current = null;
+        domImageAbortRef.current?.abort();
+        domImageAbortRef.current = null;
+        pointCloudIndexAbortRef.current?.abort();
+        pointCloudIndexAbortRef.current = null;
+      };
+    }, [projectId]);
+
+    // Fetch thông tin dự án khi projectId thay đổi. ViewerPage là owner chính;
+    // chỉ fallback fetch khi không có project được truyền xuống.
+    useEffect(() => {
+      if (suppliedProject?.id === projectId) {
+        setProject(suppliedProject);
+        return;
+      }
+      const controller = new AbortController();
       if (projectId) {
-        fetchProjectById(projectId).then(data => {
+        if (import.meta.env.DEV) console.info('[ViewerRequest] fallback project start');
+        fetchProjectById(projectId, controller.signal).then(data => {
+          if (controller.signal.aborted) return;
           if (data) setProject(data);
+          else setViewerPhase('error');
         });
       }
-    }, [projectId]);
+      return () => controller.abort();
+    }, [projectId, suppliedProject]);
 
     // Đổi dự án thì đóng kết quả trắc dọc cũ để không hiển thị dữ liệu của project trước.
     useEffect(() => {
       setActiveProfile(null);
       setIsProfileSampling(false);
+      setDisplayMode('full');
+      activeLayerProjectRef.current = null;
+      modelLoadGenerationRef.current += 1;
+      pointCloudLoadGenerationRef.current += 1;
+      domLoadGenerationRef.current += 1;
+      stopEarthRotationRef.current();
+      initialVisualCleanupRef.current.splice(0).forEach(cleanup => cleanup());
+      const viewer = viewerRef.current;
+      if (initialCameraRunRef.current.started && !initialCameraRunRef.current.finalized && viewer && !viewer.isDestroyed()) {
+        viewer.camera.cancelFlight();
+      }
+      const cameraGeneration = ++initialCameraGenerationRef.current;
+      initialCameraRunRef.current = {
+        projectId,
+        generation: cameraGeneration,
+        startedAt: performance.now(),
+        boundsCandidates: {},
+        userInteracted: false,
+        cancelled: false,
+        started: false,
+        completed: false,
+        finalized: false,
+      };
+      lastLoggedViewerPhaseRef.current = null;
+      setViewerPhase(viewer && !viewer.isDestroyed() ? 'waiting-project' : 'initializing');
+      setFirstProjectBoundsReady(false);
+      setPrimaryVisualReady(false);
+      setInitialFlyStarted(false);
+      setInitialFlyCompleted(false);
+      viewerPerfRef.current = {
+        projectId,
+        startedAt: performance.now(),
+        cesiumReadyMs: viewerRef.current && !viewerRef.current.isDestroyed() ? 0 : undefined,
+      };
     }, [projectId]);
+
+    useEffect(() => {
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed() || viewerPhase !== 'waiting-project' || !cesiumReady) return;
+
+      let lastTick = performance.now();
+      const startedAt = lastTick;
+      const stop = () => {
+        viewer.clock.onTick.removeEventListener(rotateEarth);
+        if (stopEarthRotationRef.current === stop) stopEarthRotationRef.current = () => undefined;
+        const run = initialCameraRunRef.current;
+        run.earthIntroMs ??= Math.round(performance.now() - startedAt);
+        setEarthRotationActive(false);
+      };
+      const rotateEarth = () => {
+        if (viewer.isDestroyed() || initialCameraRunRef.current.userInteracted) {
+          stop();
+          return;
+        }
+        const now = performance.now();
+        const deltaSeconds = Math.min((now - lastTick) / 1000, 0.1);
+        lastTick = now;
+        viewer.camera.rotate(Cesium.Cartesian3.UNIT_Z, Cesium.Math.toRadians(0.35) * deltaSeconds);
+        viewer.scene.requestRender();
+      };
+
+      stopEarthRotationRef.current();
+      stopEarthRotationRef.current = stop;
+      viewer.clock.onTick.addEventListener(rotateEarth);
+      setEarthRotationActive(true);
+      viewer.scene.requestRender();
+      return stop;
+    }, [viewerPhase, cesiumReady, projectId]);
+
+    // Keep the globe as the intentional startup visual.  Appearance/background
+    // effects can run in the same mount and temporarily hide the globe; while
+    // the automatic intro is active we explicitly keep Earth + atmosphere on.
+    useEffect(() => {
+      const viewer = viewerRef.current;
+      if (
+        !viewer || viewer.isDestroyed() || !cesiumReady ||
+        viewerPhase === 'ready' || viewerPhase === 'error' ||
+        displayMode !== 'full'
+      ) return;
+      viewer.scene.globe.show = true;
+      if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true;
+      if (viewer.scene.skyBox) viewer.scene.skyBox.show = true;
+      viewer.scene.backgroundColor = Cesium.Color.BLACK;
+      viewer.scene.requestRender();
+    }, [viewerPhase, cesiumReady, displayMode, projectId]);
 
     // States và refs quản lý tinh chỉnh vị trí của Admin (Calibration)
     const [offsets, setOffsets] = useState({
@@ -280,8 +758,6 @@ export const CesiumViewer: React.FC<{
       pcPitch: 0,
       pcRoll: 0
     });
-    const [activeTarget, setActiveTarget] = useState<'model' | 'dom' | 'pointcloud' | 'none'>('none');
-    const [stepSize, setStepSize] = useState(1.0); // bước nhảy mét mặc định là 1m thay vì 0.1m
     const originalBoundsRef = useRef({ west: 0, east: 0, south: 0, north: 0 });
     const offsetsRef = useRef(offsets);
     const pointCloudOriginalCenterRef = useRef<Cesium.Cartesian3 | null>(null);
@@ -292,6 +768,43 @@ export const CesiumViewer: React.FC<{
     layerVisibilityRef.current = { model: showModel, pointCloud: showPointCloud, dom: showDom };
     const layerOpacityRef = useRef({ model: modelOpacity, pointCloud: pointCloudOpacity, dom: domOpacity });
     layerOpacityRef.current = { model: modelOpacity, pointCloud: pointCloudOpacity, dom: domOpacity };
+
+    const buildDomCameraBoundingSphere = (
+      bounds: { west: number; east: number; south: number; north: number },
+      domLon: number,
+      domLat: number,
+      domScale: number,
+    ): Cesium.BoundingSphere | null => {
+      const { west, east, south, north } = bounds;
+      if (
+        ![west, east, south, north].every(Number.isFinite) ||
+        west >= east || south >= north
+      ) return null;
+
+      // Camera framing must follow the DOM after calibration, not the raw metadata.
+      // Heading does not change the footprint center/radius, so using the unrotated
+      // calibrated rectangle avoids the oversized diagonal canvas rectangle while
+      // still targeting the exact project location rendered by the DOM layer.
+      const scale = Number.isFinite(domScale) && domScale > 0 ? domScale : 1;
+      const centerLon = (west + east) / 2 + (Number.isFinite(domLon) ? domLon : 0);
+      const centerLat = (south + north) / 2 + (Number.isFinite(domLat) ? domLat : 0);
+      const halfWidth = ((east - west) / 2) * scale;
+      const halfHeight = ((north - south) / 2) * scale;
+      const rectangle = Cesium.Rectangle.fromDegrees(
+        centerLon - halfWidth,
+        centerLat - halfHeight,
+        centerLon + halfWidth,
+        centerLat + halfHeight,
+      );
+      return Cesium.BoundingSphere.fromRectangle3D(rectangle, Cesium.Ellipsoid.WGS84, 0);
+    };
+
+    const getCurrentDomCameraBoundingSphere = () => buildDomCameraBoundingSphere(
+      originalBoundsRef.current,
+      offsetsRef.current.domLon || 0,
+      offsetsRef.current.domLat || 0,
+      offsetsRef.current.domScale || 1,
+    );
 
     const applyProjectLayerVisibility = () => {
       const visibility = layerVisibilityRef.current;
@@ -370,11 +883,13 @@ export const CesiumViewer: React.FC<{
         }
       }
 
-      // 2. Nạp từ metadata.json nếu có
+      // 2. Nạp từ metadata.json nếu có. Reuse đúng cùng một Promise với DOM
+      // loader để metadata.json chỉ có một app-owned request trong mỗi project mount.
       if (project.metadataUrl) {
-        fetch(project.metadataUrl)
-          .then(res => res.json())
+        getProjectMetadata(project.metadataUrl)
           .then(meta => {
+            // This request is only for point-budget metadata. Camera ownership stays
+            // in the DOM loader, where calibration offsets are already available.
             if (meta && (meta.totalPoints || meta.pointCount)) {
               const pts = Number(meta.totalPoints || meta.pointCount);
               if (pts > 0) {
@@ -388,30 +903,14 @@ export const CesiumViewer: React.FC<{
               }
             }
           })
-          .catch(() => {});
+          .catch(error => {
+            if (!isAbortError(error)) console.warn('[Metadata] Point-budget metadata unavailable:', error);
+          });
       }
 
-      // 3. Nạp từ tileset.json nếu pointCloudId là đường dẫn JSON
-      if (project.pointCloudId && isDirectTilesetUrl(project.pointCloudId)) {
-        fetch(project.pointCloudId)
-          .then(res => res.json())
-          .then(tsData => {
-            if (tsData) {
-              const extras = tsData.asset?.extras || tsData.extras || {};
-              const pts = extras.pointCount || extras.totalPoints || tsData.properties?.pointCount;
-              if (pts && Number(pts) > 0) {
-                const max = Number(pts);
-                const min = Math.max(10_000, Math.round(max * 0.02));
-                setMinPointBudget(min);
-                setMaxPointBudget(max);
-                const saved = localStorage.getItem(`pointBudget_${project.id}`);
-                const initB = saved ? Math.min(max, Math.max(min, Number(saved))) : max;
-                setPointBudget(initB);
-              }
-            }
-          })
-          .catch(() => {});
-      }
+      // Point Cloud root metadata không còn fetch ở startup. Cesium sẽ nạp root
+      // khi user mở tab Point Cloud; tránh một request tileset.json không cần thiết
+      // trong đường tải ban đầu Model + DOM.
 
       const savedBudget = localStorage.getItem(`pointBudget_${project.id}`);
       const initBudget = savedBudget ? Math.min(detectedMax, Math.max(detectedMin, Number(savedBudget))) : detectedMax;
@@ -473,6 +972,9 @@ export const CesiumViewer: React.FC<{
 
       let isCurrent = true;
       const isActive = () => isCurrent && generation === domLoadGenerationRef.current && !viewer.isDestroyed();
+      const domFetchController = new AbortController();
+      domImageAbortRef.current?.abort();
+      domImageAbortRef.current = domFetchController;
       setDomLoadStatus('loading');
       setDomLoadError(null);
 
@@ -490,8 +992,7 @@ export const CesiumViewer: React.FC<{
         if (originalBoundsRef.current.west === 0) {
           if (project.metadataUrl) {
             try {
-              const res = await fetch(project.metadataUrl);
-              const meta = await res.json();
+              const meta = await getProjectMetadata(project.metadataUrl);
               if (meta.west && meta.east && meta.south && meta.north) {
                 originalBoundsRef.current = {
                   west: meta.west,
@@ -499,9 +1000,19 @@ export const CesiumViewer: React.FC<{
                   south: meta.south,
                   north: meta.north
                 };
+                const calibratedDomBounds = buildDomCameraBoundingSphere(
+                  originalBoundsRef.current,
+                  offsets.domLon || 0,
+                  offsets.domLat || 0,
+                  offsets.domScale || 1,
+                );
+                if (calibratedDomBounds) {
+                  offerInitialCameraBounds('dom-metadata', calibratedDomBounds);
+                }
                 console.log("Đã đọc bounding box DOM từ metadata.json:", meta);
               }
             } catch (e) {
+              if (isAbortError(e)) return;
               console.warn("Không thể đọc metadata.json DOM, dùng khoảng vị trí mặc định.");
             }
           }
@@ -516,6 +1027,18 @@ export const CesiumViewer: React.FC<{
               south: lat - deltaLatitude / 2,
               north: lat + deltaLatitude / 2
             };
+            if (!project.pointCloudId && !project.modelUrl) {
+              const fallbackRectangle = Cesium.Rectangle.fromDegrees(
+                originalBoundsRef.current.west,
+                originalBoundsRef.current.south,
+                originalBoundsRef.current.east,
+                originalBoundsRef.current.north,
+              );
+              offerInitialCameraBounds(
+                'project-center',
+                Cesium.BoundingSphere.fromRectangle3D(fallbackRectangle, Cesium.Ellipsoid.WGS84, 0),
+              );
+            }
             console.log("Đã tính bounding box DOM mặc định:", originalBoundsRef.current);
           }
         }
@@ -542,13 +1065,19 @@ export const CesiumViewer: React.FC<{
         const halfHeight = ((north - south) / 2) * (offsets.domScale || 1.0);
 
         const domUrl = project.domUrl;
+        const domCacheVersion = getStableProjectAssetVersion(project, domUrl);
+        const domRequestUrl = appendDomAssetVersion(domUrl, String(domCacheVersion));
 
         try {
           // Tải hình ảnh dưới dạng Blob để giải quyết CORS và tránh làm bẩn (tainting) canvas
           let img = domImageRef.current;
-          if (!img || domImageSrcRef.current !== domUrl) {
-            const res = await fetch(appendDomCacheBust(domUrl, Date.now()), { mode: 'cors' });
-            if (!res.ok) throw new Error("Fetch DOM image failed");
+          if (!img || domImageSrcRef.current !== domRequestUrl) {
+            const res = await fetch(domRequestUrl, {
+              mode: 'cors',
+              cache: 'default',
+              signal: domFetchController.signal,
+            });
+            if (!res.ok) throw new Error(`Fetch DOM image failed: HTTP ${res.status}`);
             const blob = await res.blob();
             const blobUrl = URL.createObjectURL(blob);
 
@@ -566,7 +1095,7 @@ export const CesiumViewer: React.FC<{
             });
             if (!isActive()) return;
             domImageRef.current = img;
-            domImageSrcRef.current = domUrl;
+            domImageSrcRef.current = domRequestUrl;
           }
 
           // Giới hạn độ phân giải của canvas vẽ xoay tối đa là 2048 để tránh crash bộ nhớ GPU của trình duyệt với ảnh trực giao siêu lớn
@@ -612,6 +1141,23 @@ export const CesiumViewer: React.FC<{
 
           const newDomRectangle = Cesium.Rectangle.fromDegrees(finalWest, finalSouth, finalEast, finalNorth);
 
+          if (import.meta.env.DEV) {
+            const gl = viewer.scene.canvas.getContext('webgl2')
+              ?? viewer.scene.canvas.getContext('webgl');
+            console.info('[DOMSharpness]', {
+              source: `${img.naturalWidth || img.width}x${img.naturalHeight || img.height}`,
+              preRotateCanvas: `${W}x${H}`,
+              postRotateCanvas: `${canvas.width}x${canvas.height}`,
+              providerInput: `${canvas.width}x${canvas.height}`,
+              cap: maxCanvasSize,
+              scaleFactor: Math.min(
+                W / Math.max(1, img.naturalWidth || img.width),
+                H / Math.max(1, img.naturalHeight || img.height),
+              ),
+              deviceMaxTextureSize: gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 'unavailable',
+            });
+          }
+
           const provider = new Cesium.SingleTileImageryProvider({
             url: canvas.toDataURL(),
             rectangle: newDomRectangle,
@@ -632,8 +1178,19 @@ export const CesiumViewer: React.FC<{
           if (oldLayer && !viewer.isDestroyed() && !oldLayer.isDestroyed() && viewer.imageryLayers.contains(oldLayer)) {
             viewer.imageryLayers.remove(oldLayer, true);
           }
+          // `newDomRectangle` is enlarged to the image diagonal for drawing, so it is
+          // deliberately NOT used for camera targeting. Use the calibrated original
+          // DOM footprint: same center as the rendered DOM, tighter and stable.
+          const cameraDomBounds = buildDomCameraBoundingSphere(
+            originalBoundsRef.current,
+            offsets.domLon || 0,
+            offsets.domLat || 0,
+            offsets.domScale || 1,
+          );
+          if (cameraDomBounds) offerInitialCameraBounds('dom-metadata', cameraDomBounds);
           setDomLoadStatus('ready');
         } catch (canvasErr) {
+          if (isAbortError(canvasErr) || !isActive()) return;
           console.warn("⚠️ Không thể tạo ảnh DOM xoay bằng canvas. Chuyển sang nạp ảnh gốc không xoay làm dự phòng:", canvasErr);
 
           const finalWest = centerLon - halfWidth + (offsets.domLon || 0);
@@ -656,9 +1213,23 @@ export const CesiumViewer: React.FC<{
           const domRectangle = Cesium.Rectangle.fromDegrees(finalWest, finalSouth, finalEast, finalNorth);
 
           try {
-            const provider = await Cesium.SingleTileImageryProvider.fromUrl(appendDomCacheBust(domUrl, Date.now()), {
+            const provider = await Cesium.SingleTileImageryProvider.fromUrl(domRequestUrl, {
               rectangle: domRectangle,
             });
+
+            if (import.meta.env.DEV) {
+              const gl = viewer.scene.canvas.getContext('webgl2')
+                ?? viewer.scene.canvas.getContext('webgl');
+              console.info('[DOMSharpness]', {
+                source: `${provider.tileWidth}x${provider.tileHeight}`,
+                preRotateCanvas: 'not-used (fallback)',
+                postRotateCanvas: 'not-used (fallback)',
+                providerInput: `${provider.tileWidth}x${provider.tileHeight}`,
+                cap: 2048,
+                scaleFactor: 1,
+                deviceMaxTextureSize: gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 'unavailable',
+              });
+            }
 
             if (!isActive()) return;
 
@@ -675,12 +1246,15 @@ export const CesiumViewer: React.FC<{
             if (oldLayer && !viewer.isDestroyed() && !oldLayer.isDestroyed() && viewer.imageryLayers.contains(oldLayer)) {
               viewer.imageryLayers.remove(oldLayer, true);
             }
+            offerInitialCameraBounds(
+              'dom-metadata',
+              Cesium.BoundingSphere.fromRectangle3D(domRectangle, Cesium.Ellipsoid.WGS84, 0),
+            );
             setDomLoadStatus('ready');
           } catch (err) {
-            if (isActive()) {
-              setDomLoadStatus('error');
-              setDomLoadError('Tải DOM thất bại');
-            }
+            if (!isActive() || isAbortError(err)) return;
+            setDomLoadStatus('error');
+            setDomLoadError('Tải DOM thất bại');
             console.error("Lỗi nghiêm trọng khi nạp ảnh DOM dự phòng:", err);
           }
         }
@@ -689,6 +1263,8 @@ export const CesiumViewer: React.FC<{
       return () => {
         isCurrent = false;
         clearTimeout(timer);
+        domFetchController.abort();
+        if (domImageAbortRef.current === domFetchController) domImageAbortRef.current = null;
       };
     }, [offsets.domLon, offsets.domLat, offsets.domScale, offsets.domHeading, project, domLoadAttempt]);
 
@@ -752,21 +1328,37 @@ export const CesiumViewer: React.FC<{
     const fullSceneReadinessKey = displayMode === 'full'
       ? `${project?.id ?? ''}:${modelLoadStatus}:${pointCloudLoadStatus}:${domLoadStatus}`
       : '';
+    const previousDisplayModeRef = useRef<DisplayMode>('full');
 
     // Xử lý chuyển đổi chế độ hiển thị 4 lựa chọn (Full Map, Point Cloud, 3D Model, DOM Image)
     useEffect(() => {
       const viewer = viewerRef.current;
       if (!viewer || viewer.isDestroyed()) return;
+      const displayModeChanged = previousDisplayModeRef.current !== displayMode;
+      previousDisplayModeRef.current = displayMode;
 
       const statusesBelongToProject = activeLayerProjectRef.current === project?.id;
       const modelReady = statusesBelongToProject && modelLoadStatus === 'ready';
       const pointCloudReady = statusesBelongToProject && pointCloudLoadStatus === 'ready';
       const domReady = statusesBelongToProject && domLoadStatus === 'ready';
-      const fullVisibility = modelReady
-        ? { model: true, pointCloud: false, dom: domReady }
-        : pointCloudReady
-          ? { model: false, pointCloud: true, dom: domReady }
-          : { model: false, pointCloud: false, dom: domReady };
+      // A successfully-created primitive/layer is authoritative for visibility.
+      // This prevents a later non-loading error (for example camera/startup coordination)
+      // from hiding an already usable Model/DOM and forcing the user to tick it manually.
+      const modelUsable = statusesBelongToProject && (
+        modelReady || Boolean(modelRef.current && !modelRef.current.isDestroyed())
+      );
+      const domUsable = statusesBelongToProject && (
+        domReady || Boolean(domLayerRef.current && !domLayerRef.current.isDestroyed())
+      );
+      // "Toàn cảnh" luôn chỉ hiển thị Model + DOM. Point Cloud là một chế độ
+      // riêng: chỉ tải/hiển thị khi user chủ động mở tab Point Cloud. Nếu Point Cloud
+      // đã được load trước đó thì giữ trong memory/cache để quay lại nhanh, nhưng vẫn
+      // phải ẩn khi trở về Toàn cảnh để tránh chồng điểm lên Model/DOM gây khó nhìn.
+      const fullVisibility = {
+        model: modelUsable,
+        pointCloud: false,
+        dom: domUsable,
+      };
       const visibilityByMode: Record<DisplayMode, { model: boolean; pointCloud: boolean; dom: boolean }> = {
         full: fullVisibility,
         pointcloud: { model: false, pointCloud: true, dom: false },
@@ -790,11 +1382,13 @@ export const CesiumViewer: React.FC<{
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
         if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
         viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#090d16');
-        // Lazy load: nếu trên mobile và PC chưa được load thì trigger load ngay bây giờ
-        if (isMobile && !pointCloudLoadedRef.current && project) {
-          pointCloudLoadedRef.current = true; // đặt cờ trước để tránh load nhiều lần
-          loadPointCloudLazy();
-        } else {
+        // Point Cloud là on-demand trên cả desktop và mobile. Không tranh băng thông
+        // với Model/DOM khi mới vào Viewer. Full loader ref hỗ trợ cả direct URL,
+        // custom index và Cesium Ion.
+        if (!pointCloudLoadedRef.current && project) {
+          pointCloudLoadedRef.current = true;
+          retryPointCloudRef.current();
+        } else if (displayModeChanged) {
           handleFocusPointCloud();
         }
       } else if (displayMode === 'model3d') {
@@ -802,13 +1396,13 @@ export const CesiumViewer: React.FC<{
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
         if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
         viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#090d16');
-        handleFocusProject();
+        if (displayModeChanged) handleFocusProject();
       } else if (displayMode === 'dom') {
         viewer.scene.globe.show = true;
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true;
         if (viewer.scene.skyBox) viewer.scene.skyBox.show = true;
         viewer.scene.backgroundColor = Cesium.Color.BLACK;
-        handleFocusDom();
+        if (displayModeChanged) handleFocusDom();
       }
     }, [displayMode, project, fullSceneReadinessKey]);
 
@@ -878,205 +1472,6 @@ export const CesiumViewer: React.FC<{
       }
     }, [viewAngle, project]);
 
-    // Lắng nghe phím bấm để tinh chỉnh vị trí của Admin
-    useEffect(() => {
-      if (activeTarget === 'none') return;
-
-      const handleKeyDown = (e: KeyboardEvent) => {
-        const tag = document.activeElement?.tagName.toLowerCase();
-        if (tag === 'input' || tag === 'textarea') return;
-
-        const step = stepSize;
-        const degreeStep = step * 0.000009; // Quy đổi mét sang độ vĩ/kinh (1m ≈ 0.000009 độ)
-
-        console.log(`[Admin Calib] Key: ${e.key} | Target: ${activeTarget} | Step: ${step}m (${degreeStep.toFixed(8)}°)`);
-
-        if (activeTarget === 'model') {
-          switch (e.key.toLowerCase()) {
-            case 'arrowup':
-            case 'i':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, modelLat: prev.modelLat + degreeStep }));
-              break;
-            case 'arrowdown':
-            case 'k':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, modelLat: prev.modelLat - degreeStep }));
-              break;
-            case 'arrowleft':
-            case 'j':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, modelLon: prev.modelLon - degreeStep }));
-              break;
-            case 'arrowright':
-            case 'l':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, modelLon: prev.modelLon + degreeStep }));
-              break;
-            case 'u':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, modelHeight: prev.modelHeight + step }));
-              break;
-            case 'o':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, modelHeight: prev.modelHeight - step }));
-              break;
-            case 'q':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, modelHeading: (prev.modelHeading + 1) % 360 }));
-              break;
-            case 'e':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, modelHeading: (prev.modelHeading - 1) % 360 }));
-              break;
-            case 't':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, modelPitch: (prev.modelPitch || 0) + 0.1 }));
-              break;
-            case 'g':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, modelPitch: (prev.modelPitch || 0) - 0.1 }));
-              break;
-            case 'f':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, modelRoll: (prev.modelRoll || 0) - 0.1 }));
-              break;
-            case 'h':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, modelRoll: (prev.modelRoll || 0) + 0.1 }));
-              break;
-            case '+':
-            case '=':
-              e.preventDefault();
-              setStepSize(prev => Math.min(10.0, prev * 2));
-              break;
-            case '-':
-            case '_':
-              e.preventDefault();
-              setStepSize(prev => Math.max(0.01, prev / 2));
-              break;
-          }
-        } else if (activeTarget === 'dom') {
-          switch (e.key.toLowerCase()) {
-            case 'arrowup':
-            case 'i':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, domLat: prev.domLat + degreeStep }));
-              break;
-            case 'arrowdown':
-            case 'k':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, domLat: prev.domLat - degreeStep }));
-              break;
-            case 'arrowleft':
-            case 'j':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, domLon: prev.domLon - degreeStep }));
-              break;
-            case 'arrowright':
-            case 'l':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, domLon: prev.domLon + degreeStep }));
-              break;
-            case 'q':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, domHeading: ((prev.domHeading || 0) + 1) % 360 }));
-              break;
-            case 'e':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, domHeading: ((prev.domHeading || 0) - 1 + 360) % 360 }));
-              break;
-            case 'u':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, domScale: prev.domScale + 0.005 }));
-              break;
-            case 'o':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, domScale: Math.max(0.1, prev.domScale - 0.005) }));
-              break;
-            case '+':
-            case '=':
-              e.preventDefault();
-              setStepSize(prev => Math.min(10.0, prev * 2));
-              break;
-            case '-':
-            case '_':
-              e.preventDefault();
-              setStepSize(prev => Math.max(0.01, prev / 2));
-              break;
-          }
-        } else if (activeTarget === 'pointcloud') {
-          switch (e.key.toLowerCase()) {
-            case 'arrowup':
-            case 'i':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, pcLat: (prev.pcLat || 0) + degreeStep }));
-              break;
-            case 'arrowdown':
-            case 'k':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, pcLat: (prev.pcLat || 0) - degreeStep }));
-              break;
-            case 'arrowleft':
-            case 'j':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, pcLon: (prev.pcLon || 0) - degreeStep }));
-              break;
-            case 'arrowright':
-            case 'l':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, pcLon: (prev.pcLon || 0) + degreeStep }));
-              break;
-            case 'u':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, pcHeight: (prev.pcHeight || 0) + step }));
-              break;
-            case 'o':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, pcHeight: (prev.pcHeight || 0) - step }));
-              break;
-            case 'q':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, pcHeading: ((prev.pcHeading || 0) + 1) % 360 }));
-              break;
-            case 'e':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, pcHeading: ((prev.pcHeading || 0) - 1 + 360) % 360 }));
-              break;
-            case 't':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, pcPitch: (prev.pcPitch || 0) + 0.1 }));
-              break;
-            case 'g':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, pcPitch: (prev.pcPitch || 0) - 0.1 }));
-              break;
-            case 'f':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, pcRoll: (prev.pcRoll || 0) - 0.1 }));
-              break;
-            case 'h':
-              e.preventDefault();
-              setOffsets(prev => ({ ...prev, pcRoll: (prev.pcRoll || 0) + 0.1 }));
-              break;
-            case '+':
-            case '=':
-              e.preventDefault();
-              setStepSize(prev => Math.min(10.0, prev * 2));
-              break;
-            case '-':
-            case '_':
-              e.preventDefault();
-              setStepSize(prev => Math.max(0.01, prev / 2));
-              break;
-          }
-        }
-      };
-
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [activeTarget, stepSize]);
-
     // Khởi tạo bản đồ 3D (chạy 1 lần duy nhất khi component mount)
     useEffect(() => {
       if (!cesiumContainer.current) return;
@@ -1103,8 +1498,33 @@ export const CesiumViewer: React.FC<{
       });
 
       viewerRef.current = viewer;
+      markViewerPerf(viewerPerfRef, 'cesiumReadyMs');
+      const removeInitialPostRender = viewer.scene.postRender.addEventListener(() => {
+        removeInitialPostRender();
+        setCesiumReady(true);
+        setViewerPhase(current => current === 'initializing' ? 'waiting-project' : current);
+      });
+      viewer.scene.requestRender();
+      const handleInitialCameraInput = () => markInitialCameraInteraction();
+      viewer.canvas.addEventListener('pointerdown', handleInitialCameraInput, { passive: true });
+      viewer.canvas.addEventListener('wheel', handleInitialCameraInput, { passive: true });
+      viewer.canvas.addEventListener('touchstart', handleInitialCameraInput, { passive: true });
+      let latestCameraHeading = 0;
+      let displayedCameraHeading = 0;
+      let cameraHeadingFrame: number | null = null;
+      const flushCameraHeading = () => {
+        cameraHeadingFrame = null;
+        if (viewerRef.current !== viewer || viewer.isDestroyed()) return;
+        const displayedHeading = Math.round(latestCameraHeading) % 360;
+        if (displayedHeading === displayedCameraHeading) return;
+        displayedCameraHeading = displayedHeading;
+        setCameraHeading(displayedHeading);
+      };
       const updateCameraHeading = () => {
-        setCameraHeading((Cesium.Math.toDegrees(viewer.camera.heading) + 360) % 360);
+        latestCameraHeading = (Cesium.Math.toDegrees(viewer.camera.heading) + 360) % 360;
+        if (cameraHeadingFrame === null) {
+          cameraHeadingFrame = requestAnimationFrame(flushCameraHeading);
+        }
       };
       const clearCameraPreset = () => {
         if (!suppressPresetClearRef.current) setActiveCameraView(null);
@@ -1118,7 +1538,7 @@ export const CesiumViewer: React.FC<{
       // ── BEST PRACTICE: ResolutionScale theo device pixel ratio ──
       // Mobile high-DPI (3x) render gấp 9x pixel so với logical — giảm xuống ≤ 1x logic pixel
       if (isMobile) {
-        viewer.resolutionScale = Math.min(1.0, 1.0 / window.devicePixelRatio); // Tương đương ~0.33 trên retina 3x
+        viewer.resolutionScale = 1.0; // Mobile Standard: giữ độ nét tương đương desktop Standard
         viewer.scene.globe.maximumScreenSpaceError = 4.0;
         // Tắt các effect nặng không cần thiết trên mobile
         viewer.scene.fog.enabled = false;
@@ -1129,22 +1549,20 @@ export const CesiumViewer: React.FC<{
         viewer.scene.globe.maximumScreenSpaceError = 2.0;
       }
 
-      // ── BEST PRACTICE: Terrain ──
-      // Trên mobile: dùng EllipsoidTerrainProvider (zero network cost) để giải phóng
-      // băng thông cho model 3D. Desktop giữ World Terrain để có địa hình thật.
-      if (!isMobile) {
-        Cesium.createWorldTerrainAsync()
-          .then((provider) => {
-            if (!viewer.isDestroyed()) viewer.terrainProvider = provider;
-          })
-          .catch((e) => console.error("Lỗi khi load terrain mặc định:", e));
-      }
-      // Mobile: Cesium mặc định đã dùng EllipsoidTerrainProvider, không cần làm gì thêm
+      // Terrain is intentionally deferred until the project is first usable.
+      // Startup bandwidth stays focused on the two primary visuals: Model + DOM.
 
       measurementEntitiesRef.current = [];
 
       return () => {
         focusOriginRef.current = null;
+        if (cameraHeadingFrame !== null) cancelAnimationFrame(cameraHeadingFrame);
+        cameraHeadingFrame = null;
+        removeInitialPostRender();
+        viewer.canvas.removeEventListener('pointerdown', handleInitialCameraInput);
+        viewer.canvas.removeEventListener('wheel', handleInitialCameraInput);
+        viewer.canvas.removeEventListener('touchstart', handleInitialCameraInput);
+        setCesiumReady(false);
         // Restore tracked styles while primitives are still alive, then release
         // every weak reference before Cesium destroys the scene.
         heatmapControllerRef.current.reset();
@@ -1180,6 +1598,171 @@ export const CesiumViewer: React.FC<{
         }
       };
     }, []);
+
+    // Phase 2 startup scheduling: World Terrain is useful after entry, but it does
+    // not participate in Model + DOM first paint. Defer it until the viewer is ready
+    // so terrain requests do not compete with the critical startup assets.
+    useEffect(() => {
+      const viewer = viewerRef.current;
+      if (isMobile || viewerPhase !== 'ready' || terrainLoadStartedRef.current || !viewer || viewer.isDestroyed()) return;
+
+      terrainLoadStartedRef.current = true;
+      void Cesium.createWorldTerrainAsync()
+        .then(provider => {
+          // Terrain is viewer-wide, not project-specific. If the user switches
+          // project while this request is in flight, attaching it to the same live
+          // Viewer is still correct and avoids starting another terrain request.
+          if (viewer.isDestroyed()) return;
+          viewer.terrainProvider = provider;
+          viewer.scene.requestRender();
+        })
+        .catch(error => {
+          terrainLoadStartedRef.current = false;
+          console.error("Lỗi khi load terrain mặc định:", error);
+        });
+    }, [viewerPhase, isMobile]);
+
+    // Start only from explicit spatial metadata here. Runtime loader bounds race
+    // through offerInitialCameraBounds; the first reliable source owns the flight.
+    useEffect(() => {
+      const viewer = viewerRef.current;
+      if (!project || !projectId || project.id !== projectId || !viewer || viewer.isDestroyed()) return;
+
+      let longitude = Number(project.centerLon);
+      let latitude = Number(project.centerLat);
+      if (longitude < 90 && latitude > 90) [longitude, latitude] = [latitude, longitude];
+      const west = Number(project.west ?? project.bounds?.west);
+      const east = Number(project.east ?? project.bounds?.east);
+      const south = Number(project.south ?? project.bounds?.south);
+      const north = Number(project.north ?? project.bounds?.north);
+      const hasExtent = [west, east, south, north].every(Number.isFinite)
+        && west < east && south < north;
+      const expectsHigherPriorityBounds = Boolean(project.pointCloudId || project.metadataUrl || project.modelUrl);
+      if (hasExtent && !expectsHigherPriorityBounds) {
+        const rectangle = Cesium.Rectangle.fromDegrees(west, south, east, north);
+        offerInitialCameraBounds(
+          'project-extent',
+          Cesium.BoundingSphere.fromRectangle3D(rectangle, Cesium.Ellipsoid.WGS84, 0),
+        );
+        return;
+      }
+
+      const expectsRuntimeBounds = expectsHigherPriorityBounds;
+      const hasValidCenter = Number.isFinite(longitude) && Number.isFinite(latitude)
+        && longitude >= -180 && longitude <= 180 && latitude >= -90 && latitude <= 90;
+      if (!expectsRuntimeBounds && hasValidCenter) {
+        offerInitialCameraBounds(
+          'project-center',
+          new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(longitude, latitude, 0), 150),
+        );
+      } else if (!expectsRuntimeBounds && !hasValidCenter) {
+        setViewerPhase('error');
+      }
+    }, [project, projectId]);
+
+    const firstMeaningfulContent = viewerPhase === 'ready';
+    const viewerReady = firstMeaningfulContent;
+
+    useEffect(() => {
+      if (!import.meta.env.DEV || lastLoggedViewerPhaseRef.current === viewerPhase) return;
+      lastLoggedViewerPhaseRef.current = viewerPhase;
+      console.info('[ViewerStartupState]', {
+        projectId,
+        viewerPhase,
+        cesiumReady,
+        projectBoundsReady: firstProjectBoundsReady,
+        primaryVisualReady,
+        primaryVisualType: initialCameraRunRef.current.primaryVisualType,
+        earthRotationActive,
+        initialFlyStarted,
+        initialFlyCompleted,
+        firstMeaningfulContent,
+        modelLoadStatus,
+        pointCloudLoadStatus,
+        domLoadStatus,
+        loadingReason: viewerPhase === 'initializing'
+          ? 'cesium-initializing'
+          : viewerPhase === 'waiting-project'
+            ? 'waiting-project'
+            : viewerPhase === 'flying-to-project'
+              ? 'flying-to-project'
+              : viewerPhase === 'error'
+                ? 'invalid-project-bounds-or-source'
+                : 'first-meaningful-content',
+      });
+    }, [viewerPhase, projectId, cesiumReady, firstProjectBoundsReady, primaryVisualReady, earthRotationActive, initialFlyStarted, initialFlyCompleted, firstMeaningfulContent, pointCloudLoadStatus, modelLoadStatus, domLoadStatus]);
+
+    useEffect(() => {
+      if (!project || viewerPhase !== 'waiting-project' || initialCameraRunRef.current.primaryVisualType) return;
+
+      // Startup UX intentionally ignores Point Cloud. Initial "Toàn cảnh" preloads
+      // only the two lightweight/essential project visuals: 3D Model + DOM.
+      // If both exist, wait until BOTH have either become ready or definitively failed
+      // before leaving the Earth intro. This prevents flying into a DOM-only scene and
+      // making the user manually tick Model a moment later.
+      const expectsDom = Boolean(project.domUrl);
+      const expectsModel = Boolean(project.modelUrl);
+      const domReady = expectsDom && domLoadStatus === 'ready';
+      const domFailed = !expectsDom || ['error', 'unavailable'].includes(domLoadStatus);
+      const modelReady = expectsModel && modelLoadStatus === 'ready';
+      const modelFailed = !expectsModel || ['error', 'unavailable'].includes(modelLoadStatus);
+      const domSettled = domReady || domFailed;
+      const modelSettled = modelReady || modelFailed;
+
+      if (!domSettled || !modelSettled) return;
+
+      // When both are available, Model marks the preferred visual readiness, but
+      // the camera coordinator keeps DOM/project metadata as the geographic target
+      // and uses GLB only to tighten the framing distance.
+      if (domReady && modelReady) {
+        markPrimaryVisualReady('model');
+        return;
+      }
+      if (domReady) {
+        markPrimaryVisualReady('dom');
+        return;
+      }
+      if (modelReady) {
+        markPrimaryVisualReady('model');
+        return;
+      }
+
+      let longitude = Number(project.centerLon);
+      let latitude = Number(project.centerLat);
+      if (longitude < 90 && latitude > 90) [longitude, latitude] = [latitude, longitude];
+      const west = Number(project.west ?? project.bounds?.west);
+      const east = Number(project.east ?? project.bounds?.east);
+      const south = Number(project.south ?? project.bounds?.south);
+      const north = Number(project.north ?? project.bounds?.north);
+      if ([west, east, south, north].every(Number.isFinite) && west < east && south < north) {
+        const rectangle = Cesium.Rectangle.fromDegrees(west, south, east, north);
+        offerInitialCameraBounds(
+          'project-extent',
+          Cesium.BoundingSphere.fromRectangle3D(rectangle, Cesium.Ellipsoid.WGS84, 0),
+        );
+      } else if (Number.isFinite(longitude) && Number.isFinite(latitude)) {
+        offerInitialCameraBounds(
+          'project-center',
+          new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(longitude, latitude, 0), 150),
+        );
+      } else {
+        setViewerPhase('error');
+        return;
+      }
+      markPrimaryVisualReady('fallback');
+    }, [project, viewerPhase, modelLoadStatus, domLoadStatus]);
+
+    useEffect(() => {
+      if (modelLoadStatus === 'ready') markViewerPerf(viewerPerfRef, 'modelReadyMs');
+    }, [modelLoadStatus]);
+
+    useEffect(() => {
+      if (pointCloudLoadStatus === 'ready') markViewerPerf(viewerPerfRef, 'pointCloudReadyMs');
+    }, [pointCloudLoadStatus]);
+
+    useEffect(() => {
+      if (domLoadStatus === 'ready') markViewerPerf(viewerPerfRef, 'domReadyMs');
+    }, [domLoadStatus]);
 
     // Nạp dữ liệu khi dự án (project) thay đổi
     useEffect(() => {
@@ -1234,7 +1817,7 @@ export const CesiumViewer: React.FC<{
       );
 
       // 1. Nạp mô hình 3D model
-      const loadOfflineModel = async (flyAfterLoad = true) => {
+      const loadOfflineModel = async () => {
         const generation = ++modelLoadGenerationRef.current;
         const isActive = () => isCurrent && generation === modelLoadGenerationRef.current && !viewer.isDestroyed();
         try {
@@ -1242,16 +1825,6 @@ export const CesiumViewer: React.FC<{
           if (!modelUrl) {
             if (isActive()) setModelLoadStatus('unavailable');
             console.log("Dự án này không có mô hình 3D Mesh.");
-            const position = Cesium.Cartesian3.fromDegrees(longitude, latitude, 20);
-            const targetSphere = new Cesium.BoundingSphere(position, 100.0);
-            viewer.camera.flyToBoundingSphere(targetSphere, {
-              duration: 3,
-              offset: new Cesium.HeadingPitchRange(
-                0,
-                Cesium.Math.toRadians(-35),
-                180
-              )
-            });
             return;
           }
 
@@ -1313,20 +1886,28 @@ export const CesiumViewer: React.FC<{
           );
 
           console.log("Nạp 3D model từ:", modelUrl);
-          const model = await Cesium.Model.fromGltfAsync({
+
+          // Model là một trong hai layer startup chính (Model + DOM), vì vậy cho phép
+          // Cesium tự retry các lỗi mạng tạm thời (5xx/429/timeout/network). Không retry
+          // 4xx cố định như 404 để tránh tải lặp vô ích khi URL asset thực sự sai.
+          const modelResource = new Cesium.Resource({
             url: modelUrl,
-            modelMatrix: modelMatrix,
+            retryAttempts: 2,
+            retryCallback: (_resource, requestError) => {
+              const statusCode = (requestError as { statusCode?: number } | undefined)?.statusCode;
+              return statusCode == null || statusCode === 0 || statusCode === 408 || statusCode === 429 || statusCode >= 500;
+            },
+          });
+
+          // Giữ options tối thiểu/stable cho GLB. Các option mặc định của Cesium 1.143
+          // đã là asynchronous + incrementallyLoadTextures + clampAnimations; không cần
+          // ép releaseGltfJson trong startup path. Điều này giảm biến số khi asset GLB
+          // có extension/texture đặc thù.
+          const model = await Cesium.Model.fromGltfAsync({
+            url: modelResource,
+            modelMatrix,
             scale: 1.0,
-            // ── BEST PRACTICE (Cesium Community + gltf-pipeline guide) ──
-            // incrementallyLoadTextures: model hiện ra ngay, texture stream vào dần
-            // → tránh màn hình đen/trắng kéo dài trong lúc chờ texture decode
             incrementallyLoadTextures: true,
-            // releaseGltfJson: giải phóng JSON buffer ngay sau khi parse xong
-            // → tiết kiệm ~10-30% RAM trên mobile
-            releaseGltfJson: true,
-            // clampAnimations: nếu model có animation, clamp ở frame cuối khi hết
-            // thay vì loop liên tục → giảm CPU usage nền
-            clampAnimations: true,
           });
 
           if (!isActive()) {
@@ -1337,26 +1918,47 @@ export const CesiumViewer: React.FC<{
           modelRef.current = model;
           model.show = layerVisibilityRef.current.model;
           model.color = Cesium.Color.WHITE.withAlpha(layerOpacityRef.current.model);
+
+          // From this point the GLB itself is successfully created and attached.
+          // Mark it ready BEFORE camera/startup coordination so a secondary error
+          // cannot poison modelLoadStatus and hide an otherwise valid primitive.
           setModelLoadStatus('ready');
+          setModelLoadError(null);
 
-          const targetSphere = new Cesium.BoundingSphere(position, 200.0);
-          if (flyAfterLoad) viewer.camera.flyToBoundingSphere(targetSphere, {
-            // Mobile: bay nhanh hơn để không block interaction
-            duration: isMobile ? 1.5 : 2.5,
-            offset: new Cesium.HeadingPitchRange(
-              0,
-              Cesium.Math.toRadians(-30),
-              450
-            )
-          });
-
-          // requestRenderMode: yêu cầu render 1 frame sau khi model load xong
-          if (!(viewer as any).useDefaultRenderLoop) viewer.scene.requestRender();
+          try {
+            offerInitialCameraBounds('glb', model.boundingSphere);
+            // Startup coordinator decides when Model + DOM together are ready.
+            // Do not independently unlock the intro from this loader.
+            viewer.scene.requestRender();
+          } catch (postLoadError) {
+            console.warn('[Model] GLB loaded, but post-load startup coordination failed:', postLoadError);
+          }
         } catch (error) {
           if (isActive()) {
+            // If the primitive already exists, the GLB load succeeded. Keep the
+            // layer usable and report only a warning instead of a false load error.
+            const attachedModel = modelRef.current;
+            if (attachedModel && !attachedModel.isDestroyed()) {
+              setModelLoadStatus('ready');
+              setModelLoadError(null);
+              console.warn('[Model] Ignoring post-attach error because the model is already usable:', error);
+              return;
+            }
+            const statusCode = (error as { statusCode?: number } | undefined)?.statusCode;
+            const message = error instanceof Error ? error.message : String(error);
             setModelLoadStatus('error');
-            setModelLoadError('Tải Model thất bại');
-            console.error("Lỗi khi load mô hình 3D:", error);
+            setModelLoadError(
+              statusCode
+                ? `Tải Model thất bại (HTTP ${statusCode})`
+                : 'Tải Model thất bại'
+            );
+            console.error("Lỗi khi load mô hình 3D:", {
+              projectId: project.id,
+              modelUrl: project.modelUrl,
+              statusCode,
+              message,
+              error,
+            });
           }
         }
       };
@@ -1417,8 +2019,11 @@ export const CesiumViewer: React.FC<{
       const loadPointCloud = async () => {
         const generation = ++pointCloudLoadGenerationRef.current;
         const isActive = () => isCurrent && generation === pointCloudLoadGenerationRef.current && !viewer.isDestroyed();
+        pointCloudIndexAbortRef.current?.abort();
+        pointCloudIndexAbortRef.current = null;
         const pcId = project.pointCloudId;
         if (!pcId) {
+          pointCloudLoadedRef.current = false;
           if (isActive()) setPointCloudLoadStatus('unavailable');
           console.log("Dự án này không có mây điểm Point Cloud.");
           return;
@@ -1476,6 +2081,8 @@ export const CesiumViewer: React.FC<{
             }
             
             applyPcCalibration(tileset, targetPosition);
+            offerInitialCameraBounds('point-cloud-root', tileset.boundingSphere);
+            watchPointCloudCoarseContent(tileset);
             setPointCloudLoadStatus('ready');
             return;
           }
@@ -1484,8 +2091,12 @@ export const CesiumViewer: React.FC<{
           if (pointCloudSource.kind === 'custom-index') {
             console.log("Phát hiện custom copc-tiles index.json, đọc danh sách tiles:", pcId);
             try {
-              const res = await fetch(pcId);
+              const indexController = new AbortController();
+              pointCloudIndexAbortRef.current = indexController;
+              const res = await fetch(pcId, { signal: indexController.signal, cache: 'default' });
+              if (!res.ok) throw new Error(`Point Cloud index request failed: HTTP ${res.status}`);
               const indexData = await res.json();
+              if (pointCloudIndexAbortRef.current === indexController) pointCloudIndexAbortRef.current = null;
 
               if (isCopcTilesIndex(indexData)) {
                 const baseUrl = getPointCloudIndexBaseUrl(pcId);
@@ -1541,11 +2152,23 @@ export const CesiumViewer: React.FC<{
                   }
                 }
                 if (firstTileset) {
+                  const pointCloudSpheres = loadedPointCloudTilesetsRef.current
+                    .filter(ts => !ts.isDestroyed() && !!ts.boundingSphere)
+                    .map(ts => ts.boundingSphere);
+                  const overviewBounds = pointCloudSpheres.length > 1
+                    ? Cesium.BoundingSphere.fromBoundingSpheres(pointCloudSpheres)
+                    : firstTileset.boundingSphere;
+                  // Custom indexes may split one site into several tilesets.
+                  // Fit the complete initial site, not only the first tile.
+                  offerInitialCameraBounds('point-cloud-root', overviewBounds);
+                  watchPointCloudCoarseContent(firstTileset);
                   setPointCloudLoadStatus('ready');
                   return;
                 }
               }
             } catch (indexErr) {
+              if (isAbortError(indexErr) || !isActive()) return;
+              pointCloudIndexAbortRef.current = null;
               console.warn("Không thể đọc index.json, thử load trực tiếp:", indexErr);
             }
           }
@@ -1586,16 +2209,20 @@ export const CesiumViewer: React.FC<{
             }
             
             applyPcCalibration(tileset, targetPosition);
+            offerInitialCameraBounds('point-cloud-root', tileset.boundingSphere);
+            watchPointCloudCoarseContent(tileset);
             setPointCloudLoadStatus('ready');
             return;
           }
 
           console.warn("Không nhận diện được định dạng pointCloudId:", pcId);
+          pointCloudLoadedRef.current = false;
           if (isActive()) {
             setPointCloudLoadStatus('error');
             setPointCloudLoadError('Tải Point Cloud thất bại');
           }
         } catch (error) {
+          pointCloudLoadedRef.current = false;
           if (isActive()) {
             setPointCloudLoadStatus('error');
             setPointCloudLoadError('Tải Point Cloud thất bại');
@@ -1607,27 +2234,21 @@ export const CesiumViewer: React.FC<{
       // Reset lazy load flag khi đổi project
       pointCloudLoadedRef.current = false;
 
-      retryModelRef.current = () => { void loadOfflineModel(false); };
-      retryPointCloudRef.current = () => {
-        if (isMobile) void loadPointCloudLazy(false);
-        else void loadPointCloud();
-      };
+      retryModelRef.current = () => { void loadOfflineModel(); };
+      retryPointCloudRef.current = () => { void loadPointCloud(); };
 
       loadOfflineModel();
 
-      // ── BEST PRACTICE: Lazy Load Point Cloud ──
-      // Desktop: load ngay (không ảnh hưởng hiệu năng nhiều)
-      // Mobile: CHỈ load khi user chủ động chuyển sang chế độ Point Cloud
-      // → tránh crash do OOM (Out Of Memory) khi GPU phải xử lý cả model + PC cùng lúc
-      if (!isMobile) {
-        loadPointCloud();
-      }
-      // Mobile: loadPointCloudLazy() sẽ được gọi trong displayMode effect khi user bấm PC mode
+      // Point Cloud KHÔNG tải ở startup trên bất kỳ thiết bị nào.
+      // Chỉ load khi user chủ động mở tab Point Cloud. Việc này bỏ phần request/parse/GPU
+      // nặng nhất khỏi critical path ban đầu; Model + DOM vẫn tải song song.
 
       return () => {
         isCurrent = false;
         modelLoadGenerationRef.current += 1;
         pointCloudLoadGenerationRef.current += 1;
+        pointCloudIndexAbortRef.current?.abort();
+        pointCloudIndexAbortRef.current = null;
 
         // Nếu component đang unmount (viewer chuẩn bị hủy), ta không cần remove từng phần tử
         // vì viewer.destroy() sẽ tự dọn dẹp WebGL ở tick tiếp theo.
@@ -1668,102 +2289,6 @@ export const CesiumViewer: React.FC<{
         } catch (e) { }
       };
     }, [project]);
-
-    // ── Hàm lazy load Point Cloud cho Mobile ──
-    // Được gọi khi user lần đầu chuyển sang chế độ Point Cloud trên mobile
-    const loadPointCloudLazy = async (focusAfterLoad = true) => {
-      const viewer = viewerRef.current;
-      if (!viewer || viewer.isDestroyed() || !project) return;
-      const generation = ++pointCloudLoadGenerationRef.current;
-      const isActive = () => generation === pointCloudLoadGenerationRef.current && activeLayerProjectRef.current === project.id && !viewer.isDestroyed();
-
-      let longitude = project.centerLon || 106.8099;
-      let latitude = project.centerLat || 10.8404;
-      if (longitude < 90 && latitude > 90) { const t = longitude; longitude = latitude; latitude = t; }
-
-      const pcId = project.pointCloudId;
-      if (!pcId) {
-        if (isActive()) setPointCloudLoadStatus('unavailable');
-        return;
-      }
-      const pointCloudSource = classifyPointCloudSource(pcId);
-
-      setPointCloudLoadStatus('loading');
-      setPointCloudLoadError(null);
-      loadedPointCloudTilesetsRef.current.forEach(tileset => {
-        if (!tileset.isDestroyed()) viewer.scene.primitives.remove(tileset);
-      });
-      loadedPointCloudTilesetsRef.current = [];
-      pointCloudRef.current = null;
-      pointCloudOriginalCenterRef.current = null;
-
-      const targetPosition = Cesium.Cartesian3.fromDegrees(longitude, latitude, 0);
-
-      // Tái sử dụng hàm applyPcCalibration từ closure của useEffect project
-      // (code này cần được inline vì nằm ngoài scope)
-      const applyMatrix = (tileset: Cesium.Cesium3DTileset) => {
-        if (!tileset.boundingSphere) return;
-        if (!pointCloudOriginalCenterRef.current) {
-          pointCloudOriginalCenterRef.current = tileset.boundingSphere.center.clone();
-        }
-        const bsCenter = pointCloudOriginalCenterRef.current;
-        let pcLon = 0, pcLat = 0, pcHeight = 0, pcHeading = 0, pcPitch = 0, pcRoll = 0;
-        if (project.calibration) {
-          try { const p = JSON.parse(project.calibration); pcLon=p.pcLon??0; pcLat=p.pcLat??0; pcHeight=p.pcHeight??0; pcHeading=p.pcHeading??0; pcPitch=p.pcPitch??0; pcRoll=p.pcRoll??0; } catch(e){}
-        }
-        const offsetPos = Cesium.Cartesian3.fromDegrees(longitude + pcLon, latitude + pcLat, pcHeight);
-        const hpr = new Cesium.HeadingPitchRoll(Cesium.Math.toRadians(pcHeading), Cesium.Math.toRadians(pcPitch), Cesium.Math.toRadians(pcRoll));
-        const enuToEcef = Cesium.Transforms.eastNorthUpToFixedFrame(bsCenter);
-        const ecefToEnu = Cesium.Matrix4.inverse(enuToEcef, new Cesium.Matrix4());
-        const hprFixedFrame = Cesium.Transforms.headingPitchRollToFixedFrame(offsetPos, hpr);
-        tileset.modelMatrix = Cesium.Matrix4.multiply(hprFixedFrame, ecefToEnu, new Cesium.Matrix4());
-      };
-
-      try {
-        let tileset: Cesium.Cesium3DTileset | null = null;
-        if (pointCloudSource.kind === 'direct-url') {
-          tileset = await Cesium.Cesium3DTileset.fromUrl(pcId);
-        } else if (pointCloudSource.kind === 'ion-asset') {
-          tileset = await Cesium.Cesium3DTileset.fromIonAssetId(pointCloudSource.assetId);
-        }
-        if (!tileset) throw new Error('Unsupported Point Cloud source');
-        if (!isActive()) {
-          if (!tileset.isDestroyed()) tileset.destroy();
-          return;
-        }
-        viewer.scene.primitives.add(tileset);
-        pointCloudRef.current = tileset;
-        loadedPointCloudTilesetsRef.current = [tileset];
-        tileset.show = layerVisibilityRef.current.pointCloud;
-        
-        // ── BEST PRACTICE TỐI ƯU POINT CLOUD TRONG CHẾ ĐỘ LAZY LOAD ──
-        tileset.skipLevelOfDetail = true;
-        tileset.baseScreenSpaceError = 1024;
-        tileset.skipScreenSpaceErrorFactor = 16;
-        tileset.skipLevels = 1;
-        tileset.immediatelyLoadDesiredLevelOfDetail = false;
-        tileset.maximumScreenSpaceError = isMobile ? 32.0 : 16.0;
-        (tileset as any).maximumMemoryUsage = isMobile ? 256 : 1024;
-
-        if (tileset.pointCloudShading) {
-          tileset.pointCloudShading.attenuation = true;
-          tileset.pointCloudShading.geometricErrorScale = 1.0;
-          tileset.pointCloudShading.maximumAttenuation = isMobile ? 2.0 : 4.0;
-        }
-
-        applyMatrix(tileset);
-        setPointCloudLoadStatus('ready');
-        if (focusAfterLoad) handleFocusPointCloud();
-        viewer.scene.requestRender();
-      } catch(e) {
-        pointCloudLoadedRef.current = false; // Reset để có thể thử lại
-        if (isActive()) {
-          setPointCloudLoadStatus('error');
-          setPointCloudLoadError('Tải Point Cloud thất bại');
-        }
-        console.error("Lazy load PC thất bại:", e);
-      }
-    };
 
     const retryModel = () => retryModelRef.current();
     const retryPointCloud = () => retryPointCloudRef.current();
@@ -1887,7 +2412,7 @@ export const CesiumViewer: React.FC<{
       // High Quality render sắc nét theo DPR thật của màn hình, Standard tối ưu 1.0 (hoặc 0.75 trên mobile)
       viewer.resolutionScale = isHigh 
         ? Math.max(1.0, Math.min(2.0, window.devicePixelRatio || 1.0)) 
-        : (isMobile ? Math.min(1.0, 1.0 / (window.devicePixelRatio || 1)) : 1.0);
+        : 1.0;
 
       if ((viewer.scene.postProcessStages as any).fxaa) {
         (viewer.scene.postProcessStages as any).fxaa.enabled = isHigh;
@@ -2547,6 +3072,10 @@ export const CesiumViewer: React.FC<{
         hydratedMeasurementsProjectRef.current = null;
         return;
       }
+      if (String(project.id) !== String(projectId)) return;
+      // Measurement persistence is optional/background work. Do not let its API
+      // request compete with Model + DOM during the Earth intro/startup path.
+      if (viewerPhase !== 'ready') return;
       if (hydratedMeasurementsProjectRef.current === projectId) return;
 
       // A project switch replaces only the local measurement layer. It must not
@@ -2578,9 +3107,9 @@ export const CesiumViewer: React.FC<{
           console.error('[Measurement persistence] load:', error);
         });
       return () => { cancelled = true; };
-      // Hydration is intentionally keyed by project identity only.
+      // Hydration is keyed by project identity and deferred until viewer ready.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [projectId, project]);
+    }, [projectId, project, viewerPhase]);
 
     // Helper bắt tọa độ 3D thông minh
     const getPickedPosition = (windowPosition: Cesium.Cartesian2): Cesium.Cartesian3 | null => {
@@ -4394,17 +4923,40 @@ export const CesiumViewer: React.FC<{
     }, [toolMode, lockView]);
 
     const getProjectBoundingSphere = () => {
-      const spheres: Cesium.BoundingSphere[] = [];
-      loadedPointCloudTilesetsRef.current.forEach(tileset => {
-        if (!tileset.isDestroyed() && tileset.boundingSphere) spheres.push(tileset.boundingSphere);
-      });
-      if (modelRef.current && !modelRef.current.isDestroyed() && modelRef.current.boundingSphere) {
-        spheres.push(modelRef.current.boundingSphere);
+      // "Bay tới Dự án" must target the same calibrated project footprint users see
+      // in Toàn cảnh. Model/Point Cloud bounding spheres can be in a different local
+      // frame or cover only a subset, so they must not override a valid DOM footprint.
+      const domSphere = getCurrentDomCameraBoundingSphere();
+      if (domSphere) {
+        const model = modelRef.current;
+        const modelSphere = model && !model.isDestroyed() ? model.boundingSphere : undefined;
+        return buildAdaptiveProjectCameraSphere(domSphere, modelSphere);
       }
-      if (spheres.length === 1) return spheres[0];
-      if (spheres.length > 1) return Cesium.BoundingSphere.fromBoundingSpheres(spheres);
+
+      const west = Number(project?.west ?? project?.bounds?.west);
+      const east = Number(project?.east ?? project?.bounds?.east);
+      const south = Number(project?.south ?? project?.bounds?.south);
+      const north = Number(project?.north ?? project?.bounds?.north);
+      if ([west, east, south, north].every(Number.isFinite) && west < east && south < north) {
+        return Cesium.BoundingSphere.fromRectangle3D(
+          Cesium.Rectangle.fromDegrees(west, south, east, north),
+          Cesium.Ellipsoid.WGS84,
+          0,
+        );
+      }
+
+      const model = modelRef.current;
+      if (model && !model.isDestroyed() && model.boundingSphere) return model.boundingSphere;
+
+      let longitude = Number(project?.centerLon);
+      let latitude = Number(project?.centerLat);
+      if (longitude < 90 && latitude > 90) [longitude, latitude] = [latitude, longitude];
+      if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
+        longitude = 106.8099;
+        latitude = 10.8404;
+      }
       return new Cesium.BoundingSphere(
-        Cesium.Cartesian3.fromDegrees(project?.centerLon || 106.8099, project?.centerLat || 10.8404, 50),
+        Cesium.Cartesian3.fromDegrees(longitude, latitude, 50),
         100,
       );
     };
@@ -4419,21 +4971,31 @@ export const CesiumViewer: React.FC<{
       return getProjectBoundingSphere();
     };
 
-    const flyToSphere = (sphere: Cesium.BoundingSphere, pitch = Cesium.Math.toRadians(-30)) => {
+    const flyToSphere = (
+      sphere: Cesium.BoundingSphere,
+      pitch = Cesium.Math.toRadians(-30),
+      rangeMultiplier = 2.5,
+    ) => {
       const viewer = viewerRef.current;
       if (!viewer || viewer.isDestroyed()) return;
       const radius = Math.max(10, sphere.radius);
       viewer.camera.cancelFlight();
       viewer.camera.flyToBoundingSphere(sphere, {
         duration: 1.35,
-        offset: new Cesium.HeadingPitchRange(viewer.camera.heading, pitch, Math.min(50000, Math.max(30, radius * 2.5))),
+        offset: new Cesium.HeadingPitchRange(
+          viewer.camera.heading,
+          pitch,
+          Math.min(50000, Math.max(30, radius * rangeMultiplier)),
+        ),
       });
     };
 
     const handleFocusProject = () => {
       const viewer = viewerRef.current;
       if (!viewer || viewer.isDestroyed()) return;
-      flyToSphere(getProjectBoundingSphere());
+      // Match the tighter startup overview. Point Cloud keeps its existing 2.5x
+      // framing when the dedicated Point Cloud action is used.
+      flyToSphere(getProjectBoundingSphere(), Cesium.Math.toRadians(-30), 1.72);
     };
 
     const handleFocusPointCloud = () => {
@@ -4445,29 +5007,75 @@ export const CesiumViewer: React.FC<{
     const handleFocusDOM = () => {
       const viewer = viewerRef.current;
       if (!viewer || viewer.isDestroyed()) return;
+
       setShowDom(true);
 
-      const centerLon = (project?.centerLon || 106.8099) + (offsets.domLon || 0);
-      const centerLat = (project?.centerLat || 10.8404) + (offsets.domLat || 0);
-      const scale = offsets.domScale || 1.0;
+      // Dùng đúng footprint DOM đã calibration từ metadata.
+      // Không dùng project.centerLon/centerLat làm target chính vì tâm project
+      // có thể lệch với tâm ảnh DOM (ví dụ Quy Nhơn).
+      const calibratedDomSphere = getCurrentDomCameraBoundingSphere();
+
+      if (calibratedDomSphere) {
+        const radius = Math.max(10, calibratedDomSphere.radius);
+        viewer.camera.cancelFlight();
+        viewer.camera.flyToBoundingSphere(calibratedDomSphere, {
+          duration: 2,
+          offset: new Cesium.HeadingPitchRange(
+            0,
+            Cesium.Math.toRadians(-90),
+            Math.min(50000, Math.max(30, radius * 2.2)),
+          ),
+        });
+        viewer.scene.requestRender();
+        return;
+      }
+
+      // Fallback chỉ khi metadata DOM chưa resolve / bounds chưa hợp lệ.
+      let centerLon = Number(project?.centerLon ?? 106.8099);
+      let centerLat = Number(project?.centerLat ?? 10.8404);
+      if (centerLon < 90 && centerLat > 90) [centerLon, centerLat] = [centerLat, centerLon];
+      centerLon += offsets.domLon || 0;
+      centerLat += offsets.domLat || 0;
+
+      const scale = Number.isFinite(offsets.domScale) && offsets.domScale > 0
+        ? offsets.domScale
+        : 1.0;
       const halfWidth = 0.005 * scale;
       const halfHeight = 0.005 * scale;
-
       const finalWest = centerLon - halfWidth;
       const finalEast = centerLon + halfWidth;
       const finalSouth = centerLat - halfHeight;
       const finalNorth = centerLat + halfHeight;
 
-      const domRectangle = Cesium.Rectangle.fromDegrees(finalWest, finalSouth, finalEast, finalNorth);
-      const bs = Cesium.BoundingSphere.fromRectangle3D(domRectangle);
-      viewer.camera.flyToBoundingSphere(bs, {
+      if (
+        ![finalWest, finalEast, finalSouth, finalNorth].every(Number.isFinite) ||
+        finalWest >= finalEast || finalSouth >= finalNorth ||
+        finalWest < -180 || finalEast > 180 || finalSouth < -90 || finalNorth > 90
+      ) {
+        console.warn('[DOM Focus] Invalid fallback DOM bounds', {
+          finalWest, finalEast, finalSouth, finalNorth,
+        });
+        return;
+      }
+
+      const domRectangle = Cesium.Rectangle.fromDegrees(
+        finalWest, finalSouth, finalEast, finalNorth,
+      );
+      const fallbackSphere = Cesium.BoundingSphere.fromRectangle3D(
+        domRectangle, Cesium.Ellipsoid.WGS84, 0,
+      );
+      const radius = Math.max(10, fallbackSphere.radius);
+
+      viewer.camera.cancelFlight();
+      viewer.camera.flyToBoundingSphere(fallbackSphere, {
         duration: 2,
         offset: new Cesium.HeadingPitchRange(
           0,
           Cesium.Math.toRadians(-90),
-          bs.radius * 2.2
-        )
+          Math.min(50000, Math.max(30, radius * 2.2)),
+        ),
       });
+      viewer.scene.requestRender();
     };
 
     const handleFocusDom = handleFocusDOM;
@@ -4517,10 +5125,161 @@ export const CesiumViewer: React.FC<{
         measurementDragCancelRef.current?.();
         restoreMeasurementCamera();
         setToolMode('none');
-        setActiveTarget('none');
       },
       clearClipping: () => clippingControllerRef.current?.clear(),
     });
+
+    const handleToggleZoomArea = () => {
+      markInitialCameraInteraction();
+      measurementDragCancelRef.current?.();
+      restoreMeasurementCamera();
+      setToolMode('none');
+      setIsFocusPicking(false);
+      stopFlightPath();
+      stopSelectedOrbit();
+      stopCameraAnimation();
+      setZoomAreaRect(null);
+      setIsZoomAreaSelecting((active) => !active);
+    };
+
+    useEffect(() => {
+      const viewer = viewerRef.current;
+      if (!viewer || viewer.isDestroyed() || !isZoomAreaSelecting) return;
+
+      const canvas = viewer.scene.canvas;
+      const controller = viewer.scene.screenSpaceCameraController;
+      const previousCursor = canvas.style.cursor;
+      const previousEnableInputs = controller.enableInputs;
+      controller.enableInputs = false;
+      canvas.style.cursor = 'crosshair';
+
+      let dragging = false;
+      let startX = 0;
+      let startY = 0;
+
+      const clampToCanvas = (clientX: number, clientY: number) => {
+        const rect = canvas.getBoundingClientRect();
+        return {
+          x: Cesium.Math.clamp(clientX - rect.left, 0, rect.width),
+          y: Cesium.Math.clamp(clientY - rect.top, 0, rect.height),
+        };
+      };
+
+      const updateSelectionRect = (x: number, y: number) => {
+        const left = Math.min(startX, x);
+        const top = Math.min(startY, y);
+        setZoomAreaRect({
+          left,
+          top,
+          width: Math.abs(x - startX),
+          height: Math.abs(y - startY),
+        });
+      };
+
+      const onPointerDown = (event: PointerEvent) => {
+        if (event.button !== 0) return;
+        const point = clampToCanvas(event.clientX, event.clientY);
+        dragging = true;
+        startX = point.x;
+        startY = point.y;
+        setZoomAreaRect({ left: startX, top: startY, width: 0, height: 0 });
+        event.preventDefault();
+      };
+
+      const onPointerMove = (event: PointerEvent) => {
+        if (!dragging) return;
+        const point = clampToCanvas(event.clientX, event.clientY);
+        updateSelectionRect(point.x, point.y);
+        event.preventDefault();
+      };
+
+      const finishSelection = (event: PointerEvent) => {
+        if (!dragging) return;
+        dragging = false;
+        const end = clampToCanvas(event.clientX, event.clientY);
+        const minX = Math.min(startX, end.x);
+        const maxX = Math.max(startX, end.x);
+        const minY = Math.min(startY, end.y);
+        const maxY = Math.max(startY, end.y);
+        const width = maxX - minX;
+        const height = maxY - minY;
+
+        setZoomAreaRect(null);
+        if (width < 12 || height < 12) return;
+
+        const samples = [
+          new Cesium.Cartesian2(minX, minY),
+          new Cesium.Cartesian2(maxX, minY),
+          new Cesium.Cartesian2(maxX, maxY),
+          new Cesium.Cartesian2(minX, maxY),
+          new Cesium.Cartesian2((minX + maxX) / 2, (minY + maxY) / 2),
+        ];
+
+        const worldPoints = samples
+          .map((screenPoint) => {
+            const picked = getPickedPosition(screenPoint);
+            if (picked) return picked;
+            const ellipsoidPoint = viewer.camera.pickEllipsoid(screenPoint, viewer.scene.globe.ellipsoid);
+            return isFiniteCartesian(ellipsoidPoint) ? Cesium.Cartesian3.clone(ellipsoidPoint) : null;
+          })
+          .filter((point): point is Cesium.Cartesian3 => !!point);
+
+        if (worldPoints.length < 2) return;
+
+        const sphere = Cesium.BoundingSphere.fromPoints(worldPoints);
+        if (!Number.isFinite(sphere.radius)) return;
+
+        const radius = Math.max(5, sphere.radius);
+        const heading = viewer.camera.heading;
+        const pitch = Cesium.Math.clamp(
+          viewer.camera.pitch,
+          Cesium.Math.toRadians(-80),
+          Cesium.Math.toRadians(-20),
+        );
+
+        setIsZoomAreaSelecting(false);
+        viewer.camera.cancelFlight();
+        viewer.camera.flyToBoundingSphere(
+          new Cesium.BoundingSphere(sphere.center, radius),
+          {
+            duration: 1.0,
+            offset: new Cesium.HeadingPitchRange(
+              heading,
+              pitch,
+              Math.max(15, radius * 2.0),
+            ),
+          },
+        );
+      };
+
+      const cancelSelection = () => {
+        dragging = false;
+        setZoomAreaRect(null);
+        setIsZoomAreaSelecting(false);
+      };
+
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') cancelSelection();
+      };
+
+      canvas.addEventListener('pointerdown', onPointerDown, true);
+      window.addEventListener('pointermove', onPointerMove, true);
+      window.addEventListener('pointerup', finishSelection, true);
+      window.addEventListener('keydown', onKeyDown);
+
+      return () => {
+        canvas.removeEventListener('pointerdown', onPointerDown, true);
+        window.removeEventListener('pointermove', onPointerMove, true);
+        window.removeEventListener('pointerup', finishSelection, true);
+        window.removeEventListener('keydown', onKeyDown);
+        if (!viewer.isDestroyed()) {
+          controller.enableInputs = previousEnableInputs;
+          canvas.style.cursor = previousCursor;
+          viewer.scene.requestRender();
+        }
+        setZoomAreaRect(null);
+      };
+    }, [isZoomAreaSelecting]);
 
     useEffect(() => {
       const viewer = viewerRef.current;
@@ -4782,24 +5541,33 @@ export const CesiumViewer: React.FC<{
       setToolMode(current => current === mode ? 'none' : mode);
     };
 
-    return (
-      <div className="relative w-full h-screen">
-        <UnifiedToolbar
-          displayMode={displayMode}
-          onDisplayModeChange={setDisplayMode}
-          viewAngle={viewAngle}
-          onViewAngleChange={setViewAngle}
-          reserveAdminPanel={isAdmin}
-          reserveSidebar={isSidebarOpen}
-        />
+    const handleInitialDisplayModeChange = (mode: DisplayMode) => {
+      if (viewerPhase !== 'ready') markInitialCameraInteraction();
+      setDisplayMode(mode);
+    };
 
+    const closeSidebarForCanvasAction = () => {
+      if (window.matchMedia('(max-width: 63.999rem)').matches) {
+        onToggleSidebar?.(false);
+      }
+    };
+
+    const initialLoadingTitle = viewerPhase === 'flying-to-project'
+      ? loadingCopy.positioningProject
+      : loadingCopy.loadingProject;
+
+    return (
+      <div className="viewer-shell relative flex h-full min-h-0 w-full overflow-hidden">
         {/* Component Potree Sidebar điều khiển bên trái */}
         <PotreeSidebar
           isOpen={isSidebarOpen}
           onToggleOpen={onToggleSidebar ? () => onToggleSidebar(!isSidebarOpen) : undefined}
           projectName={projectName}
           currentMode={toolMode}
-          onModeChange={handleToolModeChange}
+          onModeChange={(mode) => {
+            handleToolModeChange(mode);
+            if (toolMode !== mode) closeSidebarForCanvasAction();
+          }}
           onClear={handleClear}
           measurementManager={(
             <MeasurementManager
@@ -4808,7 +5576,10 @@ export const CesiumViewer: React.FC<{
               onDelete={handleDeleteMeasurement}
             />
           )}
-          onClipTool={handleClipTool}
+          onClipTool={(tool) => {
+            handleClipTool(tool);
+            if (tool !== 'clear') closeSidebarForCanvasAction();
+          }}
           activeClipTool={activeClipTool}
           clipInstruction={clipInstruction}
           clipMode={clipMode}
@@ -4819,12 +5590,30 @@ export const CesiumViewer: React.FC<{
           onToggleShowMeasurements={() => setShowMeasurements(!showMeasurements)}
           cameraSpeed={cameraSpeed}
           onCameraSpeedChange={setCameraSpeed}
-          onSetCameraView={handleSetCameraView}
-          onNavigationAction={handleNavigationAction}
+          onSetCameraView={(view) => {
+            markInitialCameraInteraction();
+            handleSetCameraView(view);
+            closeSidebarForCanvasAction();
+          }}
+          onNavigationAction={(action) => {
+            markInitialCameraInteraction();
+            handleNavigationAction(action);
+            if (action === 'compass') closeSidebarForCanvasAction();
+          }}
           isFocusPicking={isFocusPicking}
           isReturningFocusOrigin={isReturningFocusOrigin}
-          onToggleFocusPick={handleToggleFocusPick}
+          onToggleFocusPick={() => {
+            const startsCanvasPick = !isFocusPicking && !isReturningFocusOrigin;
+            handleToggleFocusPick();
+            if (startsCanvasPick) closeSidebarForCanvasAction();
+          }}
           navigationMode={navigationMode}
+          isZoomAreaSelecting={isZoomAreaSelecting}
+          onToggleZoomArea={() => {
+            const startsCanvasSelection = !isZoomAreaSelecting;
+            handleToggleZoomArea();
+            if (startsCanvasSelection) closeSidebarForCanvasAction();
+          }}
           isCameraAnimating={isCameraAnimating}
           flightHeight={flightHeight}
           onFlightHeightChange={setFlightHeight}
@@ -4833,7 +5622,10 @@ export const CesiumViewer: React.FC<{
           flightPathPointCount={flightPathPointCount}
           isDrawingFlightPath={isDrawingFlightPath}
           flightPathStatus={flightPathStatus}
-          onDrawFlightPath={drawFlightPath}
+          onDrawFlightPath={() => {
+            drawFlightPath();
+            closeSidebarForCanvasAction();
+          }}
           onStartFlightPath={() => runFlightPath(true)}
           onPauseFlightPath={pauseFlightPath}
           onResumeFlightPath={() => runFlightPath(false)}
@@ -4846,12 +5638,12 @@ export const CesiumViewer: React.FC<{
           orbitTargetSelected={hasOrbitTarget}
           isSelectingOrbitTarget={isSelectingOrbitTarget}
           isOrbitingTarget={isOrbitingSelectedTarget}
-          onSelectOrbitTarget={beginOrbitTargetSelection}
-          onStartOrbitTarget={() => startSelectedOrbit()}
+          onSelectOrbitTarget={() => {
+            beginOrbitTargetSelection();
+            closeSidebarForCanvasAction();
+          }}
+          onStartOrbitTarget={() => { markInitialCameraInteraction(); startSelectedOrbit(); }}
           onStopOrbitTarget={() => stopSelectedOrbit()}
-          isOptimizerOpen={isOptimizerOpen}
-          onToggleOptimizer={() => setIsOptimizerOpen(!isOptimizerOpen)}
-          showOptimizerControl={isAdmin}
           showModel={showModel}
           setShowModel={setShowModel}
           showDom={showDom}
@@ -4906,335 +5698,67 @@ export const CesiumViewer: React.FC<{
           onLockViewChange={setLockView}
           isOrthographic={isOrthographic}
           onProjectionChange={setIsOrthographic}
-          onFocusProject={() => { stopFlightPath(); stopSelectedOrbit(); handleFocusProject(); }}
-          onFocusPointCloud={() => { stopFlightPath(); stopSelectedOrbit(); handleFocusPointCloud(); }}
-          onFocusDom={() => { stopFlightPath(); stopSelectedOrbit(); handleFocusDom(); }}
+          onFocusProject={() => { markInitialCameraInteraction(); stopFlightPath(); stopSelectedOrbit(); handleFocusProject(); closeSidebarForCanvasAction(); }}
+          onFocusPointCloud={() => { markInitialCameraInteraction(); stopFlightPath(); stopSelectedOrbit(); handleFocusPointCloud(); closeSidebarForCanvasAction(); }}
+          onFocusDom={() => { markInitialCameraInteraction(); stopFlightPath(); stopSelectedOrbit(); handleFocusDom(); closeSidebarForCanvasAction(); }}
         />
 
-
-
-        {/* Component Optimizer Panel */}
-        {isAdmin && isOptimizerOpen && (
-          <OptimizerPanel projectId={projectId} onClose={() => setIsOptimizerOpen(false)} />
-        )}
+        <div className="viewer-content relative min-h-0 min-w-0 flex-1 overflow-hidden">
+        <UnifiedToolbar
+          displayMode={displayMode}
+          onDisplayModeChange={handleInitialDisplayModeChange}
+          viewAngle={viewAngle}
+          onViewAngleChange={setViewAngle}
+        />
 
         {/* Container chứa bản đồ 3D */}
         <div ref={cesiumContainer} className="absolute inset-0 z-0" />
 
-        {/* ── Loading Overlay: hiện khi đang fetch/parse Model 3D ── */}
-        {modelLoadStatus === 'loading' && (
-          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-none">
-            <div className="flex flex-col items-center gap-4">
-              {/* Spinner vòng tròn */}
-              <div className="relative w-16 h-16">
-                <div className="absolute inset-0 rounded-full border-4 border-sky-500/20" />
-                <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-sky-400 animate-spin" />
-              </div>
-              <div className="text-center">
-                <p className="text-sky-300 font-semibold text-sm tracking-wider">Đang tải mô hình 3D...</p>
-                <p className="text-slate-500 text-xs mt-1">Vui lòng chờ trong giây lát</p>
-              </div>
-            </div>
+        {zoomAreaRect && (
+          <div
+            className="pointer-events-none absolute z-30 border border-sky-400 bg-sky-400/10 shadow-[0_0_0_1px_rgba(14,165,233,0.12)]"
+            style={{
+              left: zoomAreaRect.left,
+              top: zoomAreaRect.top,
+              width: zoomAreaRect.width,
+              height: zoomAreaRect.height,
+            }}
+          />
+        )}
+
+        {/* Lightweight status: Cesium stays visible and the surrounding UI remains usable. */}
+        {!viewerReady && viewerPhase !== 'error' && (
+          <div className="pointer-events-none absolute left-1/2 top-1/2 z-20 w-[min(22rem,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-sky-500/20 bg-slate-950/88 px-5 py-4 text-center shadow-2xl backdrop-blur-sm">
+            <div className="mx-auto h-7 w-7 rounded-full border-2 border-sky-500/20 border-t-sky-400 animate-spin" />
+            <p className="mt-3 text-sm font-semibold text-sky-200">{initialLoadingTitle}</p>
+            <p className="mt-1 text-xs text-slate-400">{loadingCopy.loadingProjectHint}</p>
           </div>
         )}
 
-        {/* Bảng tinh chỉnh vị trí của Admin (Calibration - Chỉ Admin hệ thống mới có quyền truy cập) */}
-        {isAdmin && (
-          <div className="absolute top-4 right-4 z-40 bg-slate-950/90 border border-slate-800 text-slate-300 p-4 rounded-2xl w-80 backdrop-blur-md text-xs space-y-3 shadow-2xl select-none font-sans">
-            <div className="flex items-center justify-between border-b border-slate-900 pb-2">
-              <span className="font-bold text-sky-400 tracking-wider">🔧 CALIBRATION PANEL (ADMIN)</span>
-              <button
-                onClick={() => setActiveTarget(prev => prev === 'none' ? 'model' : 'none')}
-                className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${activeTarget !== 'none'
-                  ? 'bg-emerald-500/20 border border-emerald-500 text-emerald-400'
-                  : 'bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-400 hover:text-white'
-                  }`}
-              >
-                {activeTarget !== 'none' ? 'BẬT' : 'TẮT'}
-              </button>
-            </div>
+        {viewerPhase === 'error' && (
+          <div className="pointer-events-none absolute left-1/2 top-1/2 z-20 w-[min(22rem,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-rose-500/25 bg-slate-950/90 px-5 py-4 text-center text-sm font-semibold text-rose-300 shadow-2xl backdrop-blur-sm">
+            {loadingCopy.loadError}
+          </div>
+        )}
 
-            {activeTarget !== 'none' && (
-              <div className="space-y-3">
-                {/* Chọn đối tượng hiệu chỉnh */}
-                <div className="flex gap-1.5 text-[10px]">
-                  <button
-                    onClick={() => setActiveTarget('model')}
-                    className={`flex-1 py-1.5 rounded-lg border font-bold text-center transition-all ${activeTarget === 'model'
-                      ? 'bg-sky-500/20 border-sky-500 text-sky-400 shadow-[0_0_10px_rgba(14,165,233,0.15)]'
-                      : 'border-slate-800 bg-slate-900/40 text-slate-400 hover:text-white'
-                      }`}
-                  >
-                    Model 3D
-                  </button>
-                  <button
-                    onClick={() => setActiveTarget('dom')}
-                    className={`flex-1 py-1.5 rounded-lg border font-bold text-center transition-all ${activeTarget === 'dom'
-                      ? 'bg-sky-500/20 border-sky-500 text-sky-400 shadow-[0_0_10px_rgba(14,165,233,0.15)]'
-                      : 'border-slate-800 bg-slate-900/40 text-slate-400 hover:text-white'
-                      }`}
-                  >
-                    Ảnh DOM
-                  </button>
-                  <button
-                    onClick={() => setActiveTarget('pointcloud')}
-                    className={`flex-1 py-1.5 rounded-lg border font-bold text-center transition-all ${activeTarget === 'pointcloud'
-                      ? 'bg-sky-500/20 border-sky-500 text-sky-400 shadow-[0_0_10px_rgba(14,165,233,0.15)]'
-                      : 'border-slate-800 bg-slate-900/40 text-slate-400 hover:text-white'
-                      }`}
-                  >
-                    Point Cloud
-                  </button>
-                </div>
-
-                {/* Thông số hiện tại & Cho phép nhập tay trực tiếp */}
-                <div className="bg-slate-950 p-3 rounded-lg border border-slate-900 space-y-2 font-sans text-[11px] text-slate-300">
-                  <div className="text-[10px] text-sky-400 font-bold uppercase tracking-wider mb-1.5 border-b border-slate-900 pb-1">
-                    Hiệu chỉnh thông số
-                  </div>
-
-                  {activeTarget === 'model' ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Lon Offset (°):</span>
-                        <CalibNumberInput
-                          step="0.0000001"
-                          value={offsets.modelLon}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, modelLon: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-white font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Lat Offset (°):</span>
-                        <CalibNumberInput
-                          step="0.0000001"
-                          value={offsets.modelLat}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, modelLat: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-white font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Cao độ (m):</span>
-                        <CalibNumberInput
-                          step="0.1"
-                          value={offsets.modelHeight}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, modelHeight: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-emerald-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Góc xoay Yaw (°):</span>
-                        <CalibNumberInput
-                          step="0.5"
-                          value={offsets.modelHeading}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, modelHeading: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-amber-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Nghiêng Pitch (°):</span>
-                        <CalibNumberInput
-                          step="0.1"
-                          value={offsets.modelPitch || 0}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, modelPitch: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-amber-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Nghiêng Roll (°):</span>
-                        <CalibNumberInput
-                          step="0.1"
-                          value={offsets.modelRoll || 0}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, modelRoll: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-amber-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                    </div>
-                  ) : activeTarget === 'dom' ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Lon Offset (°):</span>
-                        <CalibNumberInput
-                          step="0.0000001"
-                          value={offsets.domLon}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, domLon: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-white font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Lat Offset (°):</span>
-                        <CalibNumberInput
-                          step="0.0000001"
-                          value={offsets.domLat}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, domLat: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-white font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Tỉ lệ Scale (x):</span>
-                        <CalibNumberInput
-                          step="0.001"
-                          value={offsets.domScale}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, domScale: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-sky-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Góc xoay (°):</span>
-                        <CalibNumberInput
-                          step="0.5"
-                          value={offsets.domHeading || 0}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, domHeading: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-amber-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Lon Offset (°):</span>
-                        <CalibNumberInput
-                          step="0.0000001"
-                          value={offsets.pcLon || 0}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, pcLon: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-white font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Lat Offset (°):</span>
-                        <CalibNumberInput
-                          step="0.0000001"
-                          value={offsets.pcLat || 0}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, pcLat: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-white font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Cao độ (m):</span>
-                        <CalibNumberInput
-                          step="0.1"
-                          value={offsets.pcHeight || 0}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, pcHeight: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-emerald-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Góc xoay Yaw (°):</span>
-                        <CalibNumberInput
-                          step="0.5"
-                          value={offsets.pcHeading || 0}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, pcHeading: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-amber-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Nghiêng Pitch (°):</span>
-                        <CalibNumberInput
-                          step="0.1"
-                          value={offsets.pcPitch || 0}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, pcPitch: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-amber-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400 font-mono">Nghiêng Roll (°):</span>
-                        <CalibNumberInput
-                          step="0.1"
-                          value={offsets.pcRoll || 0}
-                          onChange={(val) => setOffsets(prev => ({ ...prev, pcRoll: val }))}
-                          className="w-36 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-amber-400 font-mono font-bold focus:outline-none focus:border-sky-500 text-right"
-                        />
-                      </div>
-                    </div>
-                  )}
-                  <div className="border-t border-slate-900 pt-1.5 mt-1.5 flex justify-between text-[10px]">
-                    <span className="text-slate-500">Bước nhảy phím tắt:</span>
-                    <span className="text-sky-400 font-bold">{stepSize} m</span>
-                  </div>
-                </div>
-
-                {/* Hướng dẫn phím tắt */}
-                <div className="text-[10px] text-slate-500 space-y-1 bg-slate-950/40 p-2 rounded-lg border border-slate-900/40 leading-relaxed font-sans">
-                  <div className="font-bold text-slate-400 uppercase tracking-wider text-[9px] mb-1 font-sans">Bàn phím:</div>
-                  <div>• <b>Mũi tên / I, K, J, L</b>: Di chuyển hướng Bắc/Nam/Tây/Đông</div>
-                  {activeTarget === 'model' ? (
-                    <>
-                      <div>• <b>U / O</b>: Nâng cao / Hạ thấp cao độ</div>
-                      <div>• <b>Q / E</b>: Xoay Heading (Yaw) sang Trái / Phải</div>
-                      <div>• <b>T / G</b>: Nghiêng Pitch Lên / Xuống</div>
-                      <div>• <b>F / H</b>: Nghiêng Roll Trái / Phải</div>
-                    </>
-                  ) : activeTarget === 'dom' ? (
-                    <>
-                      <div>• <b>Q / E</b>: Xoay ảnh DOM sang Trái / Phải</div>
-                      <div>• <b>U / O</b>: Thu nhỏ / Phóng to kích thước (Scale)</div>
-                    </>
-                  ) : (
-                    <>
-                      <div>• <b>U / O</b>: Nâng cao / Hạ thấp cao độ mây điểm</div>
-                      <div>• <b>Q / E</b>: Xoay Heading (Yaw) sang Trái / Phải</div>
-                      <div>• <b>T / G</b>: Nghiêng Pitch Lên / Xuống</div>
-                      <div>• <b>F / H</b>: Nghiêng Roll Trái / Phải</div>
-                    </>
-                  )}
-                  <div>• <b>+ / -</b>: Tăng / Giảm bước dịch chuyển</div>
-                </div>
-
-                {/* Nút hành động */}
-                <div className="flex gap-2 font-sans">
-                  <button
-                    onClick={() => {
-                      setOffsets({
-                        modelLon: 0,
-                        modelLat: 0,
-                        modelHeight: 0.3,
-                        modelHeading: 0,
-                        modelPitch: 0,
-                        modelRoll: 0,
-                        domLon: 0,
-                        domLat: 0,
-                        domScale: 1.0,
-                        domHeading: 0,
-                        pcLon: 0,
-                        pcLat: 0,
-                        pcHeight: 0,
-                        pcHeading: 0,
-                        pcPitch: 0,
-                        pcRoll: 0
-                      });
-                    }}
-                    className="flex-1 py-1.5 rounded-lg border border-slate-800 bg-slate-900/40 hover:bg-slate-900 hover:text-white transition-colors font-medium text-center cursor-pointer"
-                  >
-                    Reset
-                  </button>
-                  <button
-                    onClick={async () => {
-                      if (projectId) {
-                        localStorage.setItem(`calibration_${projectId}`, JSON.stringify(offsets));
-                        const success = await updateProject(projectId, { calibration: JSON.stringify(offsets) });
-                        if (success) {
-                          alert("💾 Đã lưu và đồng bộ thông số vị trí dự án vào Database thành công!");
-                        } else {
-                          alert("⚠️ Đã lưu nháp vào máy khách, nhưng không thể kết nối đồng bộ vào Database.");
-                        }
-                      }
-                    }}
-                    className="flex-1 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-center transition-colors shadow-lg shadow-sky-600/20 cursor-pointer"
-                  >
-                    Lưu Vị Trí
-                  </button>
-                </div>
-              </div>
-            )}
+        {viewerReady && (
+          (displayMode === 'model3d' && modelLoadStatus === 'loading') ||
+          (displayMode === 'pointcloud' && pointCloudLoadStatus === 'loading') ||
+          (displayMode === 'dom' && domLoadStatus === 'loading')
+        ) && (
+          <div className="pointer-events-none absolute bottom-4 left-1/2 z-20 max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-full border border-sky-500/20 bg-slate-950/85 px-3 py-1.5 text-center text-xs font-medium text-sky-300 shadow-lg backdrop-blur-md">
+            {displayMode === 'model3d'
+              ? loadingCopy.loadingModel
+              : displayMode === 'pointcloud'
+                ? loadingCopy.loadingPointCloud
+                : loadingCopy.loadingDom}
           </div>
         )}
 
         {/* Trắc dọc thật: biểu đồ Distance → Elevation của profile mới nhất */}
         {showMeasurements && activeProfile && activeProfileVisible && (
           <div
-            className={`absolute bottom-4 z-30 w-[560px] max-w-[calc(100vw-32px)] overflow-hidden rounded-2xl border border-slate-700/70 bg-slate-950/92 text-slate-100 shadow-2xl backdrop-blur-xl ${
-              isAdmin ? 'right-[352px]' : 'right-4'
-            }`}
+            className="viewer-profile-panel absolute bottom-3 right-3 z-30 w-[min(560px,calc(100%-24px))] overflow-hidden rounded-2xl border border-slate-700/70 bg-slate-950/92 text-slate-100 shadow-2xl backdrop-blur-xl md:bottom-4 md:right-4"
           >
             <div className="flex items-start justify-between gap-3 border-b border-slate-800/90 px-4 py-3">
               <div>
@@ -5349,7 +5873,7 @@ export const CesiumViewer: React.FC<{
 
         {/* Hướng dẫn động nổi dưới đáy */}
         {toolMode !== 'none' && (
-          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 bg-black/70 text-slate-100 px-6 py-3 rounded-full backdrop-blur-sm pointer-events-none border border-slate-700/50 shadow-lg text-xs font-semibold tracking-wider uppercase">
+          <div className="absolute bottom-4 left-1/2 z-20 max-w-[calc(100%-24px)] -translate-x-1/2 rounded-xl border border-slate-700/50 bg-black/70 px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wide text-slate-100 shadow-lg backdrop-blur-sm pointer-events-none sm:bottom-8 sm:rounded-full sm:px-6 sm:py-3 sm:text-xs sm:tracking-wider">
             {toolMode === 'distance' && (measurementPoints.length === 0
               ? "⚡ Click điểm đầu tiên để bắt đầu đo khoảng cách"
               : "⚡ Click chốt điểm tiếp theo. Click đúp (Double click) để hoàn thành")}
@@ -5364,6 +5888,7 @@ export const CesiumViewer: React.FC<{
               : "📈 Click thêm các đỉnh tuyến. Double-click để lấy mẫu cao độ và mở biểu đồ")}
           </div>
         )}
+        </div>
       </div>
     );
   }

@@ -453,6 +453,14 @@ app.put('/api/projects/:id', authenticateToken, requireProjectRole('EDITOR'), as
 // API xóa dự án
 // ── 3. DEMO LEADS & CONTACT SALES ROUTES ──
 
+const getDemoDestination = async () => {
+  return prisma.project.findFirst({
+    where: { isPublic: true },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true }
+  });
+};
+
 // Trạng thái Demo access của user hiện tại.
 // Flow mới:
 // - Demo Showcase là các project public.
@@ -460,8 +468,14 @@ app.put('/api/projects/:id', authenticateToken, requireProjectRole('EDITOR'), as
 // - Không còn phụ thuộc DEMO_PROJECT_ID / ProjectMember.
 app.get('/api/demo-access', authenticateToken, async (req: AuthRequest, res) => {
   try {
+    const demoProject = await getDemoDestination();
+
     if (req.user?.role === 'SUPERADMIN') {
-      return res.json({ success: true, hasAccess: true });
+      return res.json({
+        success: true,
+        hasAccess: true,
+        demoProjectId: demoProject?.id
+      });
     }
 
     const accountEmail = req.user!.email.trim().toLowerCase();
@@ -475,7 +489,8 @@ app.get('/api/demo-access', authenticateToken, async (req: AuthRequest, res) => 
 
     res.json({
       success: true,
-      hasAccess: Boolean(existingLead)
+      hasAccess: Boolean(existingLead),
+      demoProjectId: existingLead ? demoProject?.id : undefined
     });
   } catch (error: any) {
     res.status(500).json({
@@ -487,8 +502,7 @@ app.get('/api/demo-access', authenticateToken, async (req: AuthRequest, res) => 
 });
 
 // Gửi yêu cầu Demo.
-// Sau khi đăng ký thành công frontend sẽ chuyển về /dashboard,
-// nơi user tự chọn một trong các project Demo Showcase (isPublic = true).
+// Sau khi đăng ký thành công frontend mở public Demo project hiện hành.
 app.post('/api/demo-leads', authenticateToken, async (req: AuthRequest, res) => {
   try {
     const { fullName, jobTitle, company, phone, message, source } = req.body;
@@ -507,9 +521,11 @@ app.post('/api/demo-leads', authenticateToken, async (req: AuthRequest, res) => 
     });
 
     if (existingLead) {
+      const demoProject = await getDemoDestination();
       return res.json({
         success: true,
         hasAccess: true,
+        demoProjectId: demoProject?.id,
         message: 'Bạn đã đăng ký Demo trước đó.',
         lead: existingLead
       });
@@ -539,9 +555,12 @@ app.post('/api/demo-leads', authenticateToken, async (req: AuthRequest, res) => 
       source
     }).catch(err => console.error('[Background Email Error]:', err));
 
+    const demoProject = await getDemoDestination();
+
     res.status(201).json({
       success: true,
       hasAccess: true,
+      demoProjectId: demoProject?.id,
       message: 'Đăng ký Demo thành công.',
       lead
     });

@@ -50,6 +50,8 @@ const VIEWER_COPY = {
 } as const;
 
 const viewerPageStyle = `
+  /* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
+  /* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app */
   .viewer-option-b {
     --vp-panel: rgba(8,19,33,.93);
     --vp-panel-strong: #07111f;
@@ -84,6 +86,7 @@ const viewerPageStyle = `
     flex-direction: column;
     align-items: flex-start;
     gap: 7px;
+    left: 12px;
   }
 
   .viewer-back-button {
@@ -145,72 +148,39 @@ const viewerPageStyle = `
     color: #0f172a;
   }
 
-  /*
-   * Admin Calibration panel:
-   * CSS-only skin; all input handlers and calibration logic remain inside
-   * CesiumViewer untouched.
-   */
-  .viewer-option-b
-  [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80'] {
-    width: 310px !important;
-    border-color: var(--vp-border) !important;
-    border-radius: 16px !important;
-    background: var(--vp-panel) !important;
-    color: var(--vp-soft) !important;
-    box-shadow: var(--vp-shadow) !important;
-    backdrop-filter: blur(18px) !important;
+  @media (min-width: 64rem) {
+    .viewer-project-dock.is-sidebar-open {
+      left: calc(clamp(260px, 21vw, 320px) + 16px);
+    }
   }
 
-  .viewer-option-b
-  [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
-  [class~='border-slate-900'],
-  .viewer-option-b
-  [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
-  [class~='border-slate-800'] {
-    border-color: var(--vp-border-soft) !important;
-  }
-
-  .viewer-option-b
-  [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
-  [class~='bg-slate-950'] {
-    background: var(--vp-panel-strong) !important;
-  }
-
-  .viewer-option-b
-  [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
-  [class~='bg-slate-900'] {
-    background: var(--vp-surface) !important;
-  }
-
-  .viewer-option-b
-  [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
-  [class~='text-slate-300'],
-  .viewer-option-b
-  [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
-  [class~='text-slate-400'] {
-    color: var(--vp-soft) !important;
-  }
-
-  .viewer-option-b
-  [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
-  input {
-    border-color: var(--vp-border-soft) !important;
-    border-radius: 7px !important;
-    background: var(--vp-surface) !important;
-    color: var(--vp-text) !important;
-  }
-
-  .viewer-option-b
-  [class~='right-4'][class~='top-4'][class~='z-40'][class~='w-80']
-  button {
-    box-shadow: none !important;
-  }
-
-  @media (max-width: 1320px) {
+  @media (max-width: 82.5rem) {
     .viewer-project-chip {
       display: none;
     }
   }
+
+  @media (max-width: 89.999rem) {
+    .viewer-project-dock {
+      top: 66px !important;
+    }
+  }
+
+  @media (max-width: 47.999rem) {
+    .viewer-project-dock {
+      z-index: 35 !important;
+    }
+
+    .viewer-back-button {
+      width: 42px;
+      padding-inline: 0 !important;
+    }
+
+    .viewer-back-button span {
+      display: none;
+    }
+  }
+
 `;
 
 export const ViewerPage: React.FC = () => {
@@ -235,17 +205,51 @@ export const ViewerPage: React.FC = () => {
   const [
     isSidebarOpen,
     setIsSidebarOpen,
-  ] = useState(true);
+  ] = useState(() =>
+    typeof window !== 'undefined'
+      ? window.matchMedia('(min-width: 64rem)').matches
+      : true
+  );
 
   useEffect(() => {
+    const desktopQuery = window.matchMedia(
+      '(min-width: 64rem)'
+    );
+
+    const handleBreakpointChange = (
+      event: MediaQueryListEvent
+    ) => {
+      if (!event.matches) {
+        setIsSidebarOpen(false);
+      }
+    };
+
+    desktopQuery.addEventListener(
+      'change',
+      handleBreakpointChange
+    );
+
+    return () => {
+      desktopQuery.removeEventListener(
+        'change',
+        handleBreakpointChange
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
     const loadProject = async () => {
       if (!projectId) return;
 
       setLoading(true);
+      setProject(null);
 
       const data =
-        await fetchProjectById(projectId);
+        await fetchProjectById(projectId, controller.signal);
 
+      if (!active) return;
       if (data) {
         setProject(data);
         setCurrentProject(data.id);
@@ -257,6 +261,8 @@ export const ViewerPage: React.FC = () => {
     loadProject();
 
     return () => {
+      active = false;
+      controller.abort();
       setCurrentProject(null);
     };
   }, [projectId, setCurrentProject]);
@@ -323,14 +329,12 @@ export const ViewerPage: React.FC = () => {
   }
 
   return (
-    <div className="viewer-option-b relative h-screen w-full overflow-hidden bg-black">
+    <div className="viewer-option-b relative h-dvh min-h-0 w-full overflow-hidden bg-black">
       <style>{viewerPageStyle}</style>
 
       <div
-        className={`viewer-project-dock absolute top-3 z-50 transition-all duration-300 ease-in-out ${
-          isSidebarOpen
-            ? 'left-[308px]'
-            : 'left-3'
+        className={`viewer-project-dock absolute top-3 z-40 transition-transform duration-300 ease-in-out ${
+          isSidebarOpen ? 'is-sidebar-open' : ''
         }`}
       >
         <Button
@@ -342,7 +346,7 @@ export const ViewerPage: React.FC = () => {
           }
         >
           <ArrowLeft size={15} />
-          {c.dashboard}
+          <span>{c.dashboard}</span>
         </Button>
 
         <div
@@ -358,6 +362,7 @@ export const ViewerPage: React.FC = () => {
       <CesiumViewer
         projectId={project.id}
         projectName={project.name}
+        project={project}
         isSidebarOpen={isSidebarOpen}
         onToggleSidebar={
           setIsSidebarOpen

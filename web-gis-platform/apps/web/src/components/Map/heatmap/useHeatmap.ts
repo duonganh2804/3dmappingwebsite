@@ -22,7 +22,7 @@ export function useHeatmap({
   propertyRef.current = property;
 
   const calculateRange = useCallback((force = false): boolean => {
-    const range = controllerRef.current.autoRange(force);
+    const range = controllerRef.current.autoRange(force, viewerRef.current);
     setRangeAvailable(Boolean(range));
     if (!range) {
       if (force || enabledRef.current) {
@@ -68,7 +68,7 @@ export function useHeatmap({
   }, [enabled, max, property, viewerRef]);
 
   useEffect(() => {
-    if (pointCloudLoadStatus === 'ready') calculateRange();
+    if (pointCloudLoadStatus === 'ready' && enabledRef.current) calculateRange();
   }, [calculateRange, pointCloudLoadStatus, projectKey]);
 
   return {

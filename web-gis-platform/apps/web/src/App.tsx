@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   HashRouter,
   Routes,
@@ -17,7 +17,8 @@ import { BookDemoPage } from './pages/BookDemoPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import ContactConsultationPage from './pages/ContactConsultationPage';
-
+import { SystemSettingsPage } from './pages/route/SystemSettingsPage';
+import { HelpSupportPage } from './pages/route/HelpSupportPage';
 // Solutions
 import { SurveyingSolutionPage } from './pages/SurveyingSolutionPage';
 import ConstructionInfrastructureSolutionPage from './pages/ConstructionInfrastructureSolutionPage';
@@ -41,6 +42,7 @@ import UserGuidesPage from './pages/resources/UserGuidesPage';
 
 // Store
 import { useAuthStore } from './store/useAuthStore';
+import { fetchDemoAccess } from './services/api';
 
 const PublicPage = ({
   children,
@@ -51,6 +53,40 @@ const PublicPage = ({
     {children}
   </PublicSiteLayout>
 );
+
+const PlatformAccessGuard = ({ children }: { children: React.ReactNode }) => {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const isLoading = useAuthStore((state) => state.isLoading);
+  const user = useAuthStore((state) => state.user);
+  const accessToken = useAuthStore((state) => state.accessToken);
+  const [demoAccess, setDemoAccess] = useState<'checking' | 'allowed' | 'denied'>('checking');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const verifyAccess = async () => {
+      if (isLoading || !isAuthenticated) {
+        setDemoAccess('checking');
+        return;
+      }
+      const result = await fetchDemoAccess();
+      if (cancelled) return;
+      setDemoAccess(result.success && result.hasAccess ? 'allowed' : 'denied');
+    };
+
+    setDemoAccess('checking');
+    void verifyAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, isAuthenticated, isLoading, user?.id]);
+
+  if (isLoading) return null;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (demoAccess === 'checking') return null;
+  if (demoAccess === 'denied') return <Navigate to="/book-demo" replace />;
+  return children;
+};
 
 function App() {
   const checkAuth = useAuthStore(
@@ -251,12 +287,38 @@ function App() {
         {/* APPLICATION */}
         <Route
           path="/dashboard"
-          element={<DashboardPage />}
+          element={
+            <PlatformAccessGuard>
+              <DashboardPage />
+            </PlatformAccessGuard>
+          }
+        />
+
+        <Route
+          path="/settings"
+          element={
+            <PlatformAccessGuard>
+              <SystemSettingsPage />
+            </PlatformAccessGuard>
+          }
+        />
+
+        <Route
+          path="/help"
+          element={
+            <PlatformAccessGuard>
+              <HelpSupportPage />
+            </PlatformAccessGuard>
+          }
         />
 
         <Route
           path="/viewer/:projectId"
-          element={<ViewerPage />}
+          element={
+            <PlatformAccessGuard>
+              <ViewerPage />
+            </PlatformAccessGuard>
+          }
         />
 
         {/* FALLBACK */}

@@ -325,8 +325,8 @@ export const BookDemoPage: React.FC = () => {
   const [isCheckingAccess, setIsCheckingAccess] =
     useState(true);
 
-  const openGrantedDemo = useCallback(() => {
-    navigate('/dashboard?tab=demo', {
+  const openGrantedDemo = useCallback((demoProjectId: string) => {
+    navigate(`/viewer/${demoProjectId}`, {
       replace: true
     });
   }, [navigate]);
@@ -415,9 +415,10 @@ export const BookDemoPage: React.FC = () => {
 
       if (
         demoAccess.success &&
-        demoAccess.hasAccess
+        demoAccess.hasAccess &&
+        demoAccess.demoProjectId
       ) {
-        openGrantedDemo();
+        openGrantedDemo(demoAccess.demoProjectId);
         return;
       }
 
@@ -468,9 +469,10 @@ export const BookDemoPage: React.FC = () => {
 
     if (
       demoAccess.success &&
-      demoAccess.hasAccess
+      demoAccess.hasAccess &&
+      demoAccess.demoProjectId
     ) {
-      openGrantedDemo();
+      openGrantedDemo(demoAccess.demoProjectId);
       return;
     }
 
@@ -555,12 +557,19 @@ export const BookDemoPage: React.FC = () => {
     setIsSubmitting(false);
 
     if (res.success) {
+      const demoAccess = await fetchDemoAccess();
+      if (!demoAccess.success || !demoAccess.hasAccess || !demoAccess.demoProjectId) {
+        setServerMessageType('error');
+        setServerMessage(res.message || c.submitError);
+        return;
+      }
+
       setServerMessage(c.success);
       setServerMessageType('success');
       setIsRedirecting(true);
 
       window.setTimeout(() => {
-        openGrantedDemo();
+        openGrantedDemo(demoAccess.demoProjectId!);
       }, 1500);
 
       return;

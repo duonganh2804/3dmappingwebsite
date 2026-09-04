@@ -20,6 +20,7 @@ interface AuthState {
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+const AUTH_LOGGED_OUT_KEY = 'authLoggedOut';
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
@@ -28,11 +29,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   isLoading: true,
 
   setAuth: (user: UserProfile, token: string) => {
+    localStorage.removeItem(AUTH_LOGGED_OUT_KEY);
     localStorage.setItem('accessToken', token);
     set({ user, accessToken: token, isAuthenticated: true, isLoading: false });
   },
 
   logout: async () => {
+    localStorage.setItem(AUTH_LOGGED_OUT_KEY, 'true');
+    localStorage.removeItem('accessToken');
+    set({ user: null, accessToken: null, isAuthenticated: false, isLoading: false });
+
     try {
       await fetch(`${API_BASE_URL}/auth/logout`, {
         method: 'POST',
@@ -41,13 +47,16 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
     } catch (err) {
       console.warn('Lỗi gọi API logout:', err);
-    } finally {
-      localStorage.removeItem('accessToken');
-      set({ user: null, accessToken: null, isAuthenticated: false, isLoading: false });
     }
   },
 
   checkAuth: async () => {
+    if (localStorage.getItem(AUTH_LOGGED_OUT_KEY) === 'true') {
+      localStorage.removeItem('accessToken');
+      set({ user: null, accessToken: null, isAuthenticated: false, isLoading: false });
+      return;
+    }
+
     const token = localStorage.getItem('accessToken');
     set({ isLoading: true });
 

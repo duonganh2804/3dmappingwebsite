@@ -9,7 +9,7 @@ import {
   Plus, MapPin, HardDrive, ArrowRight, Trash2, Users, LogOut, LogIn,
   Image, Box, Cloud, Loader2, CheckCircle2, XCircle, Terminal, ChevronDown, ChevronUp, RefreshCw,
   Globe, Shield, Search, Lock, Unlock, Sparkles, Eye, Layers, Building2, Map as MapIcon,
-  Menu, X, Bell, MoreVertical, LayoutGrid, List, Info, HelpCircle, User, Settings, FolderPlus, BookOpen, Plane, Crown
+  Menu, X, MoreVertical, LayoutGrid, List, Info, HelpCircle, User, Settings, FolderPlus, BookOpen, Plane, Crown
 } from 'lucide-react';
 import { useProjectStore, type Project } from '../store/useProjectStore';
 import { useAuthStore } from '../store/useAuthStore';
@@ -19,6 +19,10 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { ProjectFormModal } from '../components/ProjectFormModal';
 import { ProjectMemberModal } from '../components/ProjectMemberModal';
 import { AdminLeadsModal } from '../components/AdminLeadsModal';
+import { NotificationCenter } from '../features/notifications/NotificationCenter';
+import {
+  pushAppNotification,
+} from '../features/notifications/notificationStore';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface PipelineState {
@@ -28,6 +32,85 @@ interface PipelineState {
   finishedAt: number | null;
   success: boolean | null;
 }
+
+const readBooleanPreference = (
+  key: string,
+  fallback: boolean,
+) => {
+  const value = localStorage.getItem(key);
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return fallback;
+};
+
+const readAutoRefreshSeconds = () => {
+  const value = Number(
+    localStorage.getItem('dashboard_auto_refresh_seconds'),
+  );
+
+  return value === 30 ||
+    value === 60 ||
+    value === 120 ||
+    value === 300
+    ? value
+    : 60;
+};
+
+const NOTIFICATION_COPY = {
+  vi: {
+    pipelineSuccessTitle: 'Xử lý dữ liệu hoàn tất',
+    pipelineSuccessMessage: 'Dữ liệu dự án đã xử lý xong và sẵn sàng để kiểm tra.',
+    pipelineErrorTitle: 'Pipeline xử lý có lỗi',
+    pipelineErrorMessage: 'Quá trình xử lý dữ liệu đã kết thúc với lỗi. Mở tiến trình để kiểm tra log.',
+    projectCreatedTitle: 'Đã tạo dự án',
+    projectCreatedMessage: (name: string) => `Dự án “${name}” đã được tạo.`,
+    pipelineStartedMessage: (name: string) => `Dự án “${name}” đã được tạo và pipeline đang bắt đầu xử lý.`,
+    projectUpdatedTitle: 'Đã cập nhật dự án',
+    projectUpdatedMessage: (name: string) => `Thông tin dự án “${name}” đã được lưu.`,
+    projectDeletedTitle: 'Đã xóa dự án',
+    projectDeletedMessage: (name: string) => `Dự án “${name}” đã được xóa khỏi danh sách.`,
+    visibilityTitle: 'Đã cập nhật hiển thị dự án',
+    visibilityPublicMessage: (name: string) => `Dự án “${name}” đã chuyển sang Demo Showcase.`,
+    visibilityPrivateMessage: (name: string) => `Dự án “${name}” đã chuyển sang chế độ riêng tư.`,
+  },
+  en: {
+    pipelineSuccessTitle: 'Processing completed',
+    pipelineSuccessMessage: 'Project data processing is complete and ready for review.',
+    pipelineErrorTitle: 'Processing pipeline failed',
+    pipelineErrorMessage: 'The data pipeline finished with an error. Open the progress panel to review the logs.',
+    projectCreatedTitle: 'Project created',
+    projectCreatedMessage: (name: string) => `Project “${name}” was created.`,
+    pipelineStartedMessage: (name: string) => `Project “${name}” was created and the processing pipeline is starting.`,
+    projectUpdatedTitle: 'Project updated',
+    projectUpdatedMessage: (name: string) => `Project “${name}” was updated.`,
+    projectDeletedTitle: 'Project deleted',
+    projectDeletedMessage: (name: string) => `Project “${name}” was removed from the list.`,
+    visibilityTitle: 'Project visibility updated',
+    visibilityPublicMessage: (name: string) => `Project “${name}” is now in Demo Showcase.`,
+    visibilityPrivateMessage: (name: string) => `Project “${name}” is now private.`,
+  },
+  zh: {
+    pipelineSuccessTitle: '数据处理完成',
+    pipelineSuccessMessage: '项目数据已处理完成，可以开始检查。',
+    pipelineErrorTitle: '处理 Pipeline 出错',
+    pipelineErrorMessage: '数据处理已结束但出现错误。请打开进度面板检查日志。',
+    projectCreatedTitle: '项目已创建',
+    projectCreatedMessage: (name: string) => `项目“${name}”已创建。`,
+    pipelineStartedMessage: (name: string) => `项目“${name}”已创建，处理 Pipeline 正在启动。`,
+    projectUpdatedTitle: '项目已更新',
+    projectUpdatedMessage: (name: string) => `项目“${name}”的信息已保存。`,
+    projectDeletedTitle: '项目已删除',
+    projectDeletedMessage: (name: string) => `项目“${name}”已从列表中删除。`,
+    visibilityTitle: '项目可见性已更新',
+    visibilityPublicMessage: (name: string) => `项目“${name}”已加入 Demo Showcase。`,
+    visibilityPrivateMessage: (name: string) => `项目“${name}”已设为私有。`,
+  },
+} as const;
+
+const getCurrentNotificationLanguage = () => {
+  const saved = localStorage.getItem('lp_lang');
+  return saved === 'en' || saved === 'zh' ? saved : 'vi';
+};
 
 // ─── Translations Dictionary ──────────────────────────────────────────────────
 const DASHBOARD_TRANSLATIONS = {
@@ -357,6 +440,11 @@ export const DashboardPage: React.FC = () => {
   const { projects, setProjects, isLoading, setLoading } = useProjectStore();
   const { user, isAuthenticated, logout } = useAuthStore();
 
+  const handleLogout = async () => {
+    await logout();
+    navigate('/', { replace: true });
+  };
+
   const isAdmin = user?.role === 'SUPERADMIN';
   const isCustomerView =
     new URLSearchParams(location.search).get('view') ===
@@ -365,13 +453,43 @@ export const DashboardPage: React.FC = () => {
   // Tabs: 'all' | 'assigned' | 'public'
   // ?tab=demo => luôn mở thẳng Demo Showcase khi đi từ Book Demo.
   const requestedTab = searchParams.get('tab');
-  const [activeTab, setActiveTab] = useState<'all' | 'assigned' | 'public'>(() =>
-    requestedTab === 'demo' ? 'public' : 'all'
-  );
+  const [activeTab, setActiveTab] = useState<'all' | 'assigned' | 'public'>(() => {
+    if (requestedTab === 'demo') return 'public';
+
+    const rememberLast = readBooleanPreference(
+      'dashboard_remember_last_tab',
+      true,
+    );
+    const lastTab = localStorage.getItem('dashboard_last_tab');
+
+    if (rememberLast) {
+      if (lastTab === 'public' || lastTab === 'assigned') {
+        return lastTab;
+      }
+      if (lastTab === 'all' && user?.role === 'SUPERADMIN') {
+        return 'all';
+      }
+    }
+
+    const defaultTab = localStorage.getItem('dashboard_default_tab');
+    if (defaultTab === 'public') return 'public';
+    if (defaultTab === 'assigned') return 'assigned';
+
+    return user?.role === 'SUPERADMIN' ? 'all' : 'assigned';
+  });
   const [searchQuery, setSearchQuery] = useState('');
 
   const handleTabChange = (tab: 'all' | 'assigned' | 'public') => {
     setActiveTab(tab);
+
+    if (
+      readBooleanPreference(
+        'dashboard_remember_last_tab',
+        true,
+      )
+    ) {
+      localStorage.setItem('dashboard_last_tab', tab);
+    }
 
     if (tab === 'public') {
       setSearchParams({ tab: 'demo' }, { replace: true });
@@ -382,8 +500,29 @@ export const DashboardPage: React.FC = () => {
 
   // UI layout and view state
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [sortBy, setSortBy] = useState<'lastCaptured' | 'name'>('lastCaptured');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
+    const saved = localStorage.getItem('dashboard_view_mode');
+    return saved === 'list' ? 'list' : 'grid';
+  });
+  const [sortBy, setSortBy] = useState<'lastCaptured' | 'name'>(() => {
+    const saved = localStorage.getItem('dashboard_sort_by');
+    return saved === 'name' ? 'name' : 'lastCaptured';
+  });
+  const [showProjectThumbnails] = useState(() =>
+    readBooleanPreference(
+      'dashboard_show_thumbnails',
+      true,
+    )
+  );
+  const [autoRefreshProjects] = useState(() =>
+    readBooleanPreference(
+      'dashboard_auto_refresh',
+      false,
+    )
+  );
+  const [autoRefreshSeconds] = useState(
+    readAutoRefreshSeconds
+  );
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [showFolderAlert, setShowFolderAlert] = useState(false);
@@ -407,10 +546,20 @@ export const DashboardPage: React.FC = () => {
     );
   }, [currentLang]);
 
+  useEffect(() => {
+    localStorage.setItem('dashboard_view_mode', viewMode);
+  }, [viewMode]);
+
+  useEffect(() => {
+    localStorage.setItem('dashboard_sort_by', sortBy);
+  }, [sortBy]);
+
+
   // Translate helper function
   const t = (key: keyof typeof DASHBOARD_TRANSLATIONS.vi) => {
     return DASHBOARD_TRANSLATIONS[currentLang][key] || DASHBOARD_TRANSLATIONS.vi[key] || '';
   };
+
 
   const getLocalizedProjectDescription = (
     description?: string | null
@@ -473,20 +622,42 @@ export const DashboardPage: React.FC = () => {
     setLoading(false);
   }, [setProjects, setLoading]);
 
+  const refreshProjectsSilently = useCallback(async () => {
+    const data = await fetchProjects();
+    setProjects(data);
+  }, [setProjects]);
+
   useEffect(() => { loadProjects(); }, [loadProjects, isAuthenticated]);
 
-  // Set default tab on load/login.
-  // Nếu URL có ?tab=demo thì luôn ưu tiên Demo Showcase.
+  useEffect(() => {
+    if (!autoRefreshProjects) return;
+
+    const intervalId = window.setInterval(() => {
+      if (
+        document.visibilityState !== 'visible' ||
+        pipeline.isProcessing
+      ) {
+        return;
+      }
+
+      void refreshProjectsSilently();
+    }, autoRefreshSeconds * 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [
+    autoRefreshProjects,
+    autoRefreshSeconds,
+    pipeline.isProcessing,
+    refreshProjectsSilently,
+  ]);
+
+  // Resolve default project tab from user preference without weakening access rules.
+  // ?tab=demo always has the highest priority.
   useEffect(() => {
     if (!user) return;
 
     if (requestedTab === 'demo') {
       setActiveTab('public');
-      return;
-    }
-
-    if (isAdmin) {
-      setActiveTab('all');
       return;
     }
 
@@ -496,11 +667,47 @@ export const DashboardPage: React.FC = () => {
         project.members?.some((member) => member.userId === user.id)
     ).length;
 
-    if (assignedCount > 0) {
-      setActiveTab('assigned');
-    } else {
-      setActiveTab('public');
+    const rememberLast = readBooleanPreference(
+      'dashboard_remember_last_tab',
+      true,
+    );
+    const lastTab = localStorage.getItem('dashboard_last_tab');
+
+    if (rememberLast) {
+      if (lastTab === 'public') {
+        setActiveTab('public');
+        return;
+      }
+
+      if (lastTab === 'assigned') {
+        setActiveTab(assignedCount > 0 ? 'assigned' : 'public');
+        return;
+      }
+
+      if (lastTab === 'all' && isAdmin) {
+        setActiveTab('all');
+        return;
+      }
     }
+
+    const defaultTab = localStorage.getItem('dashboard_default_tab');
+
+    if (defaultTab === 'public') {
+      setActiveTab('public');
+      return;
+    }
+
+    if (defaultTab === 'assigned') {
+      setActiveTab(assignedCount > 0 ? 'assigned' : 'public');
+      return;
+    }
+
+    if (isAdmin) {
+      setActiveTab('all');
+      return;
+    }
+
+    setActiveTab(assignedCount > 0 ? 'assigned' : 'public');
   }, [user, isAdmin, projects.length, requestedTab]);
 
   // Handle mobile responsive sidebar defaults
@@ -545,11 +752,60 @@ export const DashboardPage: React.FC = () => {
         if (!newPipeline.isProcessing && newPipeline.finishedAt) {
           clearInterval(id);
           await loadProjects();
+
+          const notificationLanguage = getCurrentNotificationLanguage();
+          const notificationCopy = NOTIFICATION_COPY[notificationLanguage];
+          const targetUserId = user?.id ?? 'anonymous';
+          const pipelineHref = newPipeline.projectId
+            ? `/viewer/${newPipeline.projectId}`
+            : undefined;
+
+          pushAppNotification(targetUserId, {
+            id: `pipeline:${newPipeline.projectId ?? 'unknown'}:${newPipeline.finishedAt}`,
+            level: newPipeline.success ? 'success' : 'error',
+            source: 'pipeline',
+            title: newPipeline.success
+              ? notificationCopy.pipelineSuccessTitle
+              : notificationCopy.pipelineErrorTitle,
+            message: newPipeline.success
+              ? notificationCopy.pipelineSuccessMessage
+              : notificationCopy.pipelineErrorMessage,
+            href: pipelineHref,
+            projectId: newPipeline.projectId ?? undefined,
+          });
+
+          const browserNotificationsEnabled =
+            readBooleanPreference(
+              'saolatek_browser_notifications',
+              false,
+            );
+          const processingNotificationEnabled =
+            readBooleanPreference(
+              'saolatek_notify_processing_complete',
+              true,
+            );
+
+          if (
+            browserNotificationsEnabled &&
+            processingNotificationEnabled &&
+            typeof Notification !== 'undefined' &&
+            Notification.permission === 'granted'
+          ) {
+            try {
+              new Notification('Saolatek 3D GIS', {
+                body: newPipeline.success
+                  ? 'Xử lý dữ liệu dự án đã hoàn tất.'
+                  : 'Pipeline xử lý dữ liệu đã kết thúc với lỗi.',
+              });
+            } catch {
+              // Browser notification is best-effort only.
+            }
+          }
         }
       } catch (_) { }
     }, 1500);
     return () => clearInterval(id);
-  }, [showPanel, loadProjects]);
+  }, [showPanel, loadProjects, user?.id]);
 
   // ── Thao tác Admin: Đổi trạng thái Public Demo (1-click) ────────────────
   const handleTogglePublic = async (e: React.MouseEvent, project: Project) => {
@@ -561,6 +817,18 @@ export const DashboardPage: React.FC = () => {
     if (window.confirm(`Bạn có chắc chắn muốn ${actionLabel} dự án "${project.name}"?`)) {
       const updated = await updateProject(project.id, { isPublic: newIsPublic });
       if (updated) {
+        const copy = NOTIFICATION_COPY[currentLang];
+        pushAppNotification(user?.id ?? 'anonymous', {
+          level: 'info',
+          source: 'project',
+          title: copy.visibilityTitle,
+          message: newIsPublic
+            ? copy.visibilityPublicMessage(project.name)
+            : copy.visibilityPrivateMessage(project.name),
+          href: `/viewer/${project.id}`,
+          projectId: project.id,
+        });
+
         loadProjects();
       } else {
         alert("Lỗi khi cập nhật trạng thái công khai của dự án.");
@@ -582,6 +850,16 @@ export const DashboardPage: React.FC = () => {
         pointCloudId: data.pointCloudId,
       });
       if (updated) {
+        const copy = NOTIFICATION_COPY[currentLang];
+        pushAppNotification(user?.id ?? 'anonymous', {
+          level: 'success',
+          source: 'project',
+          title: copy.projectUpdatedTitle,
+          message: copy.projectUpdatedMessage(data.name),
+          href: `/viewer/${editingProject.id}`,
+          projectId: editingProject.id,
+        });
+
         await loadProjects();
         setEditingProject(null);
       } else {
@@ -601,6 +879,16 @@ export const DashboardPage: React.FC = () => {
           alert('Không thể tạo dự án. Vui lòng thử lại.');
           return;
         }
+
+        const copy = NOTIFICATION_COPY[currentLang];
+        pushAppNotification(user?.id ?? 'anonymous', {
+          level: 'info',
+          source: 'pipeline',
+          title: copy.projectCreatedTitle,
+          message: copy.pipelineStartedMessage(data.name),
+          href: `/viewer/${project.id}`,
+          projectId: project.id,
+        });
 
         setPanelLogs([`[INFO] Dự án "${data.name}" được tạo thành công (ID: ${project.id})`]);
         setPipeline({ isProcessing: true, projectId: project.id, startedAt: Date.now(), finishedAt: null, success: null });
@@ -629,7 +917,20 @@ export const DashboardPage: React.FC = () => {
 
         await loadProjects();
       } else {
-        await createProject(data);
+        const created = await createProject(data);
+
+        if (created?.id) {
+          const copy = NOTIFICATION_COPY[currentLang];
+          pushAppNotification(user?.id ?? 'anonymous', {
+            level: 'success',
+            source: 'project',
+            title: copy.projectCreatedTitle,
+            message: copy.projectCreatedMessage(data.name),
+            href: `/viewer/${created.id}`,
+            projectId: created.id,
+          });
+        }
+
         await loadProjects();
       }
     }
@@ -638,11 +939,40 @@ export const DashboardPage: React.FC = () => {
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     setActiveDropdown(null);
-    if (window.confirm('Bạn có chắc chắn muốn xóa dự án này?')) {
-      await deleteProject(id);
-      loadProjects();
+
+    const requireConfirm = readBooleanPreference(
+      'dashboard_confirm_delete',
+      true,
+    );
+
+    if (
+      requireConfirm &&
+      !window.confirm('Bạn có chắc chắn muốn xóa dự án này?')
+    ) {
+      return;
     }
+
+    const projectName =
+      projects.find(project => project.id === id)?.name ??
+      (currentLang === 'en'
+        ? 'Project'
+        : currentLang === 'zh'
+          ? '项目'
+          : 'Dự án');
+
+    await deleteProject(id);
+
+    const copy = NOTIFICATION_COPY[currentLang];
+    pushAppNotification(user?.id ?? 'anonymous', {
+      level: 'warning',
+      source: 'project',
+      title: copy.projectDeletedTitle,
+      message: copy.projectDeletedMessage(projectName),
+    });
+
+    loadProjects();
   };
+
 
   // ── Lọc danh sách dự án theo Role, Search & Sort ──────────────────────────────
   const assignedProjects = projects.filter(p =>
@@ -801,14 +1131,20 @@ export const DashboardPage: React.FC = () => {
         {/* Lower Sidebar */}
         <div className="p-3 border-t border-slate-100 bg-slate-50/50 space-y-0.5">
           <button
-            onClick={() => alert(t('menuSettings'))}
+            onClick={() => {
+              setIsSidebarOpen(false);
+              navigate('/settings');
+            }}
             className="w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 rounded-lg transition-colors text-left cursor-pointer"
           >
             <Settings size={15} />
             <span>{t('menuSettings')}</span>
           </button>
           <button
-            onClick={() => alert(t('menuHelp'))}
+            onClick={() => {
+              setIsSidebarOpen(false);
+              navigate('/help');
+            }}
             className="w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 rounded-lg transition-colors text-left cursor-pointer"
           >
             <HelpCircle size={15} />
@@ -816,7 +1152,7 @@ export const DashboardPage: React.FC = () => {
           </button>
           {isAuthenticated && user && (
             <button
-              onClick={() => logout()}
+              onClick={handleLogout}
               className="w-full flex items-center gap-3 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 rounded-lg transition-colors text-left cursor-pointer"
             >
               <LogOut size={15} />
@@ -837,12 +1173,12 @@ export const DashboardPage: React.FC = () => {
       {/* ── Main Layout Canvas ─────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
 
-        <header className="h-14 bg-white text-slate-800 flex items-center justify-between px-4 z-20 shrink-0 border-b border-slate-200 shadow-sm">
+        <header className="h-14 bg-white text-slate-800 flex items-center justify-between px-2 sm:px-4 z-20 shrink-0 border-b border-slate-200 shadow-sm">
           {/* Left Area: Hamburger and Brand */}
           <div className="flex items-center gap-1.5 animate-fade-in">
             <button
               onClick={() => setIsSidebarOpen(v => !v)}
-              className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 hover:text-slate-800 cursor-pointer"
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
               title="Menu"
             >
               <Menu size={18} />
@@ -850,7 +1186,7 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           {/* Middle Area: Search bar matching template */}
-          <div className="relative w-full max-w-sm lg:max-w-md mx-4 select-none shrink">
+          <div className="relative mx-2 min-w-0 flex-1 select-none sm:mx-4 sm:max-w-sm lg:max-w-md">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-450" />
             <input
               type="text"
@@ -871,12 +1207,12 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           {/* Right Area: Utility Actions */}
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-0.5 sm:gap-3">
             {/* Language Switcher Dropdown (Globe Icon) */}
             <div className="relative dropdown-trigger">
               <button
                 onClick={() => setLangDropdownOpen(v => !v)}
-                className={`p-2 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer flex items-center justify-center relative
+                className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors hover:bg-slate-100 cursor-pointer relative lg:h-auto lg:w-auto lg:p-2
                   ${langDropdownOpen ? 'text-slate-800 bg-slate-100' : 'text-slate-500 hover:text-slate-800'}`}
                 aria-label="Select language"
                 title={currentLang === 'vi' ? 'Chọn ngôn ngữ' : currentLang === 'en' ? 'Select language' : '选择语言'}
@@ -908,21 +1244,18 @@ export const DashboardPage: React.FC = () => {
               )}
             </div>
 
-            {/* Notification bell */}
-            <button
-              className="text-slate-500 hover:text-slate-800 p-2 hover:bg-slate-100 rounded-lg transition-colors relative cursor-pointer"
-              title="Thông báo"
-            >
-              <Bell size={16} />
-              <span className="absolute top-1 right-1.5 w-1.5 h-1.5 bg-blue-500 rounded-full" />
-            </button>
+            {/* Notification center */}
+            <NotificationCenter
+              userId={user?.id ?? 'anonymous'}
+              language={currentLang}
+            />
 
             {/* Profile Dropdown trigger */}
             {isAuthenticated && user ? (
               <div className="relative dropdown-trigger">
                 <button
                   onClick={() => setIsProfileOpen(v => !v)}
-                  className="w-8 h-8 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center text-xs shadow-md cursor-pointer transition-colors"
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white shadow-md transition-colors hover:bg-blue-700 cursor-pointer lg:h-8 lg:w-8"
                 >
                   {user.fullName.substring(0, 2).toUpperCase()}
                 </button>
@@ -971,7 +1304,7 @@ export const DashboardPage: React.FC = () => {
                     <div className="border-t border-slate-100 my-1" />
 
                     <button
-                      onClick={() => logout()}
+                      onClick={handleLogout}
                       className="w-full px-4 py-2 hover:bg-red-50 text-left font-semibold text-red-600 flex items-center gap-2 cursor-pointer"
                     >
                       <LogOut size={14} />
@@ -993,7 +1326,7 @@ export const DashboardPage: React.FC = () => {
         </header>
 
         {/* ── Content Canvas Container ─────────────────────────────────── */}
-        <div className="flex-1 overflow-y-auto bg-slate-50/70 p-6 flex flex-col">
+        <div className="flex-1 overflow-y-auto bg-slate-50/70 p-3 sm:p-6 flex flex-col">
           {isCustomerView && isAdmin ? (
             <AdminLeadsModal
               isOpen
@@ -1004,14 +1337,14 @@ export const DashboardPage: React.FC = () => {
           <div className="max-w-7xl w-full mx-auto flex-1 flex flex-col">
 
             {/* ── Control Options & Action Buttons Bar ───────────────────── */}
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200 pb-3 mb-6 shrink-0">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 sm:gap-4 border-b border-slate-200 pb-3 mb-4 sm:mb-6 shrink-0">
 
               {/* Left Side: Filter Tabs */}
-              <div className="flex border-b border-slate-200 -mb-px">
+              <div className="-mb-px flex w-full flex-nowrap overflow-x-auto border-b border-slate-200 overscroll-x-contain md:w-auto">
                 {isAdmin && (
                   <button
                     onClick={() => handleTabChange('all')}
-                    className={`pb-2.5 px-3.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'all'
+                    className={`flex min-h-10 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-bold transition-all sm:px-3.5 sm:pb-2.5 ${activeTab === 'all'
                         ? 'border-blue-600 text-blue-600'
                         : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
                       }`}
@@ -1025,7 +1358,7 @@ export const DashboardPage: React.FC = () => {
 
                 <button
                   onClick={() => handleTabChange('assigned')}
-                  className={`pb-2.5 px-3.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'assigned'
+                  className={`flex min-h-10 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-bold transition-all sm:px-3.5 sm:pb-2.5 ${activeTab === 'assigned'
                       ? 'border-blue-600 text-blue-600'
                       : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
                     }`}
@@ -1038,7 +1371,7 @@ export const DashboardPage: React.FC = () => {
 
                 <button
                   onClick={() => handleTabChange('public')}
-                  className={`pb-2.5 px-3.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'public'
+                  className={`flex min-h-10 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-bold transition-all sm:px-3.5 sm:pb-2.5 ${activeTab === 'public'
                       ? 'border-blue-600 text-blue-600'
                       : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'
                     }`}
@@ -1051,14 +1384,14 @@ export const DashboardPage: React.FC = () => {
               </div>
 
               {/* Right Side: Layout and Actions Controls */}
-              <div className="flex items-center flex-wrap gap-3">
+              <div className="flex w-full flex-wrap items-center gap-2 sm:gap-3 md:w-auto">
                 {/* Sort Option Dropdown */}
-                <div className="relative dropdown-trigger flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 font-semibold shadow-sm select-none">
+                <div className="relative dropdown-trigger flex min-h-10 min-w-0 flex-1 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 shadow-sm select-none sm:flex-none">
                   <span className="text-slate-400">{t('sortByLabel')}</span>
                   <select
                     value={sortBy}
                     onChange={(e) => setSortBy(e.target.value as 'lastCaptured' | 'name')}
-                    className="bg-transparent border-0 focus:outline-none focus:ring-0 pr-1 text-slate-800 cursor-pointer font-semibold"
+                    className="min-w-0 flex-1 cursor-pointer border-0 bg-transparent pr-1 font-semibold text-slate-800 focus:outline-none focus:ring-0"
                   >
                     <option value="lastCaptured">{t('sortLatest')}</option>
                     <option value="name">{t('sortName')}</option>
@@ -1066,10 +1399,10 @@ export const DashboardPage: React.FC = () => {
                 </div>
 
                 {/* Grid/List View switcher */}
-                <div className="flex bg-white border border-slate-200 rounded-lg p-0.5 shadow-sm">
+                <div className="flex min-h-10 bg-white border border-slate-200 rounded-lg p-0.5 shadow-sm">
                   <button
                     onClick={() => setViewMode('grid')}
-                    className={`p-1.5 rounded-md cursor-pointer transition-colors ${viewMode === 'grid' ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:text-slate-700'
+                    className={`flex min-w-9 items-center justify-center rounded-md cursor-pointer transition-colors ${viewMode === 'grid' ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:text-slate-700'
                       }`}
                     title={currentLang === 'vi' ? 'Dạng lưới' : currentLang === 'en' ? 'Grid View' : '网格视图'}
                   >
@@ -1077,7 +1410,7 @@ export const DashboardPage: React.FC = () => {
                   </button>
                   <button
                     onClick={() => setViewMode('list')}
-                    className={`p-1.5 rounded-md cursor-pointer transition-colors ${viewMode === 'list' ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:text-slate-700'
+                    className={`flex min-w-9 items-center justify-center rounded-md cursor-pointer transition-colors ${viewMode === 'list' ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:text-slate-700'
                       }`}
                     title={currentLang === 'vi' ? 'Dạng danh sách' : currentLang === 'en' ? 'List View' : '列表视图'}
                   >
@@ -1088,7 +1421,7 @@ export const DashboardPage: React.FC = () => {
                 {/* Add new folder button */}
                 <button
                   onClick={() => setShowFolderAlert(true)}
-                  className="bg-white hover:bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                  className="flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-900 cursor-pointer"
                 >
                   <FolderPlus size={14} className="text-slate-500" />
                   <span>{t('newFolder')}</span>
@@ -1098,7 +1431,7 @@ export const DashboardPage: React.FC = () => {
                 {isAdmin && (
                   <button
                     onClick={() => setIsModalOpen(true)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3 py-1.5 text-xs font-semibold shadow-sm shadow-blue-500/10 transition-all flex items-center gap-1.5 cursor-pointer"
+                    className="flex min-h-10 items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-blue-500/10 transition-all hover:bg-blue-700 cursor-pointer"
                   >
                     <Plus size={14} />
                     <span>{t('newProject')}</span>
@@ -1129,7 +1462,7 @@ export const DashboardPage: React.FC = () => {
               </div>
             ) : viewMode === 'grid' ? (
               /* GRID VIEW */
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-12">
                 {displayedProjects.map((project) => {
                   const isThisProcessing = pipeline.isProcessing && pipeline.projectId === project.id;
                   const hasDOM = !!project.domUrl;
@@ -1161,11 +1494,13 @@ export const DashboardPage: React.FC = () => {
                             <Loader2 size={24} className="text-blue-500 animate-spin" />
                             <span className="text-[10px] font-mono text-blue-600 font-semibold animate-pulse">{t('processing3d')}</span>
                           </div>
-                        ) : hasDOM ? (
+                        ) : hasDOM && showProjectThumbnails ? (
                           <img
                             src={project.domUrl!}
                             crossOrigin="anonymous"
                             alt={project.name}
+                            loading="lazy"
+                            decoding="async"
                             className="w-full h-full object-cover group-hover:scale-103 transition-transform duration-500"
                           />
                         ) : (
@@ -1203,13 +1538,13 @@ export const DashboardPage: React.FC = () => {
                         </div>
 
                         {/* EPSG coordinate tag bottom right */}
-                        <div className="absolute bottom-2.5 right-2.5 bg-neutral-900/80 text-white/95 text-[9px] font-mono px-2 py-0.5 rounded backdrop-blur-sm border border-neutral-800 shadow-sm select-text">
+                        <div className="absolute bottom-2.5 right-2.5 max-w-[calc(100%-20px)] truncate bg-neutral-900/80 text-white/95 text-[9px] font-mono px-2 py-0.5 rounded backdrop-blur-sm border border-neutral-800 shadow-sm select-text">
                           EPSG: {project.epsg}
                         </div>
                       </div>
 
                       {/* Card Content body */}
-                      <div className="p-4 flex flex-col flex-grow select-none">
+                      <div className="p-3 sm:p-4 flex flex-col flex-grow select-none">
                         <div className="flex items-start justify-between gap-2">
                           <h4
                             onClick={() => !isThisProcessing && navigate(`/viewer/${project.id}`)}
@@ -1304,7 +1639,7 @@ export const DashboardPage: React.FC = () => {
                       </div>
 
                       {/* Card Footer / Stats */}
-                      <div className="px-4 py-3 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-semibold select-none font-mono">
+                      <div className="px-3 sm:px-4 py-3 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between gap-3 text-[11px] text-slate-500 font-semibold select-none font-mono">
                         <div className="flex items-center gap-3">
                           <span className="flex items-center gap-1" title={t('columnLayers')}>
                             <Layers size={12} className="text-slate-400" />
@@ -1374,8 +1709,15 @@ export const DashboardPage: React.FC = () => {
                                     <div className="w-full h-full flex items-center justify-center">
                                       <Loader2 size={12} className="animate-spin text-blue-500" />
                                     </div>
-                                  ) : hasDOM ? (
-                                    <img src={project.domUrl!} crossOrigin="anonymous" alt="" className="w-full h-full object-cover" />
+                                  ) : hasDOM && showProjectThumbnails ? (
+                                    <img
+                                      src={project.domUrl!}
+                                      crossOrigin="anonymous"
+                                      alt=""
+                                      loading="lazy"
+                                      decoding="async"
+                                      className="w-full h-full object-cover"
+                                    />
                                   ) : (
                                     <div className="w-full h-full flex items-center justify-center text-slate-300">
                                       <MapPin size={14} />
@@ -1529,7 +1871,7 @@ export const DashboardPage: React.FC = () => {
 
         {/* ── Modals & Overlay Dialogs ─────────────────────────────────── */}
         <ProjectFormModal
-        language={currentLang}
+          language={currentLang}
           isOpen={isModalOpen || !!editingProject}
           onClose={() => {
             setIsModalOpen(false);

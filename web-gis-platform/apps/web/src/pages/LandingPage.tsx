@@ -2328,7 +2328,7 @@ export const LandingPage: React.FC = () => {
                 </button>
               ))}
             </div>
-          </div>làm landing
+          </div>
 
           <div className="lp-shell lp-footer__bottom">
             <span>{t('rights')}</span>

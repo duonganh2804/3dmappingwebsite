@@ -59,6 +59,14 @@ async function run() {
     const adminUser = await prisma.user.findFirst({ where: { role: 'SUPERADMIN' } });
 
     for (const pid of projectIds) {
+      const versionedPrefix = `projects/${pid}/versions/`;
+      if (allKeys.some(key => key.startsWith(versionedPrefix))) {
+        // A failed upload may leave an incomplete, unpublished version in R2.
+        // Without an authoritative DB URL/completion marker, never guess which
+        // version is safe and never replace current URLs with null.
+        console.warn(`[R2 Sync] Skipping versioned project ${pid}; keeping authoritative DB URLs unchanged.`);
+        continue;
+      }
       const domUrl = allKeys.includes(`projects/${pid}/dom.png`) ? `${PUBLIC_URL}/projects/${pid}/dom.png` : null;
       const modelUrl = allKeys.includes(`projects/${pid}/model.glb`) ? `${PUBLIC_URL}/projects/${pid}/model.glb` : null;
       const metadataUrl = allKeys.includes(`projects/${pid}/metadata.json`) ? `${PUBLIC_URL}/projects/${pid}/metadata.json` : null;

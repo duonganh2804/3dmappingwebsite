@@ -25,7 +25,7 @@ const AUTH_LOGGED_OUT_KEY = 'authLoggedOut';
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   accessToken: localStorage.getItem('accessToken') || null,
-  isAuthenticated: !!localStorage.getItem('accessToken'),
+  isAuthenticated: false,
   isLoading: true,
 
   setAuth: (user: UserProfile, token: string) => {

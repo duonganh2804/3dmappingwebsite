@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  useLocation,
   useNavigate,
   useParams,
 } from 'react-router-dom';
@@ -11,13 +12,44 @@ import {
 
 import { CesiumViewer } from '../components/Map/CesiumViewer';
 import { Button } from '../components/UI/Button';
-import { fetchProjectById } from '../services/api';
+import { fetchProjectById, fetchProjectSurveys } from '../services/api';
 import { useLanguage } from '../hooks/useLanguage';
 import {
   useProjectStore,
   type Project,
+  type ProjectSurvey,
 } from '../store/useProjectStore';
+import {
+  openPerf,
+  type ProjectSource,
+} from '../components/Map/viewer/viewerOpenTelemetry';
 
+const projectApiRequests = new Map<string, Promise<Project | null>>();
+const surveyApiRequests = new Map<string, Promise<ProjectSurvey[]>>();
+
+const fetchProjectOnce = (projectId: string) => {
+  const pending = projectApiRequests.get(projectId);
+  if (pending) return pending;
+
+  openPerf.startProjectApi(projectId);
+  const request = fetchProjectById(projectId)
+    .finally(() => {
+      openPerf.endProjectApi(projectId);
+      projectApiRequests.delete(projectId);
+    });
+  projectApiRequests.set(projectId, request);
+  return request;
+};
+
+const fetchSurveysOnce = (projectId: string) => {
+  const pending = surveyApiRequests.get(projectId);
+  if (pending) return pending;
+
+  const request = fetchProjectSurveys(projectId)
+    .finally(() => surveyApiRequests.delete(projectId));
+  surveyApiRequests.set(projectId, request);
+  return request;
+};
 
 const VIEWER_COPY = {
   vi: {
@@ -26,7 +58,8 @@ const VIEWER_COPY = {
     loadingTitle: 'Đang mở không gian 3D',
     loadingDesc: 'Đang tải thông tin dự án và lớp dữ liệu...',
     notFound: 'Không tìm thấy dự án',
-    notFoundDesc: 'Dự án có thể đã bị xóa hoặc tài khoản hiện tại không còn quyền truy cập.',
+    notFoundDesc:
+      'Dự án có thể đã bị xóa hoặc tài khoản hiện tại không còn quyền truy cập.',
     backDashboard: 'Quay lại Bảng điều khiển',
   },
   en: {
@@ -35,7 +68,8 @@ const VIEWER_COPY = {
     loadingTitle: 'Opening 3D workspace',
     loadingDesc: 'Loading project information and data layers...',
     notFound: 'Project not found',
-    notFoundDesc: 'The project may have been deleted or your account no longer has access.',
+    notFoundDesc:
+      'The project may have been deleted or your account no longer has access.',
     backDashboard: 'Back to Dashboard',
   },
   zh: {
@@ -44,7 +78,8 @@ const VIEWER_COPY = {
     loadingTitle: '正在打开3D空间',
     loadingDesc: '正在加载项目信息和数据图层...',
     notFound: '未找到项目',
-    notFoundDesc: '该项目可能已被删除，或当前账户已无访问权限。',
+    notFoundDesc:
+      '该项目可能已被删除，或当前账户已无访问权限。',
     backDashboard: '返回控制台',
   },
 } as const;
@@ -142,6 +177,77 @@ const viewerPageStyle = `
     color: #e2e8f0;
   }
 
+  .viewer-survey-timeline {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    z-index: 40;
+    display: flex;
+    max-width: min(680px, calc(100vw - 32px));
+    transform: translateX(-50%);
+    overflow-x: auto;
+    gap: 4px;
+    border: 1px solid rgba(71,85,105,.72);
+    border-radius: 10px;
+    padding: 4px;
+    background: rgba(7,17,31,.94);
+    box-shadow: 0 12px 30px rgba(2,6,23,.34);
+    scrollbar-width: thin;
+    backdrop-filter: blur(14px);
+  }
+
+  .viewer-survey-option {
+    min-width: 92px;
+    height: 34px;
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    padding: 0 9px;
+    color: #94a3b8;
+    background: transparent;
+    transition: background .14s ease, border-color .14s ease, color .14s ease;
+  }
+
+  .viewer-survey-option:hover {
+    border-color: rgba(71,85,105,.72);
+    color: #e2e8f0;
+    background: rgba(30,41,59,.82);
+  }
+
+  .viewer-survey-option.is-active {
+    border-color: rgba(14,165,233,.58);
+    color: #e0f2fe;
+    background: rgba(14,165,233,.16);
+  }
+
+  .viewer-survey-option-name,
+  .viewer-survey-option-date {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .viewer-survey-option-name {
+    font-size: 9px;
+    font-weight: 650;
+  }
+
+  .viewer-survey-option-date {
+    margin-top: 1px;
+    color: #64748b;
+    font-size: 8px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .viewer-survey-option.is-active .viewer-survey-option-date {
+    color: #7dd3fc;
+  }
+
   html[data-saolatek-theme='light']
   .viewer-page-status {
     background: #f3f6fa;
@@ -180,34 +286,117 @@ const viewerPageStyle = `
       display: none;
     }
   }
-
 `;
+
+type ViewerLocationState = {
+  project?: Project;
+  openedAt?: number;
+} | null;
+
+const isViewerProjectEquivalent = (
+  a: Project,
+  b: Project
+) =>
+  a.id === b.id &&
+  a.domUrl === b.domUrl &&
+  a.metadataUrl === b.metadataUrl &&
+  a.modelUrl === b.modelUrl &&
+  a.pointCloudId === b.pointCloudId &&
+  a.calibration === b.calibration &&
+  a.centerLon === b.centerLon &&
+  a.centerLat === b.centerLat &&
+  a.epsg === b.epsg;
 
 export const ViewerPage: React.FC = () => {
   const { currentLang } =
     useLanguage('vi');
+
   const c = VIEWER_COPY[currentLang];
 
   const { projectId } =
     useParams<{ projectId: string }>();
 
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const { setCurrentProject } =
-    useProjectStore();
+  const {
+    projects,
+    setCurrentProject,
+  } = useProjectStore();
+
+  const navigationState =
+    location.state as ViewerLocationState;
+
+  const navigationProject = useMemo(() => {
+    const candidate = navigationState?.project;
+
+    if (!candidate || candidate.id !== projectId) {
+      return null;
+    }
+
+    return candidate;
+  }, [navigationState, projectId]);
+
+  const storeProject = useMemo(
+    () =>
+      projects.find(
+        (item) => item.id === projectId
+      ) ?? null,
+    [projects, projectId]
+  );
+
+  const bootstrapProject =
+    navigationProject ??
+    storeProject ??
+    null;
+
+  const projectSource: ProjectSource = navigationProject
+    ? 'navigation-state'
+    : storeProject
+      ? 'project-store'
+      : 'api';
 
   const [project, setProject] =
-    useState<Project | null>(null);
+    useState<Project | null>(
+      () => {
+        if (projectId) {
+          openPerf.markViewerPageMounted(
+            projectId,
+            projectSource,
+            navigationState?.openedAt
+          );
+        }
+        return bootstrapProject;
+      }
+    );
 
   const [loading, setLoading] =
-    useState(true);
+    useState(() => !bootstrapProject);
+
+  const validationRequestRef = useRef<{
+    projectId: string;
+    promise: Promise<Project | null>;
+  } | null>(null);
+
+  const surveyRequestRef = useRef<{
+    projectId: string;
+    promise: Promise<ProjectSurvey[]>;
+  } | null>(null);
+
+  const [surveyState, setSurveyState] = useState<{
+    projectId: string | null;
+    surveys: ProjectSurvey[];
+  }>({ projectId: null, surveys: [] });
+  const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null);
 
   const [
     isSidebarOpen,
     setIsSidebarOpen,
   ] = useState(() =>
     typeof window !== 'undefined'
-      ? window.matchMedia('(min-width: 64rem)').matches
+      ? window
+          .matchMedia('(min-width: 64rem)')
+          .matches
       : true
   );
 
@@ -238,36 +427,216 @@ export const ViewerPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-    let active = true;
-    const loadProject = async () => {
-      if (!projectId) return;
-
-      setLoading(true);
+    if (!projectId) {
       setProject(null);
+      setLoading(false);
+      return;
+    }
 
-      const data =
-        await fetchProjectById(projectId, controller.signal);
+    let active = true;
 
-      if (!active) return;
-      if (data) {
-        setProject(data);
-        setCurrentProject(data.id);
-      }
+    const cachedProject =
+      navigationProject ??
+      projects.find(
+        (item) => item.id === projectId
+      ) ??
+      null;
+
+    if (cachedProject) {
+      setProject((current) => {
+        if (
+          current &&
+          isViewerProjectEquivalent(
+            current,
+            cachedProject
+          )
+        ) {
+          return current;
+        }
+
+        return cachedProject;
+      });
 
       setLoading(false);
+      setCurrentProject(cachedProject.id);
+    } else {
+      setProject(null);
+      setLoading(true);
+    }
+
+    const validateProject = async () => {
+      try {
+        if (validationRequestRef.current?.projectId !== projectId) {
+          validationRequestRef.current = {
+            projectId,
+            promise: fetchProjectOnce(projectId),
+          };
+        }
+        const data =
+          await validationRequestRef.current.promise;
+
+        if (!active) return;
+
+        if (!data) {
+          setProject(null);
+          setLoading(false);
+          setCurrentProject(null);
+          return;
+        }
+
+        setCurrentProject(data.id);
+
+        setProject((current) => {
+          if (
+            current &&
+            isViewerProjectEquivalent(
+              current,
+              data
+            )
+          ) {
+            return current;
+          }
+
+          return data;
+        });
+
+        setLoading(false);
+      } catch (error) {
+        if (!active) return;
+
+        if (
+          error instanceof DOMException &&
+          error.name === 'AbortError'
+        ) {
+          return;
+        }
+
+        if (!cachedProject) {
+          setProject(null);
+          setLoading(false);
+          setCurrentProject(null);
+        } else {
+          // Có bootstrap project thì giữ Viewer hoạt động
+          // nếu background validation lỗi mạng tạm thời.
+          setLoading(false);
+        }
+
+        if (import.meta.env.DEV) {
+          console.error(
+            '[ViewerPage] Project validation failed',
+            error
+          );
+        }
+      }
     };
 
-    loadProject();
+    void validateProject();
 
     return () => {
       active = false;
-      controller.abort();
       setCurrentProject(null);
     };
-  }, [projectId, setCurrentProject]);
+  }, [
+    projectId,
+    navigationProject,
+    projects,
+    setCurrentProject,
+  ]);
 
-  if (loading) {
+  useEffect(() => {
+    if (!projectId) return;
+    let active = true;
+
+    const loadSurveys = async () => {
+      try {
+        if (surveyRequestRef.current?.projectId !== projectId) {
+          surveyRequestRef.current = {
+            projectId,
+            promise: fetchSurveysOnce(projectId),
+          };
+        }
+
+        const data = await surveyRequestRef.current.promise;
+        if (!active) return;
+
+        const surveys = [...data].sort(
+          (a, b) =>
+            new Date(b.capturedAt).getTime() -
+            new Date(a.capturedAt).getTime()
+        );
+        setSurveyState({ projectId, surveys });
+        setSelectedSurveyId(surveys[0]?.id ?? null);
+      } catch (error) {
+        if (!active) return;
+        setSurveyState({ projectId, surveys: [] });
+        setSelectedSurveyId(null);
+        if (import.meta.env.DEV) {
+          console.warn('[SurveyTimeline] Survey request failed; using legacy assets.', error);
+        }
+      }
+    };
+
+    void loadSurveys();
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+
+  const surveys = surveyState.projectId === projectId
+    ? surveyState.surveys
+    : [];
+  const selectedSurvey = surveys.find(
+    (survey) => survey.id === selectedSurveyId
+  ) ?? null;
+
+  const surveysReady = !projectId || surveyState.projectId === projectId;
+  const selectedSurveyDomUrl = selectedSurvey?.domUrl;
+  const selectedSurveyMetadataUrl = selectedSurvey?.metadataUrl;
+  const selectedSurveyModelUrl = selectedSurvey?.modelUrl;
+  const selectedSurveyPointCloudId = selectedSurvey?.pointCloudId;
+  const selectedSurveyCalibration = selectedSurvey?.calibration;
+  const hasSelectedSurvey = selectedSurvey !== null;
+
+  const viewerProject = useMemo<Project | null>(() => {
+    if (!project || !hasSelectedSurvey) return project;
+
+    const surveyProject = {
+      ...project,
+      domUrl: selectedSurveyDomUrl,
+      metadataUrl: selectedSurveyMetadataUrl,
+      modelUrl: selectedSurveyModelUrl,
+      pointCloudId: selectedSurveyPointCloudId,
+      calibration: selectedSurveyCalibration,
+    };
+
+    return isViewerProjectEquivalent(project, surveyProject)
+      ? project
+      : surveyProject;
+  }, [
+    project,
+    hasSelectedSurvey,
+    selectedSurveyDomUrl,
+    selectedSurveyMetadataUrl,
+    selectedSurveyModelUrl,
+    selectedSurveyPointCloudId,
+    selectedSurveyCalibration,
+  ]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || surveyState.projectId !== projectId) return;
+    console.info('[SurveyTimeline]', {
+      projectId,
+      surveyCount: surveys.length,
+      selectedSurveyId: selectedSurvey?.id ?? null,
+      selectedCapturedAt: selectedSurvey?.capturedAt ?? null,
+      usingLegacyAssets: !selectedSurvey,
+    });
+  }, [projectId, selectedSurvey, surveyState.projectId, surveys.length]);
+
+  const projectIsStale = Boolean(project && project.id !== projectId);
+  const waitingForSurveys = Boolean(project && !surveysReady);
+
+  if (loading || projectIsStale || waitingForSurveys) {
     return (
       <>
         <style>{viewerPageStyle}</style>
@@ -294,7 +663,7 @@ export const ViewerPage: React.FC = () => {
     );
   }
 
-  if (!project) {
+  if (!project || !viewerProject) {
     return (
       <>
         <style>{viewerPageStyle}</style>
@@ -334,7 +703,9 @@ export const ViewerPage: React.FC = () => {
 
       <div
         className={`viewer-project-dock absolute top-3 z-40 transition-transform duration-300 ease-in-out ${
-          isSidebarOpen ? 'is-sidebar-open' : ''
+          isSidebarOpen
+            ? 'is-sidebar-open'
+            : ''
         }`}
       >
         <Button
@@ -359,10 +730,39 @@ export const ViewerPage: React.FC = () => {
         </div>
       </div>
 
+      {surveys.length > 0 && (
+        <div className="viewer-survey-timeline" aria-label="Survey timeline">
+          {surveys.map((survey) => {
+            const isActive = survey.id === selectedSurvey?.id;
+            const capturedAt = new Intl.DateTimeFormat(
+              currentLang === 'vi' ? 'vi-VN' : currentLang === 'zh' ? 'zh-CN' : 'en-US',
+              { day: '2-digit', month: '2-digit', year: 'numeric' }
+            ).format(new Date(survey.capturedAt));
+
+            return (
+              <button
+                key={survey.id}
+                type="button"
+                aria-pressed={isActive}
+                title={`${survey.name ?? capturedAt} · ${capturedAt}`}
+                onClick={() => setSelectedSurveyId(survey.id)}
+                className={`viewer-survey-option ${isActive ? 'is-active' : ''}`}
+              >
+                <span className="viewer-survey-option-name">
+                  {survey.name ?? capturedAt}
+                </span>
+                <span className="viewer-survey-option-date">{capturedAt}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <CesiumViewer
-        projectId={project.id}
-        projectName={project.name}
-        project={project}
+        projectId={viewerProject.id}
+        surveyId={selectedSurvey?.id}
+        projectName={viewerProject.name}
+        project={viewerProject}
         isSidebarOpen={isSidebarOpen}
         onToggleSidebar={
           setIsSidebarOpen

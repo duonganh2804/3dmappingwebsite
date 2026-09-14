@@ -8,6 +8,8 @@ import rateLimit from 'express-rate-limit';
 import { register, login, googleLogin, refresh, logout, me, forgotPassword, resetPassword } from './controllers/authController';
 import { getProjectMembers, addProjectMember, updateProjectMemberRole, removeProjectMember } from './controllers/memberController';
 import { clearMeasurements, createMeasurement, deleteMeasurement, listMeasurements, updateMeasurement } from './controllers/measurementController';
+import { createSurvey, deleteSurvey, listSurveys, updateSurvey } from './controllers/surveyController';
+import { createIssue, deleteIssue, listIssues, updateIssue } from './controllers/issueController';
 import { authenticateToken, optionalAuth, requireProjectRole, AuthRequest } from './middlewares/authMiddleware';
 import { translateTileset } from './utils/translator';
 import { parseAndUnifyCoordinates } from './utils/coordinateConverter';
@@ -72,6 +74,14 @@ app.patch('/api/projects/:projectId/measurements/:measurementId', authenticateTo
 app.delete('/api/projects/:projectId/measurements/:measurementId', authenticateToken, requireProjectRole('EDITOR'), deleteMeasurement);
 app.delete('/api/projects/:projectId/measurements', authenticateToken, requireProjectRole('EDITOR'), clearMeasurements);
 
+app.get('/api/projects/:projectId/surveys', optionalAuth, requireProjectRole('VIEWER'), listSurveys);
+app.post('/api/projects/:projectId/surveys', authenticateToken, requireProjectRole('EDITOR'), createSurvey);
+app.patch('/api/projects/:projectId/surveys/:surveyId', authenticateToken, requireProjectRole('EDITOR'), updateSurvey);
+app.delete('/api/projects/:projectId/surveys/:surveyId', authenticateToken, requireProjectRole('EDITOR'), deleteSurvey);
+app.get('/api/projects/:projectId/issues', optionalAuth, requireProjectRole('VIEWER'), listIssues);
+app.post('/api/projects/:projectId/issues', authenticateToken, requireProjectRole('EDITOR'), createIssue);
+app.patch('/api/projects/:projectId/issues/:issueId', authenticateToken, requireProjectRole('EDITOR'), updateIssue);
+app.delete('/api/projects/:projectId/issues/:issueId', authenticateToken, requireProjectRole('EDITOR'), deleteIssue);
 // ─── Pipeline State ────────────────────────────────────────────────────────
 // Tracking trạng thái xử lý ngầm để frontend biết được tiến độ
 let processLogs: string[] = [];

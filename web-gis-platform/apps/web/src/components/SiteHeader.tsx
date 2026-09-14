@@ -49,7 +49,8 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
 
   const { currentLang, setCurrentLang } = useLanguage('vi');
   const { openDemo, isDemoLoading } = useDemoNavigation();
-  const { user, isAuthenticated, logout } = useAuthStore();
+  const { user, isAuthenticated, isLoading, logout } = useAuthStore();
+  const hasAuthenticatedUser = isAuthenticated && user !== null;
 
   const [isDarkMode, setIsDarkMode] = useState(readInitialTheme);
   const [activeDropdown, setActiveDropdown] =
@@ -76,7 +77,7 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
   };
 
   const openAccount = () => {
-    if (!isAuthenticated) {
+    if (!hasAuthenticatedUser) {
       navigate('/login');
       return;
     }
@@ -1324,19 +1325,21 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
               <div className="site-header__theme-thumb" />
             </button>
 
-            <button
-              type="button"
-              className="site-header__button site-header__button--ghost"
-              onClick={openAccount}
-            >
-              {isAuthenticated
-                ? actionCopy.dashboard
-                : actionCopy.login}
+            {!isLoading && (
+              <button
+                type="button"
+                className="site-header__button site-header__button--ghost"
+                onClick={openAccount}
+              >
+                {hasAuthenticatedUser
+                  ? actionCopy.dashboard
+                  : actionCopy.login}
 
-              {isAuthenticated && user?.fullName
-                ? ` (${user.fullName.split(' ')[0]})`
-                : ''}
-            </button>
+                {hasAuthenticatedUser && user.fullName
+                  ? ` (${user.fullName.split(' ')[0]})`
+                  : ''}
+              </button>
+            )}
 
             <button
               type="button"
@@ -1347,7 +1350,7 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
               {actionCopy.demo}
             </button>
 
-            {isAuthenticated && (
+            {!isLoading && hasAuthenticatedUser && (
               <button
                 type="button"
                 className="site-header__logout-corner"
@@ -1454,18 +1457,20 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
           </div>
 
           <div className="site-header-mobile__actions">
-            <button
-              type="button"
-              className="site-header__button site-header__button--ghost"
-              onClick={() => {
-                setMobileMenuOpen(false);
-                openAccount();
-              }}
-            >
-              {isAuthenticated
-                ? actionCopy.dashboard
-                : actionCopy.login}
-            </button>
+            {!isLoading && (
+              <button
+                type="button"
+                className="site-header__button site-header__button--ghost"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  openAccount();
+                }}
+              >
+                {hasAuthenticatedUser
+                  ? actionCopy.dashboard
+                  : actionCopy.login}
+              </button>
+            )}
 
             <button
               type="button"
@@ -1479,7 +1484,7 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
               {actionCopy.demo}
             </button>
 
-            {isAuthenticated && (
+            {!isLoading && hasAuthenticatedUser && (
               <button
                 type="button"
                 className="site-header__button site-header__button--ghost site-header-mobile__logout"

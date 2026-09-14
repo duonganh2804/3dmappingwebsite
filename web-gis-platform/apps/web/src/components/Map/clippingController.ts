@@ -1,5 +1,6 @@
 /* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4 */
 import * as Cesium from 'cesium';
+import { logClippingEvent, registerClippingLifecycle } from './viewer/lifecycleDiagnostics';
 
 export type ClipTool = 'box' | 'polygon' | 'plane';
 export type ClipMode = 'none' | 'highlight' | 'inside' | 'outside';
@@ -89,7 +90,7 @@ export class ClippingController {
   }
 
   activate(tool: ClipTool, mode: ClipMode, filter: ClipFilter) {
-    this.clear();
+    this.clear('tool-switch');
     this.mode = mode;
     this.filter = filter;
     const sphere = this.getBoundingSphere();
@@ -127,9 +128,9 @@ export class ClippingController {
     this.viewer.scene.requestRender();
   }
 
-  clear() {
+  clear(reason = 'clear/reset') {
     this.finishDrag();
-    this.detachCollections();
+    this.detachCollections(reason);
     this.entities.forEach(entity => this.viewer.entities.remove(entity));
     this.entities = [];
     this.handles = [];
@@ -145,7 +146,7 @@ export class ClippingController {
   }
 
   destroy() {
-    this.clear();
+    this.clear('unmount');
     window.removeEventListener('pointerup', this.finishDragOnWindowExit);
     window.removeEventListener('blur', this.finishDragOnWindowExit);
     if (!this.handler.isDestroyed()) this.handler.destroy();
@@ -831,6 +832,7 @@ export class ClippingController {
     const targetSet = new Set(this.getTargets().filter(target => !(target as any).isDestroyed?.()));
     for (const [target, collection] of this.collections) {
       if (!targetSet.has(target)) {
+        logClippingEvent('detaching', collection, target, 'clip-target-removed');
         (target as any).clippingPlanes = undefined;
         if (!collection.isDestroyed()) collection.destroy();
         this.collections.delete(target);
@@ -840,7 +842,9 @@ export class ClippingController {
       let collection = this.collections.get(target);
       if (!collection) {
         collection = new Cesium.ClippingPlaneCollection({ edgeColor: COLOR, edgeWidth: 1 });
+        registerClippingLifecycle(collection, target);
         (target as any).clippingPlanes = collection;
+        logClippingEvent('attached', collection, target);
         this.collections.set(target, collection);
       }
       collection.enabled = this.mode === 'inside' || this.mode === 'outside';
@@ -911,8 +915,9 @@ export class ClippingController {
     });
   }
 
-  private detachCollections() {
+  private detachCollections(reason: string) {
     for (const [target, collection] of this.collections) {
+      logClippingEvent('detaching', collection, target, reason);
       try { (target as any).clippingPlanes = undefined; } catch { /* target may already be destroyed */ }
       try { if (!collection.isDestroyed()) collection.destroy(); } catch { /* Cesium owns some destroyed resources */ }
     }

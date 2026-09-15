@@ -283,6 +283,7 @@ export const UnifiedToolbar: React.FC<
       <style>{toolbarStyle}</style>
 
       <div
+        data-tour="display-toolbar"
         className="viewer-command-bar absolute top-3 z-30 flex flex-nowrap items-center overflow-x-auto rounded-2xl border border-[var(--bar-border)] bg-[var(--bar-bg)] p-1.5 shadow-[var(--bar-shadow)] backdrop-blur-xl select-none"
       >
         <div className="viewer-command-group">

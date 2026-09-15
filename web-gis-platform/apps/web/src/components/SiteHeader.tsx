@@ -929,6 +929,30 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
           transform: translateY(-1px);
         }
 
+        .site-header__account {
+          width: 168px;
+          min-width: 0;
+          flex-shrink: 0;
+        }
+
+        .site-header__account-label {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .site-header__account-placeholder {
+          display: block;
+          width: 96px;
+          height: 12px;
+          border-radius: 4px;
+          background: var(--sh-border-strong);
+        }
+
+        .site-header-mobile__actions .site-header__account {
+          width: 100%;
+        }
+
         .site-header__button--solid {
           border: 1px solid transparent;
           background: var(--sh-solid-bg);
@@ -1325,19 +1349,26 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
               <div className="site-header__theme-thumb" />
             </button>
 
-            {!isLoading && (
+            {isLoading ? (
+              <div className="site-header__button site-header__button--ghost site-header__account" aria-busy="true" aria-label={actionCopy.dashboard}>
+                <span className="site-header__account-placeholder" aria-hidden="true" />
+              </div>
+            ) : (
               <button
                 type="button"
-                className="site-header__button site-header__button--ghost"
+                className="site-header__button site-header__button--ghost site-header__account"
                 onClick={openAccount}
+                title={hasAuthenticatedUser ? `${actionCopy.dashboard} (${user.fullName})` : actionCopy.login}
               >
-                {hasAuthenticatedUser
-                  ? actionCopy.dashboard
-                  : actionCopy.login}
+                <span className="site-header__account-label">
+                  {hasAuthenticatedUser
+                    ? actionCopy.dashboard
+                    : actionCopy.login}
 
-                {hasAuthenticatedUser && user.fullName
-                  ? ` (${user.fullName.split(' ')[0]})`
-                  : ''}
+                  {hasAuthenticatedUser && user.fullName
+                    ? ` (${user.fullName.split(' ')[0]})`
+                    : ''}
+                </span>
               </button>
             )}
 
@@ -1457,10 +1488,14 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
           </div>
 
           <div className="site-header-mobile__actions">
-            {!isLoading && (
+            {isLoading ? (
+              <div className="site-header__button site-header__button--ghost site-header__account" aria-busy="true" aria-label={actionCopy.dashboard}>
+                <span className="site-header__account-placeholder" aria-hidden="true" />
+              </div>
+            ) : (
               <button
                 type="button"
-                className="site-header__button site-header__button--ghost"
+                className="site-header__button site-header__button--ghost site-header__account"
                 onClick={() => {
                   setMobileMenuOpen(false);
                   openAccount();

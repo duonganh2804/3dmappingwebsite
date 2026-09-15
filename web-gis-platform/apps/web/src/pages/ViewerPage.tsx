@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 
 import { CesiumViewer } from '../components/Map/CesiumViewer';
+import { DemoViewerTour } from '../components/Map/DemoViewerTour';
 import { Button } from '../components/UI/Button';
 import { fetchProjectById, fetchProjectSurveys } from '../services/api';
 import { useLanguage } from '../hooks/useLanguage';
@@ -116,62 +117,6 @@ const viewerPageStyle = `
     --vp-shadow: 0 14px 32px rgba(15,23,42,.12);
   }
 
-  .viewer-project-dock {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 7px;
-    left: 12px;
-  }
-
-  .viewer-back-button {
-    height: 38px !important;
-    border: 1px solid var(--vp-border) !important;
-    border-radius: 11px !important;
-    background: var(--vp-panel) !important;
-    color: var(--vp-text) !important;
-    box-shadow: var(--vp-shadow) !important;
-    backdrop-filter: blur(16px);
-  }
-
-  .viewer-back-button:hover {
-    background: var(--vp-hover) !important;
-    border-color: rgba(14,165,233,.32) !important;
-  }
-
-  .viewer-project-chip {
-    max-width: 210px;
-    height: 34px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border: 1px solid var(--vp-border);
-    border-radius: 11px;
-    padding: 0 11px;
-    background: var(--vp-panel);
-    color: var(--vp-soft);
-    box-shadow: 0 8px 20px rgba(2,6,23,.16);
-    backdrop-filter: blur(16px);
-    font-size: 10px;
-    font-weight: 650;
-  }
-
-  .viewer-project-chip strong {
-    overflow: hidden;
-    color: var(--vp-text);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .viewer-project-chip-dot {
-    width: 7px;
-    height: 7px;
-    flex: 0 0 auto;
-    border-radius: 999px;
-    background: #22c55e;
-    box-shadow: 0 0 0 3px rgba(34,197,94,.10);
-  }
-
   .viewer-page-status {
     background: #07111f;
     color: #e2e8f0;
@@ -254,38 +199,6 @@ const viewerPageStyle = `
     color: #0f172a;
   }
 
-  @media (min-width: 64rem) {
-    .viewer-project-dock.is-sidebar-open {
-      left: calc(clamp(260px, 21vw, 320px) + 16px);
-    }
-  }
-
-  @media (max-width: 82.5rem) {
-    .viewer-project-chip {
-      display: none;
-    }
-  }
-
-  @media (max-width: 89.999rem) {
-    .viewer-project-dock {
-      top: 66px !important;
-    }
-  }
-
-  @media (max-width: 47.999rem) {
-    .viewer-project-dock {
-      z-index: 35 !important;
-    }
-
-    .viewer-back-button {
-      width: 42px;
-      padding-inline: 0 !important;
-    }
-
-    .viewer-back-button span {
-      display: none;
-    }
-  }
 `;
 
 type ViewerLocationState = {
@@ -701,35 +614,6 @@ export const ViewerPage: React.FC = () => {
     <div className="viewer-option-b relative h-dvh min-h-0 w-full overflow-hidden bg-black">
       <style>{viewerPageStyle}</style>
 
-      <div
-        className={`viewer-project-dock absolute top-3 z-40 transition-transform duration-300 ease-in-out ${
-          isSidebarOpen
-            ? 'is-sidebar-open'
-            : ''
-        }`}
-      >
-        <Button
-          variant="secondary"
-          size="sm"
-          className="viewer-back-button gap-2 px-3"
-          onClick={() =>
-            navigate('/dashboard')
-          }
-        >
-          <ArrowLeft size={15} />
-          <span>{c.dashboard}</span>
-        </Button>
-
-        <div
-          className="viewer-project-chip"
-          title={project.name}
-        >
-          <span className="viewer-project-chip-dot" />
-          <span>{c.project}</span>
-          <strong>{project.name}</strong>
-        </div>
-      </div>
-
       {surveys.length > 0 && (
         <div className="viewer-survey-timeline" aria-label="Survey timeline">
           {surveys.map((survey) => {
@@ -762,6 +646,22 @@ export const ViewerPage: React.FC = () => {
         projectId={viewerProject.id}
         surveyId={selectedSurvey?.id}
         projectName={viewerProject.name}
+        sidebarHeaderAction={(
+          <>
+          {project.isPublic && (
+            <DemoViewerTour key={project.id} onOpenSidebar={() => setIsSidebarOpen(true)} />
+          )}
+          <button
+            type="button"
+            aria-label="Bảng điều khiển"
+            title="Bảng điều khiển"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--vs-border)] bg-[var(--vs-surface)] text-[var(--vs-text-soft)] transition hover:border-sky-500/35 hover:bg-[var(--vs-surface-hover)] hover:text-sky-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500"
+            onClick={() => navigate('/dashboard')}
+          >
+            <ArrowLeft size={15} aria-hidden="true" />
+          </button>
+          </>
+        )}
         project={viewerProject}
         isSidebarOpen={isSidebarOpen}
         onToggleSidebar={

@@ -29,6 +29,7 @@ import {
 import type { ToolMode } from './CesiumViewer';
 import { useLanguage } from '../../hooks/useLanguage';
 import logoImg from '../../assets/logo.webp';
+import { ViewerToolGuide } from './ViewerToolGuide';
 
 type BgMode =
   | 'sky'
@@ -70,6 +71,8 @@ interface PotreeSidebarProps {
   onToggleOpen?: () => void;
 
   projectName?: string;
+  headerAction?: React.ReactNode;
+  enableToolGuides?: boolean;
 
   currentMode: ToolMode;
   onModeChange: (mode: ToolMode) => void;
@@ -885,10 +888,12 @@ function SliderRow({
   step,
   onChange,
   stepButtons,
+  guideTarget,
 }: {
   label: string;
   value: number;
   displayValue?: string;
+  guideTarget?: string;
   min: number;
   max: number;
   step: number;
@@ -928,6 +933,7 @@ function SliderRow({
         )}
         <input
           type="range"
+          data-tool-guide={guideTarget}
           min={min}
           max={max}
           step={step}
@@ -960,13 +966,15 @@ function SectionHeader({
   icon,
   isOpen,
   onToggle,
+  help,
 }: {
   label: string;
   icon?: React.ReactNode;
   isOpen: boolean;
   onToggle: () => void;
+  help?: React.ReactNode;
 }) {
-  return (
+  const header = (
     <button
       type="button"
       onClick={onToggle}
@@ -988,6 +996,7 @@ function SectionHeader({
       <span>{label}</span>
     </button>
   );
+  return help ? <div className="viewer-tool-guide-section">{header}{help}</div> : header;
 }
 
 function CheckMark() {
@@ -1083,12 +1092,14 @@ function PtCheckbox({
 
 function MicroTitle({
   children,
+  help,
 }: {
   children: React.ReactNode;
+  help?: React.ReactNode;
 }) {
   return (
-    <div className="viewer-micro-title border-b pb-2 text-[10px] font-bold uppercase tracking-[0.14em]">
-      {children}
+    <div className={`viewer-micro-title border-b pb-2 text-[10px] font-bold uppercase tracking-[0.14em]${help ? ' viewer-tool-guide-title' : ''}`}>
+      {help ? <><span>{children}</span>{help}</> : children}
     </div>
   );
 }
@@ -1388,6 +1399,8 @@ export function PotreeSidebar({
   onToggleOpen,
 
   projectName = 'Dự án 3D',
+  headerAction,
+  enableToolGuides = false,
 
   currentMode,
   onModeChange,
@@ -1900,50 +1913,47 @@ export function PotreeSidebar({
             : '-translate-x-full'
         }`}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-[var(--vs-border)] bg-[var(--vs-bg-soft)] px-3 py-2.5">
-          <div className="flex min-w-0 flex-1 flex-col justify-center pr-2">
+        <div className="min-w-0 shrink-0 border-b border-[var(--vs-border)] bg-[var(--vs-bg-soft)] px-3 py-2.5">
+          <div className="flex min-w-0 items-center justify-between gap-2">
             <img
               src={logoImg}
               alt="SAOLATEK"
               draggable={false}
-              className="h-[27px] w-auto max-w-[126px] object-contain object-left"
+              className="h-[27px] w-[126px] min-w-0 shrink object-contain object-left"
             />
-
-            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[8px] font-medium text-[var(--vs-muted)]">
-              <span className="shrink-0">v1.8.0</span>
-              <span className="shrink-0 text-[var(--vs-border)]">
-                ·
-              </span>
-              <span className="truncate">
-                {projectName}
-              </span>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() =>
+                  applyTheme(!isDarkMode)
+                }
+                title={
+                  isDarkMode
+                    ? c.switchLight
+                    : c.switchDark
+                }
+                aria-label={
+                  isDarkMode
+                    ? c.switchLight
+                    : c.switchDark
+                }
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--vs-border)] bg-[var(--vs-surface)] text-[var(--vs-text-soft)] transition hover:border-sky-500/35 hover:bg-[var(--vs-surface-hover)] hover:text-sky-500"
+              >
+                {isDarkMode ? (
+                  <Sun size={14} />
+                ) : (
+                  <Moon size={14} />
+                )}
+              </button>
+              {headerAction}
             </div>
           </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() =>
-                applyTheme(!isDarkMode)
-              }
-              title={
-                isDarkMode
-                  ? c.switchLight
-                  : c.switchDark
-              }
-              aria-label={
-                isDarkMode
-                  ? c.switchLight
-                  : c.switchDark
-              }
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--vs-border)] bg-[var(--vs-surface)] text-[var(--vs-text-soft)] transition hover:border-sky-500/35 hover:bg-[var(--vs-surface-hover)] hover:text-sky-500"
-            >
-              {isDarkMode ? (
-                <Sun size={14} />
-              ) : (
-                <Moon size={14} />
-              )}
-            </button>
+          <div className="mt-0.5 text-[8px] font-medium leading-3 text-[var(--vs-muted)]">
+            v1.8.0
+          </div>
+          <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] font-semibold leading-4" title={projectName}>
+            <span aria-hidden="true" className="h-[7px] w-[7px] shrink-0 rounded-full bg-green-500" />
+            <span className="min-w-0 truncate">{projectName}</span>
           </div>
         </div>
 
@@ -1959,8 +1969,8 @@ export function PotreeSidebar({
 
           {sections.tools && (
             <div className="space-y-3 border-b border-[var(--vs-border-soft)] px-3 py-3">
-              <div className="viewer-section-shell space-y-3">
-                <MicroTitle>
+              <div data-tour="measurement-tools" className="viewer-section-shell space-y-3">
+                <MicroTitle help={enableToolGuides && <ViewerToolGuide group="measurement" />}>
                   {c.measurements}
                 </MicroTitle>
 
@@ -1979,6 +1989,7 @@ export function PotreeSidebar({
                         <button
                           type="button"
                           key={`${tool.mode}-${index}`}
+                          data-tool-guide={`measure-${tool.mode}`}
                           onClick={() => {
                             if (isClear) {
                               onClear();
@@ -2056,8 +2067,8 @@ export function PotreeSidebar({
                 {measurementManager}
               </div>
 
-              <div className="viewer-section-shell space-y-3">
-                <MicroTitle>
+              <div data-tour="cut-tools" className="viewer-section-shell space-y-3">
+                <MicroTitle help={enableToolGuides && <ViewerToolGuide group="clipping" />}>
                   {c.clipping}
                 </MicroTitle>
 
@@ -2070,6 +2081,7 @@ export function PotreeSidebar({
                         onClick={() => {
                           onClipTool?.(tool.id as 'box' | 'polygon' | 'plane' | 'clear');
                         }}
+                        data-tool-guide={`clip-${tool.id}`}
                         title={tool.title}
                         className={`${baseToolButton} ${
                           tool.id === 'clear'
@@ -2116,6 +2128,7 @@ export function PotreeSidebar({
                       <button
                         type="button"
                         key={mode}
+                        data-tool-guide={`clip-${mode}`}
                         onClick={() =>
                           onClipModeChange?.(mode)
                         }
@@ -2169,9 +2182,9 @@ export function PotreeSidebar({
                 </div>
               </div>
 
-              <div className="viewer-section-shell space-y-3">
+              <div data-tour="navigation-tools" className="viewer-section-shell space-y-3">
                 <div className="flex items-center justify-between gap-2">
-                  <MicroTitle>{c.navigation}</MicroTitle>
+                  <MicroTitle help={enableToolGuides && <ViewerToolGuide group="navigation" />}>{c.navigation}</MicroTitle>
                   <span
                     className="inline-flex items-center gap-1 rounded-md border border-[var(--vs-border-soft)] bg-[var(--vs-bg-soft)] px-2 py-1 font-mono text-[9px] font-semibold tabular-nums text-[var(--vs-accent)]"
                     title="Current camera heading"
@@ -2189,6 +2202,7 @@ export function PotreeSidebar({
                         type="button"
                         key={tool.id}
                         disabled={(tool.id === 'focus' && isReturningFocusOrigin) || (tool.id === 'zoom-area' && !onToggleZoomArea)}
+                        data-tool-guide={`navigation-${tool.id}`}
                         onClick={() => {
                           if (tool.action) {
                             tool.action();
@@ -2471,6 +2485,7 @@ export function PotreeSidebar({
 
           <SectionHeader
             label={c.appearance}
+            help={enableToolGuides && <ViewerToolGuide group="display" />}
             isOpen={sections.appearance}
             onToggle={() =>
               toggleSection('appearance')
@@ -2744,6 +2759,7 @@ export function PotreeSidebar({
 
           <SectionHeader
             label={c.scene}
+            help={enableToolGuides && <ViewerToolGuide group="display" />}
             isOpen={sections.scene}
             onToggle={() =>
               toggleSection('scene')
@@ -2751,10 +2767,11 @@ export function PotreeSidebar({
           />
 
           {sections.scene && (
-            <div className="space-y-2.5 border-b border-[var(--vs-border-soft)] px-3 py-3">
+            <div data-tour="display-tools" className="space-y-2.5 border-b border-[var(--vs-border-soft)] px-3 py-3">
               <div className="space-y-1">
                 <button
                   type="button"
+                  data-tool-guide="layer-pointcloud"
                   onClick={() =>
                     setShowPointCloud(
                       !showPointCloud
@@ -2798,6 +2815,7 @@ export function PotreeSidebar({
 
                 <button
                   type="button"
+                  data-tool-guide="layer-model"
                   onClick={() =>
                     setShowModel(!showModel)
                   }
@@ -2828,6 +2846,7 @@ export function PotreeSidebar({
                 <div className="px-1.5 pb-2">
                   <SliderRow
                     label={`${c.model3d} · ${c.opacity}`}
+                    guideTarget="layer-model-opacity"
                     value={modelOpacity}
                     displayValue={`${Math.round(modelOpacity * 100)}%`}
                     min={0}
@@ -2839,6 +2858,7 @@ export function PotreeSidebar({
 
                 <button
                   type="button"
+                  data-tool-guide="layer-dom"
                   onClick={() =>
                     setShowDom(!showDom)
                   }

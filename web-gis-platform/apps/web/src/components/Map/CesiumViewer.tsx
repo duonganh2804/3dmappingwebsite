@@ -282,13 +282,15 @@ export const CesiumViewer: React.FC<{
   project?: Project;
   isSidebarOpen?: boolean;
   onToggleSidebar?: (open: boolean) => void;
+  sidebarHeaderAction?: React.ReactNode;
 }> = ({
   projectId,
   surveyId,
   projectName = 'Dự án 3D',
   project: suppliedProject,
   isSidebarOpen = true,
-  onToggleSidebar
+  onToggleSidebar,
+  sidebarHeaderAction
 }) => {
     const { currentLang } = useLanguage('vi');
     const loadingCopy = VIEWER_LOADING_COPY[currentLang];
@@ -6448,6 +6450,8 @@ export const CesiumViewer: React.FC<{
           isOpen={isSidebarOpen}
           onToggleOpen={onToggleSidebar ? () => onToggleSidebar(!isSidebarOpen) : undefined}
           projectName={projectName}
+          headerAction={sidebarHeaderAction}
+          enableToolGuides={suppliedProject?.isPublic === true}
           currentMode={toolMode}
           onModeChange={(mode) => {
             handleToolModeChange(mode);

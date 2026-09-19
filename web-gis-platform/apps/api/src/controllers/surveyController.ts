@@ -21,30 +21,10 @@ export const listSurveys = async (req: AuthRequest, res: Response) => {
   try {
     const surveys = await prisma.survey.findMany({
       where: { projectId: String(req.params.projectId) },
-      orderBy: [{ capturedAt: 'asc' }, { createdAt: 'asc' }],
-      select: {
-        id: true,
-        capturedAt: true,
-        modelUrl: true,
-        domUrl: true,
-        pointCloudId: true
-      }
+      orderBy: [{ capturedAt: 'desc' }, { createdAt: 'desc' }]
     });
-    return res.json(surveys.map(survey => ({
-      ...survey,
-      capturedAt: survey.capturedAt.toISOString()
-    })));
+    return res.json(surveys);
   } catch (error: any) {
-    // Some deployed databases predate the Survey table even though the Prisma
-    // model and route already exist in this source tree. An empty list truthfully
-    // means "no stored snapshots" and lets the Viewer use its project fallback;
-    // never manufacture temporal history from the current project assets.
-    if (error?.code === 'P2021') {
-      console.warn('[Survey] Storage is not available; returning no snapshots.', {
-        projectId: String(req.params.projectId)
-      });
-      return res.json([]);
-    }
     return res.status(500).json({ error: error.message });
   }
 };

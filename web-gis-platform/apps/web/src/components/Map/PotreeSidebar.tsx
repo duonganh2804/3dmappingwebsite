@@ -29,6 +29,7 @@ import {
 import type { ToolMode } from './CesiumViewer';
 import { useLanguage } from '../../hooks/useLanguage';
 import logoImg from '../../assets/logo.webp';
+import { ViewerToolGuide } from './ViewerToolGuide';
 
 type BgMode =
   | 'sky'
@@ -70,6 +71,8 @@ interface PotreeSidebarProps {
   onToggleOpen?: () => void;
 
   projectName?: string;
+  headerAction?: React.ReactNode;
+  enableToolGuides?: boolean;
 
   currentMode: ToolMode;
   onModeChange: (mode: ToolMode) => void;
@@ -149,7 +152,6 @@ interface PotreeSidebarProps {
   onRetryModel?: () => void;
   onRetryPointCloud?: () => void;
   onRetryDom?: () => void;
-
   pointSize: number;
   onPointSizeChange: (v: number) => void;
   fov: number;
@@ -317,6 +319,90 @@ const viewerStyle = `
   .viewer-segment.is-active {
     color: var(--vs-text);
     background: var(--vs-segment);
+  }
+
+  .viewer-pointcloud-controls .viewer-micro-title {
+    min-height: 0;
+    padding-bottom: 0;
+    border-bottom: 0;
+    color: var(--vs-muted);
+    font-size: 10px !important;
+    font-weight: 700;
+    letter-spacing: .08em !important;
+  }
+
+  .viewer-pointcloud-background-option {
+    height: 30px;
+    border: 1px solid var(--vs-border-soft);
+    border-radius: 6px;
+    color: var(--vs-muted);
+    background: var(--vs-surface);
+    font-weight: 500;
+    transition: border-color .14s ease, background .14s ease, color .14s ease, box-shadow .14s ease;
+  }
+
+  .viewer-pointcloud-background-option:hover {
+    border-color: var(--vs-border-soft);
+    color: var(--vs-text-soft);
+    background: var(--vs-surface-hover);
+  }
+
+  .viewer-pointcloud-background-option.is-active {
+    border-color: color-mix(in srgb, var(--vs-accent) 72%, var(--vs-border-soft));
+    color: var(--vs-accent);
+    background: var(--vs-accent-soft);
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .09);
+  }
+
+  .viewer-pointcloud-quality .viewer-segment {
+    min-height: 100%;
+    padding-block: 0 !important;
+    font-size: 10px;
+    font-weight: 500;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--vs-muted);
+    background: var(--vs-surface);
+  }
+
+  .viewer-pointcloud-quality .viewer-segment.is-active {
+    border-color: color-mix(in srgb, var(--vs-accent) 58%, var(--vs-border-soft));
+    color: var(--vs-accent);
+    background: color-mix(in srgb, var(--vs-accent) 14%, var(--vs-surface));
+    font-weight: 700;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .08);
+  }
+
+  .viewer-pointcloud-min-node .viewer-slider-label {
+    color: var(--vs-text-soft);
+    font-size: 11px !important;
+  }
+
+  .viewer-pointcloud-min-node .viewer-slider-value {
+    color: var(--vs-text);
+    font-size: 11px !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-weight: 600;
+    line-height: 18px;
+    border: 1px solid var(--vs-border-soft);
+    border-radius: 5px;
+    background: var(--vs-surface-hover);
+    padding: 0 8px;
+  }
+
+  .viewer-pointcloud-min-node .viewer-slider {
+    height: 5px !important;
+  }
+
+  .viewer-pointcloud-min-node .viewer-slider::-webkit-slider-thumb {
+    width: 16px !important;
+    height: 16px !important;
+  }
+
+  .viewer-pointcloud-min-node .viewer-slider::-moz-range-thumb {
+    width: 16px !important;
+    height: 16px !important;
   }
 
   .viewer-check-label,
@@ -802,10 +888,12 @@ function SliderRow({
   step,
   onChange,
   stepButtons,
+  guideTarget,
 }: {
   label: string;
   value: number;
   displayValue?: string;
+  guideTarget?: string;
   min: number;
   max: number;
   step: number;
@@ -845,6 +933,7 @@ function SliderRow({
         )}
         <input
           type="range"
+          data-tool-guide={guideTarget}
           min={min}
           max={max}
           step={step}
@@ -877,13 +966,15 @@ function SectionHeader({
   icon,
   isOpen,
   onToggle,
+  help,
 }: {
   label: string;
   icon?: React.ReactNode;
   isOpen: boolean;
   onToggle: () => void;
+  help?: React.ReactNode;
 }) {
-  return (
+  const header = (
     <button
       type="button"
       onClick={onToggle}
@@ -905,6 +996,7 @@ function SectionHeader({
       <span>{label}</span>
     </button>
   );
+  return help ? <div className="viewer-tool-guide-section">{header}{help}</div> : header;
 }
 
 function CheckMark() {
@@ -1000,12 +1092,14 @@ function PtCheckbox({
 
 function MicroTitle({
   children,
+  help,
 }: {
   children: React.ReactNode;
+  help?: React.ReactNode;
 }) {
   return (
-    <div className="viewer-micro-title border-b pb-2 text-[10px] font-bold uppercase tracking-[0.14em]">
-      {children}
+    <div className={`viewer-micro-title border-b pb-2 text-[10px] font-bold uppercase tracking-[0.14em]${help ? ' viewer-tool-guide-title' : ''}`}>
+      {help ? <><span>{children}</span>{help}</> : children}
     </div>
   );
 }
@@ -1095,9 +1189,12 @@ const SIDEBAR_COPY = {
     azimuth: 'Phương vị',
     area: 'Diện tích',
     volume: 'Thể tích',
+    cutFill: 'Đào / Đắp',
     sphere: 'Sphere',
     profile: 'Trắc dọc',
+    crossSection: 'Trắc ngang',
     annotation: 'Ghi chú',
+    issue: 'Vấn đề',
     clear: 'Xóa',
     clipBox: 'Box',
     clipPolygon: 'Đa giác',
@@ -1167,9 +1264,12 @@ const SIDEBAR_COPY = {
     azimuth: 'Azimuth',
     area: 'Area',
     volume: 'Volume',
+    cutFill: 'Cut / Fill',
     sphere: 'Sphere',
     profile: 'Profile',
+    crossSection: 'Cross-section',
     annotation: 'Note',
+    issue: 'Issue',
     clear: 'Clear',
     clipBox: 'Box',
     clipPolygon: 'Polygon',
@@ -1239,9 +1339,12 @@ const SIDEBAR_COPY = {
     azimuth: '方位角',
     area: '面积',
     volume: '体积',
+    cutFill: '挖填方',
     sphere: '球体',
     profile: '剖面',
+    crossSection: '横断面',
     annotation: '注释',
+    issue: '问题',
     clear: '清除',
     clipBox: '框选',
     clipPolygon: '多边形',
@@ -1296,6 +1399,8 @@ export function PotreeSidebar({
   onToggleOpen,
 
   projectName = 'Dự án 3D',
+  headerAction,
+  enableToolGuides = false,
 
   currentMode,
   onModeChange,
@@ -1630,14 +1735,31 @@ export function PotreeSidebar({
       mode: 'profile',
       icon: getIconUrl('profile.svg'),
       label: c.profile,
-      title:
-        'Cắt lát trắc dọc cao độ (Profile)',
+      title: 'Cao độ theo chiều dài tuyến',
+    },
+    {
+      mode: 'cutFill',
+      icon: getIconUrl('volume.svg'),
+      label: c.cutFill,
+      title: 'Tính khối lượng san nền',
+    },
+    {
+      mode: 'crossSection',
+      icon: getIconUrl('profile.svg'),
+      label: c.crossSection,
+      title: 'Mặt cắt vuông góc tại lý trình',
     },
     {
       mode: 'annotation',
       icon: getIconUrl('annotation.svg'),
       label: c.annotation,
       title: 'Thêm ghi chú 3D (Annotation)',
+    },
+    {
+      mode: 'issue',
+      icon: getIconUrl('annotation.svg'),
+      label: c.issue,
+      title: 'Ghim vấn đề trên mô hình 3D',
     },
     {
       mode: 'clear',
@@ -1791,50 +1913,47 @@ export function PotreeSidebar({
             : '-translate-x-full'
         }`}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-[var(--vs-border)] bg-[var(--vs-bg-soft)] px-3 py-2.5">
-          <div className="flex min-w-0 flex-1 flex-col justify-center pr-2">
+        <div className="min-w-0 shrink-0 border-b border-[var(--vs-border)] bg-[var(--vs-bg-soft)] px-3 py-2.5">
+          <div className="flex min-w-0 items-center justify-between gap-2">
             <img
               src={logoImg}
               alt="SAOLATEK"
               draggable={false}
-              className="h-[27px] w-auto max-w-[126px] object-contain object-left"
+              className="h-[27px] w-[126px] min-w-0 shrink object-contain object-left"
             />
-
-            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[8px] font-medium text-[var(--vs-muted)]">
-              <span className="shrink-0">v1.8.0</span>
-              <span className="shrink-0 text-[var(--vs-border)]">
-                ·
-              </span>
-              <span className="truncate">
-                {projectName}
-              </span>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() =>
+                  applyTheme(!isDarkMode)
+                }
+                title={
+                  isDarkMode
+                    ? c.switchLight
+                    : c.switchDark
+                }
+                aria-label={
+                  isDarkMode
+                    ? c.switchLight
+                    : c.switchDark
+                }
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--vs-border)] bg-[var(--vs-surface)] text-[var(--vs-text-soft)] transition hover:border-sky-500/35 hover:bg-[var(--vs-surface-hover)] hover:text-sky-500"
+              >
+                {isDarkMode ? (
+                  <Sun size={14} />
+                ) : (
+                  <Moon size={14} />
+                )}
+              </button>
+              {headerAction}
             </div>
           </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() =>
-                applyTheme(!isDarkMode)
-              }
-              title={
-                isDarkMode
-                  ? c.switchLight
-                  : c.switchDark
-              }
-              aria-label={
-                isDarkMode
-                  ? c.switchLight
-                  : c.switchDark
-              }
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--vs-border)] bg-[var(--vs-surface)] text-[var(--vs-text-soft)] transition hover:border-sky-500/35 hover:bg-[var(--vs-surface-hover)] hover:text-sky-500"
-            >
-              {isDarkMode ? (
-                <Sun size={14} />
-              ) : (
-                <Moon size={14} />
-              )}
-            </button>
+          <div className="mt-0.5 text-[8px] font-medium leading-3 text-[var(--vs-muted)]">
+            v1.8.0
+          </div>
+          <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] font-semibold leading-4" title={projectName}>
+            <span aria-hidden="true" className="h-[7px] w-[7px] shrink-0 rounded-full bg-green-500" />
+            <span className="min-w-0 truncate">{projectName}</span>
           </div>
         </div>
 
@@ -1850,8 +1969,8 @@ export function PotreeSidebar({
 
           {sections.tools && (
             <div className="space-y-3 border-b border-[var(--vs-border-soft)] px-3 py-3">
-              <div className="viewer-section-shell space-y-3">
-                <MicroTitle>
+              <div data-tour="measurement-tools" className="viewer-section-shell space-y-3">
+                <MicroTitle help={enableToolGuides && <ViewerToolGuide group="measurement" />}>
                   {c.measurements}
                 </MicroTitle>
 
@@ -1870,6 +1989,7 @@ export function PotreeSidebar({
                         <button
                           type="button"
                           key={`${tool.mode}-${index}`}
+                          data-tool-guide={`measure-${tool.mode}`}
                           onClick={() => {
                             if (isClear) {
                               onClear();
@@ -1947,8 +2067,8 @@ export function PotreeSidebar({
                 {measurementManager}
               </div>
 
-              <div className="viewer-section-shell space-y-3">
-                <MicroTitle>
+              <div data-tour="cut-tools" className="viewer-section-shell space-y-3">
+                <MicroTitle help={enableToolGuides && <ViewerToolGuide group="clipping" />}>
                   {c.clipping}
                 </MicroTitle>
 
@@ -1961,6 +2081,7 @@ export function PotreeSidebar({
                         onClick={() => {
                           onClipTool?.(tool.id as 'box' | 'polygon' | 'plane' | 'clear');
                         }}
+                        data-tool-guide={`clip-${tool.id}`}
                         title={tool.title}
                         className={`${baseToolButton} ${
                           tool.id === 'clear'
@@ -2007,6 +2128,7 @@ export function PotreeSidebar({
                       <button
                         type="button"
                         key={mode}
+                        data-tool-guide={`clip-${mode}`}
                         onClick={() =>
                           onClipModeChange?.(mode)
                         }
@@ -2060,9 +2182,9 @@ export function PotreeSidebar({
                 </div>
               </div>
 
-              <div className="viewer-section-shell space-y-3">
+              <div data-tour="navigation-tools" className="viewer-section-shell space-y-3">
                 <div className="flex items-center justify-between gap-2">
-                  <MicroTitle>{c.navigation}</MicroTitle>
+                  <MicroTitle help={enableToolGuides && <ViewerToolGuide group="navigation" />}>{c.navigation}</MicroTitle>
                   <span
                     className="inline-flex items-center gap-1 rounded-md border border-[var(--vs-border-soft)] bg-[var(--vs-bg-soft)] px-2 py-1 font-mono text-[9px] font-semibold tabular-nums text-[var(--vs-accent)]"
                     title="Current camera heading"
@@ -2080,6 +2202,7 @@ export function PotreeSidebar({
                         type="button"
                         key={tool.id}
                         disabled={(tool.id === 'focus' && isReturningFocusOrigin) || (tool.id === 'zoom-area' && !onToggleZoomArea)}
+                        data-tool-guide={`navigation-${tool.id}`}
                         onClick={() => {
                           if (tool.action) {
                             tool.action();
@@ -2362,6 +2485,7 @@ export function PotreeSidebar({
 
           <SectionHeader
             label={c.appearance}
+            help={enableToolGuides && <ViewerToolGuide group="display" />}
             isOpen={sections.appearance}
             onToggle={() =>
               toggleSection('appearance')
@@ -2547,39 +2671,30 @@ export function PotreeSidebar({
                 )}
               </div>
 
-              <div className="space-y-2.5">
-                <MicroTitle>
-                  {c.background}
-                </MicroTitle>
+              <div className="viewer-pointcloud-controls">
+                <div className="space-y-2 border-t border-[var(--vs-border-soft)] pt-3">
+                  <MicroTitle>{c.background}</MicroTitle>
 
-                <div className="flex flex-wrap gap-1">
-                  {backgroundOptions.map(
-                    ({ key, label }) => (
+                  <div className="grid grid-cols-5 gap-1">
+                    {backgroundOptions.map(({ key, label }) => (
                       <button
                         type="button"
                         key={key}
-                        onClick={() =>
-                          onBackgroundChange(key)
-                        }
-                        className={`rounded-md border px-2.5 py-1.5 text-[9px] font-semibold transition ${
-                          background === key
-                            ? 'border-sky-500/35 bg-sky-500/10 text-sky-300'
-                            : 'border-transparent text-[var(--vs-muted)] hover:border-slate-700 hover:bg-slate-800/55 hover:text-[var(--vs-text)]'
+                        onClick={() => onBackgroundChange(key)}
+                        className={`viewer-pointcloud-background-option flex min-w-0 items-center justify-center px-1 text-center text-[10px] ${
+                          background === key ? 'is-active' : ''
                         }`}
                       >
                         {label}
                       </button>
-                    )
-                  )}
+                    ))}
+                  </div>
                 </div>
-              </div>
 
-              <div className="space-y-2.5">
-                <MicroTitle>
-                  {c.quality}
-                </MicroTitle>
+                <div className="mt-3 space-y-2 border-t border-[var(--vs-border-soft)] pt-3">
+                  <MicroTitle>{c.quality}</MicroTitle>
 
-                <div className="flex overflow-hidden rounded-md border border-[var(--vs-border)] bg-[var(--vs-bg-soft)]">
+                  <div className="viewer-pointcloud-quality grid h-8 grid-cols-2 gap-1 rounded-lg border border-[var(--vs-border-soft)] bg-[var(--vs-surface)] p-0.5">
                   <Segment
                     active={
                       quality === 'standard'
@@ -2594,8 +2709,6 @@ export function PotreeSidebar({
                     {c.standard}
                   </Segment>
 
-                  <div className="w-px bg-slate-700/65" />
-
                   <Segment
                     active={quality === 'high'}
                     last
@@ -2605,21 +2718,22 @@ export function PotreeSidebar({
                   >
                     {c.highQuality}
                   </Segment>
+                  </div>
+                </div>
+
+                <div className="viewer-pointcloud-min-node mt-3 border-t border-[var(--vs-border-soft)] pt-3">
+                  <SliderRow
+                    label={c.minNodeSize}
+                    value={minNodeSize}
+                    min={0}
+                    max={32}
+                    step={1}
+                    onChange={(value) =>
+                      onMinNodeSizeChange(Math.round(value))
+                    }
+                  />
                 </div>
               </div>
-
-              <SliderRow
-                label={c.minNodeSize}
-                value={minNodeSize}
-                min={0}
-                max={32}
-                step={1}
-                onChange={(value) =>
-                  onMinNodeSizeChange(
-                    Math.round(value)
-                  )
-                }
-              />
 
               <div className="flex items-center gap-2">
                 <PtCheckbox
@@ -2645,6 +2759,7 @@ export function PotreeSidebar({
 
           <SectionHeader
             label={c.scene}
+            help={enableToolGuides && <ViewerToolGuide group="display" />}
             isOpen={sections.scene}
             onToggle={() =>
               toggleSection('scene')
@@ -2652,10 +2767,11 @@ export function PotreeSidebar({
           />
 
           {sections.scene && (
-            <div className="space-y-2.5 border-b border-[var(--vs-border-soft)] px-3 py-3">
+            <div data-tour="display-tools" className="space-y-2.5 border-b border-[var(--vs-border-soft)] px-3 py-3">
               <div className="space-y-1">
                 <button
                   type="button"
+                  data-tool-guide="layer-pointcloud"
                   onClick={() =>
                     setShowPointCloud(
                       !showPointCloud
@@ -2699,6 +2815,7 @@ export function PotreeSidebar({
 
                 <button
                   type="button"
+                  data-tool-guide="layer-model"
                   onClick={() =>
                     setShowModel(!showModel)
                   }
@@ -2729,6 +2846,7 @@ export function PotreeSidebar({
                 <div className="px-1.5 pb-2">
                   <SliderRow
                     label={`${c.model3d} · ${c.opacity}`}
+                    guideTarget="layer-model-opacity"
                     value={modelOpacity}
                     displayValue={`${Math.round(modelOpacity * 100)}%`}
                     min={0}
@@ -2740,6 +2858,7 @@ export function PotreeSidebar({
 
                 <button
                   type="button"
+                  data-tool-guide="layer-dom"
                   onClick={() =>
                     setShowDom(!showDom)
                   }
@@ -2776,6 +2895,7 @@ export function PotreeSidebar({
                     onChange={onDomOpacityChange}
                   />
                 </div>
+
               </div>
 
               <div className="space-y-2 pt-1">

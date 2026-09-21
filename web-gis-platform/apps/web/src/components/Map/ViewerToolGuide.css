@@ -1,0 +1,14 @@
+.viewer-tool-guide-help { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 22px; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--vs-muted); cursor: pointer; }
+.viewer-tool-guide-help:hover { background: var(--vs-surface-hover); color: var(--vs-accent); }
+.viewer-tool-guide-help:focus-visible { outline: 2px solid #38bdf8; outline-offset: 1px; }
+.viewer-tool-guide__mask { position: absolute; inset: 0; z-index: 0; }
+.viewer-tool-guide__highlight { position: fixed; z-index: 1; pointer-events: none; box-sizing: border-box; outline: 2px solid #38bdf8; outline-offset: 2px; border-radius: 5px; box-shadow: 0 0 12px #38bdf877; }
+.viewer-tool-guide__card { z-index: 2; }
+.viewer-tool-guide__step { margin-top: 8px; font-size: 11px; line-height: 1.5; color: #94a3b8; }
+.viewer-tool-guide .demo-tour__actions button:disabled { opacity: .4; cursor: default; }
+.viewer-tool-guide .demo-tour__actions button:disabled:hover { background: transparent; }
+.viewer-tool-guide-section { display: flex; align-items: center; border-bottom: 1px solid var(--vs-border); }
+.viewer-tool-guide-section > .viewer-section-header { flex: 1; min-width: 0; border-bottom: 0; }
+.viewer-tool-guide-section > .viewer-tool-guide-help { margin-right: 10px; }
+.viewer-tool-guide-title { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 6px; }
+.viewer-tool-guide-title > span { min-width: 0; }

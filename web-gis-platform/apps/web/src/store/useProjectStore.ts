@@ -12,6 +12,19 @@ export interface ProjectMember {
   };
 }
 
+export interface ProjectSurvey {
+  id: string;
+  projectId: string;
+  name?: string;
+  capturedAt: string;
+  domUrl?: string;
+  metadataUrl?: string;
+  modelUrl?: string;
+  pointCloudId?: string;
+  calibration?: string;
+  createdAt: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -27,6 +40,7 @@ export interface Project {
   isPublic?: boolean;
   createdById?: string;
   members?: ProjectMember[];
+  surveys?: ProjectSurvey[];
 }
 
 interface ProjectState {

@@ -83,7 +83,8 @@ export function normalizeAreaPoints(points: Cesium.Cartesian3[], plane: Cesium.P
 
 export function buildProfileSamplePlan(
   controlPoints: Cesium.Cartesian3[],
-  maxSamples = 220,
+  maxSamples = 1000,
+  spacing = 2,
 ): { items: ProfileSamplePlanItem[]; totalDistance: number } | null {
   if (controlPoints.length < 2) return null;
   const segments: {
@@ -106,7 +107,7 @@ export function buildProfileSamplePlan(
   }
 
   if (segments.length === 0 || totalDistance < 0.01) return null;
-  const sampleCount = Math.max(24, Math.min(maxSamples, Math.ceil(totalDistance / 1.0) + 1));
+  const sampleCount = Math.max(2, Math.min(maxSamples, Math.ceil(totalDistance / spacing) + 1));
   const items: ProfileSamplePlanItem[] = [];
   let segmentIndex = 0;
 
@@ -237,7 +238,7 @@ export function getProjectedPoint(first: Cesium.Cartesian3, second: Cesium.Carte
 const TYPE_LABELS: Record<ToolMode, string> = {
   none: 'Phép đo', point: 'Điểm', distance: 'Khoảng cách', height: 'Chiều cao',
   angle: 'Góc', circle: 'Đường tròn', sphere: 'Mặt cầu', azimuth: 'Azimuth',
-  area: 'Diện tích', volume: 'Thể tích', profile: 'Trắc dọc', annotation: 'Ghi chú',
+  area: 'Diện tích', volume: 'Thể tích', cutFill: 'Đào / Đắp', profile: 'Trắc dọc', crossSection: 'Trắc ngang', annotation: 'Ghi chú', issue: 'Vấn đề',
 };
 
 export function getMeasurementTypeLabel(type: ToolMode): string {

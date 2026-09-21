@@ -21,12 +21,15 @@ interface AuthState {
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 const AUTH_LOGGED_OUT_KEY = 'authLoggedOut';
+const storedAccessToken = localStorage.getItem(AUTH_LOGGED_OUT_KEY) === 'true'
+  ? null
+  : localStorage.getItem('accessToken') || null;
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  accessToken: localStorage.getItem('accessToken') || null,
-  isAuthenticated: !!localStorage.getItem('accessToken'),
-  isLoading: true,
+  accessToken: storedAccessToken,
+  isAuthenticated: false,
+  isLoading: Boolean(storedAccessToken),
 
   setAuth: (user: UserProfile, token: string) => {
     localStorage.removeItem(AUTH_LOGGED_OUT_KEY);
@@ -58,6 +61,12 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
 
     const token = localStorage.getItem('accessToken');
+    // Login/register persist the token synchronously. With no local session,
+    // visitors can use the header immediately without probing me/refresh.
+    if (!token) {
+      set({ user: null, accessToken: null, isAuthenticated: false, isLoading: false });
+      return;
+    }
     set({ isLoading: true });
 
     try {

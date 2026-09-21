@@ -1,8 +1,9 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import fs from 'fs-extra';
 import path from 'path';
 import dotenv from 'dotenv';
+import { randomUUID } from 'crypto';
 
 dotenv.config();
 
@@ -19,6 +20,37 @@ const r2Client = new S3Client({
 
 const BUCKET = process.env.R2_BUCKET_NAME || 'webgis-assets';
 const PUBLIC_URL = process.env.R2_PUBLIC_URL || '';
+
+// Explicit migration operations; existing upload paths keep their behavior.
+export const readFileFromR2 = async (r2Key: string) => {
+  const response = await r2Client.send(new GetObjectCommand({ Bucket: BUCKET, Key: r2Key }), {
+    abortSignal: AbortSignal.timeout(120_000)
+  });
+  if (!response.Body) throw new Error(`R2 object has no body: ${r2Key}`);
+  return {
+    bytes: Buffer.from(await response.Body.transformToByteArray()),
+    contentLength: response.ContentLength,
+    contentType: response.ContentType,
+    cacheControl: response.CacheControl,
+    etag: response.ETag
+  };
+};
+
+export const createVersionedModelInR2 = async (r2Key: string, bytes: Buffer): Promise<void> => {
+  const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+  if (!new RegExp(`^projects/${uuid}/versions/${uuid}/model\\.glb$`).test(r2Key)) {
+    throw new Error('Migration writes require a project UUID and a fresh version UUID.');
+  }
+  await r2Client.send(new PutObjectCommand({
+    Bucket: BUCKET,
+    Key: r2Key,
+    Body: bytes,
+    ContentLength: bytes.length,
+    ContentType: getContentType('model.glb'),
+    CacheControl: getCacheControl('model.glb', r2Key),
+    IfNoneMatch: '*' // An existing key must fail, including on a retry.
+  }), { abortSignal: AbortSignal.timeout(120_000) });
+};
 
 /**
  * Upload một file lên Cloudflare R2.
@@ -43,7 +75,8 @@ export const uploadFileToR2 = async (
           Bucket: BUCKET,
           Key: r2Key,
           Body: fileBuffer,
-          ContentType: getContentType(localFilePath)
+          ContentType: getContentType(localFilePath),
+          CacheControl: getCacheControl(localFilePath, r2Key)
         }));
         const publicUrl = `${PUBLIC_URL}/${r2Key}`;
         if (!silent) console.log(`[R2 Upload] ✅ Hoàn tất (Direct Put): ${publicUrl}`);
@@ -57,7 +90,8 @@ export const uploadFileToR2 = async (
             Key: r2Key,
             Body: fileStream,
             ContentLength: fileSize,
-            ContentType: getContentType(localFilePath)
+            ContentType: getContentType(localFilePath),
+            CacheControl: getCacheControl(localFilePath, r2Key)
           }
         });
 
@@ -111,6 +145,7 @@ export const uploadFolderToR2 = async (localDirPath: string, r2Prefix: string): 
   const concurrencyLimit = 10;
   let index = 0;
   let successCount = 0;
+  const failedFiles: Array<{ relativePath: string; message: string }> = [];
 
   const uploadNext = async (): Promise<void> => {
     while (index < totalFiles) {
@@ -128,6 +163,10 @@ export const uploadFolderToR2 = async (localDirPath: string, r2Prefix: string): 
         }
       } catch (err: any) {
         console.error(`[R2 Upload] ❌ Lỗi upload file ${relativePath}: ${err.message}`);
+        failedFiles.push({
+          relativePath,
+          message: err instanceof Error ? err.message : String(err)
+        });
       }
     }
   };
@@ -138,6 +177,17 @@ export const uploadFolderToR2 = async (localDirPath: string, r2Prefix: string): 
   }
 
   await Promise.all(uploadPromises);
+  if (failedFiles.length > 0) {
+    const failedPreview = failedFiles
+      .slice(0, 5)
+      .map(({ relativePath, message }) => `${relativePath}: ${message}`)
+      .join('; ');
+    const remainingCount = failedFiles.length - Math.min(failedFiles.length, 5);
+    throw new Error(
+      `[R2 Upload] Upload thư mục thất bại: ${failedFiles.length}/${totalFiles} file lỗi. ` +
+      `${failedPreview}${remainingCount > 0 ? `; và ${remainingCount} file khác` : ''}`
+    );
+  }
   console.log(`[R2 Upload] ✅ Hoàn tất tải lên toàn bộ thư mục! Đã thành công ${successCount}/${totalFiles} file.`);
 };
 
@@ -150,6 +200,9 @@ export const uploadProjectFilesToR2 = async (
   outputDir: string
 ): Promise<{ domUrl?: string; modelUrl?: string; metadataUrl?: string; pointCloudUrl?: string }> => {
   const results: { domUrl?: string; modelUrl?: string; metadataUrl?: string; pointCloudUrl?: string } = {};
+  const runVersion = randomUUID();
+  const versionPrefix = `projects/${projectId}/versions/${runVersion}`;
+  console.log(`[R2 Upload] Bắt đầu immutable asset version: ${versionPrefix}`);
 
   // Ưu tiên dom.jpg (nhỏ hơn, tương thích WebGL Cesium), fallback sang dom.png
   const jpgLocalPath = path.join(outputDir, 'dom/dom.jpg');
@@ -157,17 +210,19 @@ export const uploadProjectFilesToR2 = async (
 
   if (await fs.pathExists(jpgLocalPath)) {
     try {
-      results.domUrl = await uploadFileToR2(jpgLocalPath, `projects/${projectId}/dom.jpg`);
+      results.domUrl = await uploadFileToR2(jpgLocalPath, `${versionPrefix}/dom.jpg`);
       console.log(`[R2 Upload] ✅ dom.jpg: ${results.domUrl}`);
     } catch (err: any) {
       console.error(`[R2 Upload] ❌ Lỗi upload dom.jpg: ${err.message}`);
+      throw err;
     }
   } else if (await fs.pathExists(pngLocalPath)) {
     try {
-      results.domUrl = await uploadFileToR2(pngLocalPath, `projects/${projectId}/dom.png`);
+      results.domUrl = await uploadFileToR2(pngLocalPath, `${versionPrefix}/dom.png`);
       console.log(`[R2 Upload] ⚠️ Không có dom.jpg, fallback dom.png: ${results.domUrl}`);
     } catch (err: any) {
       console.error(`[R2 Upload] ❌ Lỗi upload dom.png: ${err.message}`);
+      throw err;
     }
   } else {
     console.log(`[R2 Upload] ⚠️ Không tìm thấy dom.jpg hoặc dom.png`);
@@ -175,8 +230,8 @@ export const uploadProjectFilesToR2 = async (
 
   // Upload GLB và Metadata
   const otherFiles = [
-    { localName: 'glb/model.glb', key: `projects/${projectId}/model.glb`, field: 'modelUrl' as const },
-    { localName: 'dom/metadata.json', key: `projects/${projectId}/metadata.json`, field: 'metadataUrl' as const }
+    { localName: 'glb/model.glb', key: `${versionPrefix}/model.glb`, field: 'modelUrl' as const },
+    { localName: 'dom/metadata.json', key: `${versionPrefix}/metadata.json`, field: 'metadataUrl' as const }
   ];
 
   // 1. Upload GLB và Metadata
@@ -187,6 +242,7 @@ export const uploadProjectFilesToR2 = async (
         results[file.field] = await uploadFileToR2(localPath, file.key);
       } catch (err: any) {
         console.error(`[R2 Upload] ❌ Lỗi upload ${file.localName}: ${err.message}`);
+        throw err;
       }
     } else {
       console.log(`[R2 Upload] ⚠️ Bỏ qua (không tồn tại): ${localPath}`);
@@ -204,35 +260,39 @@ export const uploadProjectFilesToR2 = async (
   if (await fs.pathExists(tilesetPath)) {
     try {
       console.log(`[R2 Upload] Phát hiện thư mục 3D Tiles Point Cloud, tiến hành upload thư mục...`);
-      await uploadFolderToR2(pcDir, `projects/${projectId}/pointcloud`);
-      results.pointCloudUrl = `${PUBLIC_URL}/projects/${projectId}/pointcloud/tileset.json`;
+      await uploadFolderToR2(pcDir, `${versionPrefix}/pointcloud`);
+      results.pointCloudUrl = `${PUBLIC_URL}/${versionPrefix}/pointcloud/tileset.json`;
       console.log(`[R2 Upload] ✅ 3D Tiles Point Cloud URL: ${results.pointCloudUrl}`);
     } catch (err: any) {
       console.error(`[R2 Upload] ❌ Lỗi upload thư mục 3D Tiles: ${err.message}`);
+      throw err;
     }
   } else if (await fs.pathExists(copcFullPath)) {
     try {
       console.log(`[R2 Upload] Phát hiện file cloud_full.copc.laz, tiến hành upload...`);
-      results.pointCloudUrl = await uploadFileToR2(copcFullPath, `projects/${projectId}/pointcloud/cloud_full.copc.laz`);
+      results.pointCloudUrl = await uploadFileToR2(copcFullPath, `${versionPrefix}/pointcloud/cloud_full.copc.laz`);
     } catch (err: any) {
       console.error(`[R2 Upload] ❌ Lỗi upload cloud_full.copc.laz: ${err.message}`);
+      throw err;
     }
   } else if (await fs.pathExists(indexPath)) {
     // Chiến lược mới: nhiều COPC tiles + index.json
     try {
       console.log(`[R2 Upload] Phát hiện COPC tiles (per-file strategy), upload toàn bộ thư mục...`);
-      await uploadFolderToR2(pcDir, `projects/${projectId}/pointcloud`);
-      results.pointCloudUrl = `${PUBLIC_URL}/projects/${projectId}/pointcloud/index.json`;
+      await uploadFolderToR2(pcDir, `${versionPrefix}/pointcloud`);
+      results.pointCloudUrl = `${PUBLIC_URL}/${versionPrefix}/pointcloud/index.json`;
       console.log(`[R2 Upload] ✅ Point Cloud tiles URL: ${results.pointCloudUrl}`);
     } catch (err: any) {
       console.error(`[R2 Upload] ❌ Lỗi upload COPC tiles: ${err.message}`);
+      throw err;
     }
   } else if (await fs.pathExists(copcPath)) {
     try {
       console.log(`[R2 Upload] Phát hiện file COPC đơn, tiến hành upload...`);
-      results.pointCloudUrl = await uploadFileToR2(copcPath, `projects/${projectId}/pointcloud/cloud.copc.laz`);
+      results.pointCloudUrl = await uploadFileToR2(copcPath, `${versionPrefix}/pointcloud/cloud.copc.laz`);
     } catch (err: any) {
       console.error(`[R2 Upload] ❌ Lỗi upload cloud.copc.laz: ${err.message}`);
+      throw err;
     }
   } else {
     console.log(`[R2 Upload] ⚠️ Bỏ qua Point Cloud (không tìm thấy COPC tiles, COPC đơn, hoặc 3D Tiles)`);
@@ -275,4 +335,19 @@ function getContentType(filePath: string): string {
     '.copc': 'application/octet-stream'
   };
   return types[ext] || 'application/octet-stream';
+}
+
+function getCacheControl(filePath: string, r2Key: string): string {
+  // Every object under a UUID version prefix is written by one upload run and is
+  // never reused by later runs. This includes generated metadata and manifests.
+  if (/^projects\/[^/]+\/versions\/[^/]+\//.test(r2Key)) {
+    return 'public, max-age=31536000, immutable';
+  }
+
+  // Legacy project keys can still be overwritten, so they must revalidate.
+  if (path.extname(filePath).toLowerCase() === '.json') {
+    return 'no-cache';
+  }
+
+  return 'public, max-age=3600, must-revalidate';
 }

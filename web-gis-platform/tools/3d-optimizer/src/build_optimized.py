@@ -467,7 +467,7 @@ def fallback_trimesh_glb(objs: list, out_path: Path) -> bool:
 
 
 def process_model_glb(project_dir: Path, output_dir: Path, srs_origin: tuple, compress: bool = False, simplify_ratio: Optional[float] = None) -> bool:
-    """Gộp OBJ thành GLB và nén."""
+    """Gộp OBJ thành GLB, tùy chọn nén meshopt và đơn giản hóa tường minh."""
     print("\n━━━ 3D Model Mesh (OBJ -> GLB) ━━━")
     
     out_glb_dir = output_dir / 'glb'
@@ -588,13 +588,15 @@ def process_model_glb(project_dir: Path, output_dir: Path, srs_origin: tuple, co
 
     # 2. Chạy gltfpack qua npx
     npx_bin = shutil.which('npx') or 'npx'
-    ratio = simplify_ratio if simplify_ratio is not None else 0.5
-    
     cmd = [npx_bin, 'gltfpack', '-i', str(merged_obj), '-o', str(out_path)]
     if compress:
-        cmd.extend(['-cc', '-si', str(ratio), '-sa'])
+        # EXT_meshopt_compression; không giảm số tam giác.
+        cmd.append('-cc')
+    if simplify_ratio is not None:
+        # Simplification là opt-in và độc lập với compression.
+        cmd.extend(['-si', str(simplify_ratio), '-sa'])
     
-    print(f"  Đang chạy gltfpack nén: {' '.join(cmd)}")
+    print(f"  Đang chạy gltfpack tối ưu mesh: {' '.join(cmd)}")
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, shell=True, encoding='utf-8')
         merged_obj.unlink(missing_ok=True)
@@ -780,11 +782,24 @@ def main():
     parser.add_argument("--skip-pointcloud", action="store_true", help="Bỏ qua xử lý mây điểm")
     parser.add_argument("--skip-model", action="store_true", help="Bỏ qua xử lý 3D Model mesh")
     parser.add_argument("--skip-dom", action="store_true", help="Bỏ qua xử lý ảnh phẳng hàng không DOM")
-    parser.add_argument("--compress-model", action="store_true", help="Nén Draco mô hình GLB qua gltfpack")
-    parser.add_argument("--simplify-ratio", type=float, default=0.5, help="Tỷ lệ đơn giản hóa mesh model (mặc định 0.5)")
+    parser.add_argument(
+        "--compress-model",
+        action="store_true",
+        help="Nén mesh bằng EXT_meshopt_compression qua gltfpack, không đơn giản hóa geometry",
+    )
+    parser.add_argument(
+        "--simplify-ratio",
+        type=float,
+        default=None,
+        metavar="RATIO",
+        help="Đơn giản hóa mesh tường minh với 0 < RATIO <= 1; mặc định không đơn giản hóa",
+    )
     parser.add_argument("--max-dom-size", type=int, default=4096, help="Kích thước tối đa ảnh DOM (mặc định 4096)")
     
     args = parser.parse_args()
+
+    if args.simplify_ratio is not None and not 0 < args.simplify_ratio <= 1:
+        parser.error("--simplify-ratio phải lớn hơn 0 và nhỏ hơn hoặc bằng 1")
 
     project_path = Path(args.project_dir)
     output_path = Path(args.output)

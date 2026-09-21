@@ -1,4 +1,4 @@
-import type { Project } from '../store/useProjectStore';
+import type { Project, ProjectSurvey } from '../store/useProjectStore';
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
@@ -179,6 +179,46 @@ export const updateProject = async (
     console.error(`Error updating project ${id}:`, error);
     return null;
   }
+};
+
+export type IssueStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED';
+export type IssueSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export interface ProjectIssue { id:string; projectId:string; title:string; description:string|null; status:IssueStatus; severity:IssueSeverity; longitude:number; latitude:number; height:number; createdById:string; createdAt:string; updatedAt:string }
+export type IssueInput = Pick<ProjectIssue,'title'|'status'|'severity'|'longitude'|'latitude'|'height'> & { description?:string|null };
+const issueRequest = async (url:string, init?:RequestInit) => { const response=await fetch(`${API_BASE_URL}${url}`,{...init,headers:{...getAuthHeaders(),...(init?.body?{'Content-Type':'application/json'}:{})},credentials:'include'}); if(!response.ok)throw new Error(`Issue request failed (${response.status})`); return response.json(); };
+const issueFetches = new Map<string, Promise<ProjectIssue[]>>();
+export const fetchProjectIssues = (projectId: string): Promise<ProjectIssue[]> => {
+  const existing = issueFetches.get(projectId);
+  if (existing) return existing;
+  const request = issueRequest(`/projects/${projectId}/issues`) as Promise<ProjectIssue[]>;
+  issueFetches.set(projectId, request);
+  const clear = () => {
+    if (issueFetches.get(projectId) === request) issueFetches.delete(projectId);
+  };
+  void request.then(clear, clear);
+  return request;
+};
+export const createProjectIssue=(projectId:string,input:IssueInput):Promise<ProjectIssue>=>issueRequest(`/projects/${projectId}/issues`,{method:'POST',body:JSON.stringify(input)});
+export const updateProjectIssue=(projectId:string,id:string,input:Partial<Pick<ProjectIssue,'title'|'description'|'status'|'severity'>>):Promise<ProjectIssue>=>issueRequest(`/projects/${projectId}/issues/${id}`,{method:'PATCH',body:JSON.stringify(input)});
+export const deleteProjectIssue=(projectId:string,id:string):Promise<{success:boolean}>=>(issueRequest(`/projects/${projectId}/issues/${id}`,{method:'DELETE'}));
+
+export const fetchProjectSurveys = async (
+  projectId: string
+): Promise<ProjectSurvey[]> => {
+  const response = await fetch(
+    `${API_BASE_URL}/projects/${projectId}/surveys`,
+    {
+      headers: getAuthHeaders(),
+      credentials: 'include'
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch project surveys (${response.status})`);
+  }
+
+  const data = await response.json();
+  return Array.isArray(data) ? (data as ProjectSurvey[]) : [];
 };
 
 export interface PersistedMeasurement {

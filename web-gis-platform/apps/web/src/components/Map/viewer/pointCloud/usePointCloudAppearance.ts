@@ -1,6 +1,6 @@
 import { useEffect, type RefObject } from 'react';
 import * as Cesium from 'cesium';
-import type { HeatmapController } from '../heatmapController';
+import type { HeatmapController } from '../../heatmapController';
 
 export function usePointCloudAppearance({
   viewerRef,

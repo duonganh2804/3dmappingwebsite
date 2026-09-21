@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  useLocation,
   useNavigate,
   useParams,
 } from 'react-router-dom';
@@ -10,14 +11,46 @@ import {
 } from 'lucide-react';
 
 import { CesiumViewer } from '../components/Map/CesiumViewer';
+import { DemoViewerTour } from '../components/Map/DemoViewerTour';
 import { Button } from '../components/UI/Button';
-import { fetchProjectById } from '../services/api';
+import { fetchProjectById, fetchProjectSurveys } from '../services/api';
 import { useLanguage } from '../hooks/useLanguage';
 import {
   useProjectStore,
   type Project,
+  type ProjectSurvey,
 } from '../store/useProjectStore';
+import {
+  openPerf,
+  type ProjectSource,
+} from '../components/Map/viewer/viewerOpenTelemetry';
 
+const projectApiRequests = new Map<string, Promise<Project | null>>();
+const surveyApiRequests = new Map<string, Promise<ProjectSurvey[]>>();
+
+const fetchProjectOnce = (projectId: string) => {
+  const pending = projectApiRequests.get(projectId);
+  if (pending) return pending;
+
+  openPerf.startProjectApi(projectId);
+  const request = fetchProjectById(projectId)
+    .finally(() => {
+      openPerf.endProjectApi(projectId);
+      projectApiRequests.delete(projectId);
+    });
+  projectApiRequests.set(projectId, request);
+  return request;
+};
+
+const fetchSurveysOnce = (projectId: string) => {
+  const pending = surveyApiRequests.get(projectId);
+  if (pending) return pending;
+
+  const request = fetchProjectSurveys(projectId)
+    .finally(() => surveyApiRequests.delete(projectId));
+  surveyApiRequests.set(projectId, request);
+  return request;
+};
 
 const VIEWER_COPY = {
   vi: {
@@ -26,7 +59,8 @@ const VIEWER_COPY = {
     loadingTitle: 'Đang mở không gian 3D',
     loadingDesc: 'Đang tải thông tin dự án và lớp dữ liệu...',
     notFound: 'Không tìm thấy dự án',
-    notFoundDesc: 'Dự án có thể đã bị xóa hoặc tài khoản hiện tại không còn quyền truy cập.',
+    notFoundDesc:
+      'Dự án có thể đã bị xóa hoặc tài khoản hiện tại không còn quyền truy cập.',
     backDashboard: 'Quay lại Bảng điều khiển',
   },
   en: {
@@ -35,7 +69,8 @@ const VIEWER_COPY = {
     loadingTitle: 'Opening 3D workspace',
     loadingDesc: 'Loading project information and data layers...',
     notFound: 'Project not found',
-    notFoundDesc: 'The project may have been deleted or your account no longer has access.',
+    notFoundDesc:
+      'The project may have been deleted or your account no longer has access.',
     backDashboard: 'Back to Dashboard',
   },
   zh: {
@@ -44,7 +79,8 @@ const VIEWER_COPY = {
     loadingTitle: '正在打开3D空间',
     loadingDesc: '正在加载项目信息和数据图层...',
     notFound: '未找到项目',
-    notFoundDesc: '该项目可能已被删除，或当前账户已无访问权限。',
+    notFoundDesc:
+      '该项目可能已被删除，或当前账户已无访问权限。',
     backDashboard: '返回控制台',
   },
 } as const;
@@ -81,65 +117,80 @@ const viewerPageStyle = `
     --vp-shadow: 0 14px 32px rgba(15,23,42,.12);
   }
 
-  .viewer-project-dock {
+  .viewer-page-status {
+    background: #07111f;
+    color: #e2e8f0;
+  }
+
+  .viewer-survey-timeline {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    z-index: 40;
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 7px;
-    left: 12px;
+    max-width: min(680px, calc(100vw - 32px));
+    transform: translateX(-50%);
+    overflow-x: auto;
+    gap: 4px;
+    border: 1px solid rgba(71,85,105,.72);
+    border-radius: 10px;
+    padding: 4px;
+    background: rgba(7,17,31,.94);
+    box-shadow: 0 12px 30px rgba(2,6,23,.34);
+    scrollbar-width: thin;
+    backdrop-filter: blur(14px);
   }
 
-  .viewer-back-button {
-    height: 38px !important;
-    border: 1px solid var(--vp-border) !important;
-    border-radius: 11px !important;
-    background: var(--vp-panel) !important;
-    color: var(--vp-text) !important;
-    box-shadow: var(--vp-shadow) !important;
-    backdrop-filter: blur(16px);
-  }
-
-  .viewer-back-button:hover {
-    background: var(--vp-hover) !important;
-    border-color: rgba(14,165,233,.32) !important;
-  }
-
-  .viewer-project-chip {
-    max-width: 210px;
+  .viewer-survey-option {
+    min-width: 92px;
     height: 34px;
     display: flex;
-    align-items: center;
-    gap: 8px;
-    border: 1px solid var(--vp-border);
-    border-radius: 11px;
-    padding: 0 11px;
-    background: var(--vp-panel);
-    color: var(--vp-soft);
-    box-shadow: 0 8px 20px rgba(2,6,23,.16);
-    backdrop-filter: blur(16px);
-    font-size: 10px;
-    font-weight: 650;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    padding: 0 9px;
+    color: #94a3b8;
+    background: transparent;
+    transition: background .14s ease, border-color .14s ease, color .14s ease;
   }
 
-  .viewer-project-chip strong {
+  .viewer-survey-option:hover {
+    border-color: rgba(71,85,105,.72);
+    color: #e2e8f0;
+    background: rgba(30,41,59,.82);
+  }
+
+  .viewer-survey-option.is-active {
+    border-color: rgba(14,165,233,.58);
+    color: #e0f2fe;
+    background: rgba(14,165,233,.16);
+  }
+
+  .viewer-survey-option-name,
+  .viewer-survey-option-date {
+    max-width: 100%;
     overflow: hidden;
-    color: var(--vp-text);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .viewer-project-chip-dot {
-    width: 7px;
-    height: 7px;
-    flex: 0 0 auto;
-    border-radius: 999px;
-    background: #22c55e;
-    box-shadow: 0 0 0 3px rgba(34,197,94,.10);
+  .viewer-survey-option-name {
+    font-size: 9px;
+    font-weight: 650;
   }
 
-  .viewer-page-status {
-    background: #07111f;
-    color: #e2e8f0;
+  .viewer-survey-option-date {
+    margin-top: 1px;
+    color: #64748b;
+    font-size: 8px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .viewer-survey-option.is-active .viewer-survey-option-date {
+    color: #7dd3fc;
   }
 
   html[data-saolatek-theme='light']
@@ -148,66 +199,117 @@ const viewerPageStyle = `
     color: #0f172a;
   }
 
-  @media (min-width: 64rem) {
-    .viewer-project-dock.is-sidebar-open {
-      left: calc(clamp(260px, 21vw, 320px) + 16px);
-    }
-  }
-
-  @media (max-width: 82.5rem) {
-    .viewer-project-chip {
-      display: none;
-    }
-  }
-
-  @media (max-width: 89.999rem) {
-    .viewer-project-dock {
-      top: 66px !important;
-    }
-  }
-
-  @media (max-width: 47.999rem) {
-    .viewer-project-dock {
-      z-index: 35 !important;
-    }
-
-    .viewer-back-button {
-      width: 42px;
-      padding-inline: 0 !important;
-    }
-
-    .viewer-back-button span {
-      display: none;
-    }
-  }
-
 `;
+
+type ViewerLocationState = {
+  project?: Project;
+  openedAt?: number;
+} | null;
+
+const isViewerProjectEquivalent = (
+  a: Project,
+  b: Project
+) =>
+  a.id === b.id &&
+  a.domUrl === b.domUrl &&
+  a.metadataUrl === b.metadataUrl &&
+  a.modelUrl === b.modelUrl &&
+  a.pointCloudId === b.pointCloudId &&
+  a.calibration === b.calibration &&
+  a.centerLon === b.centerLon &&
+  a.centerLat === b.centerLat &&
+  a.epsg === b.epsg;
 
 export const ViewerPage: React.FC = () => {
   const { currentLang } =
     useLanguage('vi');
+
   const c = VIEWER_COPY[currentLang];
 
   const { projectId } =
     useParams<{ projectId: string }>();
 
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const { setCurrentProject } =
-    useProjectStore();
+  const {
+    projects,
+    setCurrentProject,
+  } = useProjectStore();
+
+  const navigationState =
+    location.state as ViewerLocationState;
+
+  const navigationProject = useMemo(() => {
+    const candidate = navigationState?.project;
+
+    if (!candidate || candidate.id !== projectId) {
+      return null;
+    }
+
+    return candidate;
+  }, [navigationState, projectId]);
+
+  const storeProject = useMemo(
+    () =>
+      projects.find(
+        (item) => item.id === projectId
+      ) ?? null,
+    [projects, projectId]
+  );
+
+  const bootstrapProject =
+    navigationProject ??
+    storeProject ??
+    null;
+
+  const projectSource: ProjectSource = navigationProject
+    ? 'navigation-state'
+    : storeProject
+      ? 'project-store'
+      : 'api';
 
   const [project, setProject] =
-    useState<Project | null>(null);
+    useState<Project | null>(
+      () => {
+        if (projectId) {
+          openPerf.markViewerPageMounted(
+            projectId,
+            projectSource,
+            navigationState?.openedAt
+          );
+        }
+        return bootstrapProject;
+      }
+    );
 
   const [loading, setLoading] =
-    useState(true);
+    useState(() => !bootstrapProject);
+
+  const validationRequestRef = useRef<{
+    projectId: string;
+    promise: Promise<Project | null>;
+  } | null>(null);
+
+  const surveyRequestRef = useRef<{
+    projectId: string;
+    promise: Promise<ProjectSurvey[]>;
+  } | null>(null);
+
+  const [surveyState, setSurveyState] = useState<{
+    projectId: string | null;
+    surveys: ProjectSurvey[];
+  }>({ projectId: null, surveys: [] });
+  const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null);
 
   const [
     isSidebarOpen,
     setIsSidebarOpen,
   ] = useState(() =>
     typeof window !== 'undefined'
-      ? window.matchMedia('(min-width: 64rem)').matches
+      ? window
+          .matchMedia('(min-width: 64rem)')
+          .matches
       : true
   );
 
@@ -238,36 +340,216 @@ export const ViewerPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-    let active = true;
-    const loadProject = async () => {
-      if (!projectId) return;
-
-      setLoading(true);
+    if (!projectId) {
       setProject(null);
+      setLoading(false);
+      return;
+    }
 
-      const data =
-        await fetchProjectById(projectId, controller.signal);
+    let active = true;
 
-      if (!active) return;
-      if (data) {
-        setProject(data);
-        setCurrentProject(data.id);
-      }
+    const cachedProject =
+      navigationProject ??
+      projects.find(
+        (item) => item.id === projectId
+      ) ??
+      null;
+
+    if (cachedProject) {
+      setProject((current) => {
+        if (
+          current &&
+          isViewerProjectEquivalent(
+            current,
+            cachedProject
+          )
+        ) {
+          return current;
+        }
+
+        return cachedProject;
+      });
 
       setLoading(false);
+      setCurrentProject(cachedProject.id);
+    } else {
+      setProject(null);
+      setLoading(true);
+    }
+
+    const validateProject = async () => {
+      try {
+        if (validationRequestRef.current?.projectId !== projectId) {
+          validationRequestRef.current = {
+            projectId,
+            promise: fetchProjectOnce(projectId),
+          };
+        }
+        const data =
+          await validationRequestRef.current.promise;
+
+        if (!active) return;
+
+        if (!data) {
+          setProject(null);
+          setLoading(false);
+          setCurrentProject(null);
+          return;
+        }
+
+        setCurrentProject(data.id);
+
+        setProject((current) => {
+          if (
+            current &&
+            isViewerProjectEquivalent(
+              current,
+              data
+            )
+          ) {
+            return current;
+          }
+
+          return data;
+        });
+
+        setLoading(false);
+      } catch (error) {
+        if (!active) return;
+
+        if (
+          error instanceof DOMException &&
+          error.name === 'AbortError'
+        ) {
+          return;
+        }
+
+        if (!cachedProject) {
+          setProject(null);
+          setLoading(false);
+          setCurrentProject(null);
+        } else {
+          // Có bootstrap project thì giữ Viewer hoạt động
+          // nếu background validation lỗi mạng tạm thời.
+          setLoading(false);
+        }
+
+        if (import.meta.env.DEV) {
+          console.error(
+            '[ViewerPage] Project validation failed',
+            error
+          );
+        }
+      }
     };
 
-    loadProject();
+    void validateProject();
 
     return () => {
       active = false;
-      controller.abort();
       setCurrentProject(null);
     };
-  }, [projectId, setCurrentProject]);
+  }, [
+    projectId,
+    navigationProject,
+    projects,
+    setCurrentProject,
+  ]);
 
-  if (loading) {
+  useEffect(() => {
+    if (!projectId) return;
+    let active = true;
+
+    const loadSurveys = async () => {
+      try {
+        if (surveyRequestRef.current?.projectId !== projectId) {
+          surveyRequestRef.current = {
+            projectId,
+            promise: fetchSurveysOnce(projectId),
+          };
+        }
+
+        const data = await surveyRequestRef.current.promise;
+        if (!active) return;
+
+        const surveys = [...data].sort(
+          (a, b) =>
+            new Date(b.capturedAt).getTime() -
+            new Date(a.capturedAt).getTime()
+        );
+        setSurveyState({ projectId, surveys });
+        setSelectedSurveyId(surveys[0]?.id ?? null);
+      } catch (error) {
+        if (!active) return;
+        setSurveyState({ projectId, surveys: [] });
+        setSelectedSurveyId(null);
+        if (import.meta.env.DEV) {
+          console.warn('[SurveyTimeline] Survey request failed; using legacy assets.', error);
+        }
+      }
+    };
+
+    void loadSurveys();
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+
+  const surveys = surveyState.projectId === projectId
+    ? surveyState.surveys
+    : [];
+  const selectedSurvey = surveys.find(
+    (survey) => survey.id === selectedSurveyId
+  ) ?? null;
+
+  const surveysReady = !projectId || surveyState.projectId === projectId;
+  const selectedSurveyDomUrl = selectedSurvey?.domUrl;
+  const selectedSurveyMetadataUrl = selectedSurvey?.metadataUrl;
+  const selectedSurveyModelUrl = selectedSurvey?.modelUrl;
+  const selectedSurveyPointCloudId = selectedSurvey?.pointCloudId;
+  const selectedSurveyCalibration = selectedSurvey?.calibration;
+  const hasSelectedSurvey = selectedSurvey !== null;
+
+  const viewerProject = useMemo<Project | null>(() => {
+    if (!project || !hasSelectedSurvey) return project;
+
+    const surveyProject = {
+      ...project,
+      domUrl: selectedSurveyDomUrl,
+      metadataUrl: selectedSurveyMetadataUrl,
+      modelUrl: selectedSurveyModelUrl,
+      pointCloudId: selectedSurveyPointCloudId,
+      calibration: selectedSurveyCalibration,
+    };
+
+    return isViewerProjectEquivalent(project, surveyProject)
+      ? project
+      : surveyProject;
+  }, [
+    project,
+    hasSelectedSurvey,
+    selectedSurveyDomUrl,
+    selectedSurveyMetadataUrl,
+    selectedSurveyModelUrl,
+    selectedSurveyPointCloudId,
+    selectedSurveyCalibration,
+  ]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || surveyState.projectId !== projectId) return;
+    console.info('[SurveyTimeline]', {
+      projectId,
+      surveyCount: surveys.length,
+      selectedSurveyId: selectedSurvey?.id ?? null,
+      selectedCapturedAt: selectedSurvey?.capturedAt ?? null,
+      usingLegacyAssets: !selectedSurvey,
+    });
+  }, [projectId, selectedSurvey, surveyState.projectId, surveys.length]);
+
+  const projectIsStale = Boolean(project && project.id !== projectId);
+  const waitingForSurveys = Boolean(project && !surveysReady);
+
+  if (loading || projectIsStale || waitingForSurveys) {
     return (
       <>
         <style>{viewerPageStyle}</style>
@@ -294,7 +576,7 @@ export const ViewerPage: React.FC = () => {
     );
   }
 
-  if (!project) {
+  if (!project || !viewerProject) {
     return (
       <>
         <style>{viewerPageStyle}</style>
@@ -332,37 +614,55 @@ export const ViewerPage: React.FC = () => {
     <div className="viewer-option-b relative h-dvh min-h-0 w-full overflow-hidden bg-black">
       <style>{viewerPageStyle}</style>
 
-      <div
-        className={`viewer-project-dock absolute top-3 z-40 transition-transform duration-300 ease-in-out ${
-          isSidebarOpen ? 'is-sidebar-open' : ''
-        }`}
-      >
-        <Button
-          variant="secondary"
-          size="sm"
-          className="viewer-back-button gap-2 px-3"
-          onClick={() =>
-            navigate('/dashboard')
-          }
-        >
-          <ArrowLeft size={15} />
-          <span>{c.dashboard}</span>
-        </Button>
+      {surveys.length > 0 && (
+        <div className="viewer-survey-timeline" aria-label="Survey timeline">
+          {surveys.map((survey) => {
+            const isActive = survey.id === selectedSurvey?.id;
+            const capturedAt = new Intl.DateTimeFormat(
+              currentLang === 'vi' ? 'vi-VN' : currentLang === 'zh' ? 'zh-CN' : 'en-US',
+              { day: '2-digit', month: '2-digit', year: 'numeric' }
+            ).format(new Date(survey.capturedAt));
 
-        <div
-          className="viewer-project-chip"
-          title={project.name}
-        >
-          <span className="viewer-project-chip-dot" />
-          <span>{c.project}</span>
-          <strong>{project.name}</strong>
+            return (
+              <button
+                key={survey.id}
+                type="button"
+                aria-pressed={isActive}
+                title={`${survey.name ?? capturedAt} · ${capturedAt}`}
+                onClick={() => setSelectedSurveyId(survey.id)}
+                className={`viewer-survey-option ${isActive ? 'is-active' : ''}`}
+              >
+                <span className="viewer-survey-option-name">
+                  {survey.name ?? capturedAt}
+                </span>
+                <span className="viewer-survey-option-date">{capturedAt}</span>
+              </button>
+            );
+          })}
         </div>
-      </div>
+      )}
 
       <CesiumViewer
-        projectId={project.id}
-        projectName={project.name}
-        project={project}
+        projectId={viewerProject.id}
+        surveyId={selectedSurvey?.id}
+        projectName={viewerProject.name}
+        sidebarHeaderAction={(
+          <>
+          {project.isPublic && (
+            <DemoViewerTour key={project.id} onOpenSidebar={() => setIsSidebarOpen(true)} />
+          )}
+          <button
+            type="button"
+            aria-label="Bảng điều khiển"
+            title="Bảng điều khiển"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--vs-border)] bg-[var(--vs-surface)] text-[var(--vs-text-soft)] transition hover:border-sky-500/35 hover:bg-[var(--vs-surface-hover)] hover:text-sky-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500"
+            onClick={() => navigate('/dashboard')}
+          >
+            <ArrowLeft size={15} aria-hidden="true" />
+          </button>
+          </>
+        )}
+        project={viewerProject}
         isSidebarOpen={isSidebarOpen}
         onToggleSidebar={
           setIsSidebarOpen

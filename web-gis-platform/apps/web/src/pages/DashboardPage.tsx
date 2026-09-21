@@ -23,6 +23,7 @@ import { NotificationCenter } from '../features/notifications/NotificationCenter
 import {
   pushAppNotification,
 } from '../features/notifications/notificationStore';
+import { openPerf } from '../components/Map/viewer/viewerOpenTelemetry';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface PipelineState {
@@ -435,6 +436,20 @@ const DataBadge: React.FC<{ icon: React.ReactNode; label: string; active: boolea
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
+
+  const openProject = useCallback(
+    (project: Project) => {
+      const openedAt = performance.now();
+      openPerf.beginDashboardOpen(project.id, openedAt);
+      navigate(`/viewer/${project.id}`, {
+        state: {
+          project,
+          openedAt,
+        },
+      });
+    },
+    [navigate]
+  );
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { projects, setProjects, isLoading, setLoading } = useProjectStore();
@@ -1012,7 +1027,7 @@ export const DashboardPage: React.FC = () => {
   const displayedProjects = getFilteredProjects();
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-slate-50 text-slate-800 font-sans antialiased select-none">
+    <div className="flex h-dvh w-full max-w-full overflow-hidden bg-slate-50 text-slate-800 font-sans antialiased select-none">
 
       {/* ── Collapsible Left Sidebar ─────────────────────────────── */}
       <div
@@ -1171,9 +1186,9 @@ export const DashboardPage: React.FC = () => {
       )}
 
       {/* ── Main Layout Canvas ─────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col h-full overflow-hidden">
 
-        <header className="h-14 bg-white text-slate-800 flex items-center justify-between px-2 sm:px-4 z-20 shrink-0 border-b border-slate-200 shadow-sm">
+        <header className="h-14 min-w-0 bg-white text-slate-800 flex items-center justify-between px-2 sm:px-4 z-20 shrink-0 border-b border-slate-200 shadow-sm">
           {/* Left Area: Hamburger and Brand */}
           <div className="flex items-center gap-1.5 animate-fade-in">
             <button
@@ -1207,7 +1222,7 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           {/* Right Area: Utility Actions */}
-          <div className="flex shrink-0 items-center gap-0.5 sm:gap-3">
+          <div className="flex min-w-0 shrink-0 items-center gap-0 sm:gap-3">
             {/* Language Switcher Dropdown (Globe Icon) */}
             <div className="relative dropdown-trigger">
               <button
@@ -1326,7 +1341,7 @@ export const DashboardPage: React.FC = () => {
         </header>
 
         {/* ── Content Canvas Container ─────────────────────────────────── */}
-        <div className="flex-1 overflow-y-auto bg-slate-50/70 p-3 sm:p-6 flex flex-col">
+        <div className="flex min-w-0 flex-1 flex-col overflow-x-clip overflow-y-auto bg-slate-50/70 p-3 lg:p-6">
           {isCustomerView && isAdmin ? (
             <AdminLeadsModal
               isOpen
@@ -1547,7 +1562,7 @@ export const DashboardPage: React.FC = () => {
                       <div className="p-3 sm:p-4 flex flex-col flex-grow select-none">
                         <div className="flex items-start justify-between gap-2">
                           <h4
-                            onClick={() => !isThisProcessing && navigate(`/viewer/${project.id}`)}
+                            onClick={() => !isThisProcessing && openProject(project)}
                             className="font-semibold text-slate-800 text-sm line-clamp-1 flex-1 transition-colors cursor-pointer hover:text-blue-600"
                           >
                             {project.name}
@@ -1567,7 +1582,7 @@ export const DashboardPage: React.FC = () => {
                             {activeDropdown === project.id && (
                               <div className="absolute right-0 mt-1 w-44 bg-white border border-slate-200 rounded-lg shadow-xl py-1.5 z-30 dropdown-menu text-xs font-sans text-left">
                                 <button
-                                  onClick={() => { setActiveDropdown(null); navigate(`/viewer/${project.id}`); }}
+                                  onClick={() => { setActiveDropdown(null); openProject(project); }}
                                   className="w-full px-3 py-1.5 hover:bg-slate-50 text-left font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer"
                                 >
                                   <Eye size={13} className="text-slate-400" />
@@ -1662,7 +1677,7 @@ export const DashboardPage: React.FC = () => {
                           </button>
                         ) : (
                           <button
-                            onClick={() => navigate(`/viewer/${project.id}`)}
+                            onClick={() => openProject(project)}
                             className="text-blue-600 hover:text-blue-700 flex items-center gap-1 transition-colors cursor-pointer font-bold font-sans"
                           >
                             <span>{t('openMap')}</span>
@@ -1727,7 +1742,7 @@ export const DashboardPage: React.FC = () => {
                                 {/* Meta info */}
                                 <div className="min-w-0">
                                   <span
-                                    onClick={() => !isThisProcessing && navigate(`/viewer/${project.id}`)}
+                                    onClick={() => !isThisProcessing && openProject(project)}
                                     className="font-bold text-slate-800 hover:text-blue-600 cursor-pointer block truncate"
                                   >
                                     {project.name}
@@ -1788,7 +1803,7 @@ export const DashboardPage: React.FC = () => {
                                   </button>
                                 ) : (
                                   <button
-                                    onClick={() => navigate(`/viewer/${project.id}`)}
+                                    onClick={() => openProject(project)}
                                     className="px-2.5 py-1 text-[11px] font-bold border border-slate-200 hover:border-blue-600 text-slate-700 hover:text-blue-600 rounded bg-white transition-all cursor-pointer flex items-center gap-1"
                                   >
                                     <span>{t('btnOpen')}</span>
@@ -1808,7 +1823,7 @@ export const DashboardPage: React.FC = () => {
                                   {activeDropdown === project.id && (
                                     <div className="absolute right-0 mt-1 w-44 bg-white border border-slate-200 rounded-lg shadow-xl py-1.5 z-30 dropdown-menu text-left text-xs font-sans">
                                       <button
-                                        onClick={() => { setActiveDropdown(null); navigate(`/viewer/${project.id}`); }}
+                                        onClick={() => { setActiveDropdown(null); openProject(project); }}
                                         className="w-full px-3 py-1.5 hover:bg-slate-50 text-left font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer"
                                       >
                                         <Eye size={13} className="text-slate-400" />

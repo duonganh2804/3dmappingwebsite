@@ -15,7 +15,6 @@ import {
   AlertTriangle,
   Download,
   Filter,
-  Mail,
   MessageSquare,
   MonitorPlay,
   RefreshCw,
@@ -180,10 +179,12 @@ export const AdminLeadsModal: React.FC<
   const [filterStatus, setFilterStatus] = useState<
     'ALL' | LeadStatus
   >('ALL');
+
   const [searchQuery, setSearchQuery] = useState('');
 
   const [selectedLead, setSelectedLead] =
     useState<AdminLead | null>(null);
+
   const [selectedAccount, setSelectedAccount] =
     useState<CustomerAccountData | null>(null);
 
@@ -191,6 +192,7 @@ export const AdminLeadsModal: React.FC<
     id: string;
     label: string;
   } | null>(null);
+
   const [isDeleting, setIsDeleting] = useState(false);
 
   const customerAccounts = useMemo(
@@ -615,35 +617,37 @@ export const AdminLeadsModal: React.FC<
     <div
       className={
         isPage
-          ? 'flex min-h-full w-full flex-col font-sans'
+          ? 'flex min-h-full w-full min-w-0 max-w-full flex-col font-sans'
           : 'fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-0 font-sans backdrop-blur-[2px] sm:p-4'
       }
     >
       <div
         className={
           isPage
-            ? 'flex min-h-[calc(100vh-104px)] w-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-[#f7f9fc] shadow-sm'
+            ? 'flex w-full min-w-0 max-w-full flex-col rounded-2xl border border-slate-200 bg-[#f7f9fc] shadow-sm lg:h-[calc(100vh-104px)] lg:min-h-0 lg:overflow-hidden lg:rounded-xl'
             : 'flex h-dvh max-h-dvh w-full max-w-7xl flex-col overflow-hidden border border-slate-200 bg-[#f7f9fc] shadow-[0_24px_70px_rgba(15,23,42,.18)] sm:h-auto sm:max-h-[92vh] sm:rounded-2xl'
         }
       >
-        <div className="flex flex-col gap-3 border-b border-slate-200 bg-white px-3 py-3 sm:px-6 sm:py-4 md:flex-row md:items-center md:justify-between">
+        {/* HEADER */}
+        <div className="flex shrink-0 flex-col gap-3 border-b border-slate-200 bg-white px-4 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-6">
           <div className="flex min-w-0 items-start gap-2.5 sm:items-center sm:gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 text-blue-600">
               <Users size={19} />
             </div>
 
             <div className="min-w-0 flex-1">
-              <h3 className="text-base font-extrabold leading-5 tracking-tight text-slate-900 sm:text-lg sm:leading-normal">
+              <h3 className="min-w-0 [overflow-wrap:anywhere] text-xl font-extrabold leading-6 tracking-tight text-slate-900 lg:text-lg lg:leading-normal">
                 Quản lý thông tin khách hàng
               </h3>
+
               <p className="mt-1 text-[11px] leading-4 text-slate-500 sm:mt-0 sm:font-mono sm:text-xs">
                 Tài khoản · Đăng ký Demo · Liên hệ tư vấn
               </p>
             </div>
           </div>
 
-          <div className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 md:flex md:w-auto md:flex-wrap">
-            <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 lg:flex lg:w-auto lg:flex-wrap">
+            <div className="col-span-2 flex min-h-10 min-w-0 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 lg:col-auto">
               Tổng khách hàng:{' '}
               <strong className="text-slate-900">
                 {uniqueCustomers.length}
@@ -654,7 +658,7 @@ export const AdminLeadsModal: React.FC<
               type="button"
               onClick={exportCustomerData}
               disabled={uniqueCustomers.length === 0}
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 sm:px-3.5"
+              className="inline-flex min-h-10 min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 sm:px-3.5"
               title="Xuất file Excel (.xlsx)"
             >
               <Download size={15} />
@@ -689,12 +693,13 @@ export const AdminLeadsModal: React.FC<
         </div>
 
         {accountApiError && (
-          <div className="border-b border-amber-200 bg-amber-50 px-6 py-2.5 text-xs text-amber-700">
+          <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-6 py-2.5 text-xs text-amber-700">
             API danh sách tài khoản chưa sẵn sàng. Dữ liệu Demo và Tư vấn vẫn tải bình thường.
           </div>
         )}
 
-        <div className="flex flex-nowrap gap-1 overflow-x-auto border-b border-slate-200 bg-white px-3 pt-2 sm:gap-2 sm:px-6 sm:pt-4">
+        {/* TABS */}
+        <div className="relative z-10 flex max-w-full min-w-0 shrink-0 flex-nowrap gap-1 overflow-x-auto overflow-y-hidden overscroll-x-contain border-b border-slate-200 bg-white px-3 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:gap-2 lg:px-6 lg:pt-4">
           <button
             type="button"
             onClick={() => setActiveTab('ACCOUNTS')}
@@ -706,6 +711,7 @@ export const AdminLeadsModal: React.FC<
           >
             <Users size={14} />
             Tài khoản
+
             <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[10px] text-slate-600">
               {customerAccounts.length}
             </span>
@@ -722,6 +728,7 @@ export const AdminLeadsModal: React.FC<
           >
             <MonitorPlay size={14} />
             Đăng ký Demo
+
             <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[10px] text-slate-600">
               {demoLeads.length}
             </span>
@@ -740,26 +747,29 @@ export const AdminLeadsModal: React.FC<
           >
             <MessageSquare size={14} />
             Liên hệ tư vấn
+
             <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[10px] text-slate-600">
               {consultationLeads.length}
             </span>
           </button>
         </div>
 
-        <div className="flex flex-col gap-2 border-b border-slate-200 bg-[#f8fafc] px-3 py-3 sm:px-6 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-1 flex-wrap items-center gap-2">
-            <div className="relative w-full min-w-0 flex-1 md:max-w-md">
+        {/* SEARCH / FILTER */}
+        <div className="relative z-10 flex min-w-0 shrink-0 flex-col gap-3 border-b border-slate-200 bg-[#f8fafc] px-3 py-3 lg:flex-row lg:items-center lg:justify-between lg:px-6">
+          <div className="flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-2">
+            <div className="relative w-full min-w-0 flex-1 lg:max-w-md">
               <Search
                 size={14}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
               />
+
               <input
                 value={searchQuery}
                 onChange={(event) =>
                   setSearchQuery(event.target.value)
                 }
                 placeholder="Tìm tên, email, công ty, số điện thoại..."
-                className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-xs text-slate-800 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 placeholder:text-slate-400"
+                className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-xs text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
             </div>
 
@@ -807,11 +817,12 @@ export const AdminLeadsModal: React.FC<
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-grow grid-cols-1 gap-3 overflow-y-auto p-3 sm:gap-6 sm:p-6 lg:grid-cols-12">
+        {/* LIST */}
+        <div className="relative z-0 grid min-w-0 flex-1 grid-cols-1 gap-3 overflow-visible p-3 lg:min-h-0 lg:grid-cols-12 lg:gap-6 lg:overflow-y-auto lg:p-6">
           {activeTab === 'ACCOUNTS' ? (
             <>
               <div
-                className={`space-y-3 ${
+                className={`min-w-0 space-y-3 ${
                   selectedAccount
                     ? 'lg:col-span-7'
                     : 'lg:col-span-12'
@@ -833,18 +844,22 @@ export const AdminLeadsModal: React.FC<
                       onClick={() =>
                         setSelectedAccount(account)
                       }
-                      className={`flex w-full flex-col items-stretch gap-3 rounded-xl border p-3 text-left transition sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:rounded-2xl sm:p-4 ${
+                      className={`flex w-full min-w-0 max-w-full flex-col items-stretch gap-3 rounded-xl border p-4 text-left transition lg:flex-row lg:items-center lg:justify-between lg:gap-4 lg:rounded-2xl ${
                         selectedAccount?.id === account.id
                           ? 'border-emerald-300 bg-emerald-50'
                           : 'border-slate-200 bg-white hover:border-blue-300 hover:shadow-sm'
                       }`}
                     >
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-bold text-slate-900">
+                        <div className="min-w-0 [overflow-wrap:anywhere] text-sm font-bold text-slate-900 lg:truncate">
                           {account.fullName || account.email}
                         </div>
-                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 font-mono text-xs text-slate-500">
-                          <span className="min-w-0 break-all">{account.email}</span>
+
+                        <div className="mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-1 font-mono text-xs text-slate-500">
+                          <span className="min-w-0 break-all">
+                            {account.email}
+                          </span>
+
                           <span className="text-emerald-600">
                             {account.authProvider === 'GOOGLE'
                               ? 'Google'
@@ -853,11 +868,12 @@ export const AdminLeadsModal: React.FC<
                         </div>
                       </div>
 
-                      <div className="flex shrink-0 items-center justify-between gap-3 text-left sm:block sm:text-right">
+                      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 text-left lg:block lg:shrink-0 lg:text-right">
                         <div className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 font-mono text-[9px] font-bold text-slate-600">
                           USER
                         </div>
-                        <div className="font-mono text-[10px] text-slate-400 sm:mt-2">
+
+                        <div className="min-w-0 [overflow-wrap:anywhere] font-mono text-[10px] text-slate-400 lg:mt-2">
                           {dateText(account.createdAt)}
                         </div>
                       </div>
@@ -873,6 +889,7 @@ export const AdminLeadsModal: React.FC<
                       <h4 className="text-sm font-bold text-slate-900">
                         Chi tiết tài khoản
                       </h4>
+
                       <p className="mt-1 font-mono text-[10px] text-emerald-600">
                         CUSTOMER ACCOUNT
                       </p>
@@ -894,6 +911,7 @@ export const AdminLeadsModal: React.FC<
                       <span className="block font-mono text-[10px] uppercase text-slate-400">
                         Họ và tên
                       </span>
+
                       <strong className="text-sm text-slate-900">
                         {selectedAccount.fullName}
                       </strong>
@@ -903,7 +921,8 @@ export const AdminLeadsModal: React.FC<
                       <span className="block font-mono text-[10px] uppercase text-slate-400">
                         Email
                       </span>
-                      <span className="font-bold text-blue-600">
+
+                      <span className="break-all font-bold text-blue-600">
                         {selectedAccount.email}
                       </span>
                     </div>
@@ -912,6 +931,7 @@ export const AdminLeadsModal: React.FC<
                       <span className="block font-mono text-[10px] uppercase text-slate-400">
                         Phương thức đăng ký
                       </span>
+
                       <span>
                         {selectedAccount.authProvider ===
                         'GOOGLE'
@@ -924,6 +944,7 @@ export const AdminLeadsModal: React.FC<
                       <span className="block font-mono text-[10px] uppercase text-slate-400">
                         Ngày tạo tài khoản
                       </span>
+
                       <span>
                         {dateText(
                           selectedAccount.createdAt
@@ -935,6 +956,7 @@ export const AdminLeadsModal: React.FC<
                       <span className="block font-mono text-[10px] uppercase text-slate-400">
                         Customer ID
                       </span>
+
                       <span className="break-all font-mono text-slate-400">
                         {selectedAccount.id}
                       </span>
@@ -946,7 +968,7 @@ export const AdminLeadsModal: React.FC<
           ) : (
             <>
               <div
-                className={`space-y-3 ${
+                className={`min-w-0 space-y-3 ${
                   selectedLead
                     ? 'lg:col-span-7'
                     : 'lg:col-span-12'
@@ -967,20 +989,20 @@ export const AdminLeadsModal: React.FC<
                       onClick={() =>
                         setSelectedLead(lead)
                       }
-                      className={`flex cursor-pointer flex-col items-stretch gap-3 rounded-xl border p-3 transition-all sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:rounded-2xl sm:p-4 ${
+                      className={`flex min-w-0 max-w-full cursor-pointer flex-col items-stretch gap-3 rounded-xl border p-4 transition-all lg:flex-row lg:items-start lg:justify-between lg:gap-4 lg:rounded-2xl ${
                         selectedLead?.id === lead.id
                           ? 'border-blue-300 bg-blue-50'
                           : 'border-slate-200 bg-white hover:border-blue-300 hover:shadow-sm'
                       }`}
                     >
                       <div className="min-w-0 flex-grow space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-sm font-bold text-slate-900">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="min-w-0 [overflow-wrap:anywhere] text-sm font-bold text-slate-900 lg:truncate">
                             {lead.fullName || lead.email}
                           </span>
 
                           <span
-                            className={`rounded-full border px-2 py-0.5 font-mono text-[9px] font-bold ${
+                            className={`shrink-0 rounded-full border px-2 py-0.5 font-mono text-[9px] font-bold ${
                               lead.status === 'NEW'
                                 ? 'border-red-200 bg-red-50 text-red-600'
                                 : lead.status === 'CONTACTED'
@@ -992,11 +1014,15 @@ export const AdminLeadsModal: React.FC<
                           </span>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-slate-500">
-                          <span className="min-w-0 break-all">{lead.email}</span>
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-slate-500">
+                          <span className="min-w-0 break-all">
+                            {lead.email}
+                          </span>
 
                           {lead.company && (
-                            <span>🏢 {lead.company}</span>
+                            <span className="min-w-0 [overflow-wrap:anywhere]">
+                              🏢 {lead.company}
+                            </span>
                           )}
 
                           {lead.phone && (
@@ -1004,12 +1030,14 @@ export const AdminLeadsModal: React.FC<
                           )}
 
                           {isConsultationLead(lead) ? (
-                            <span className="text-cyan-700">
+                            <span className="min-w-0 [overflow-wrap:anywhere] text-cyan-700">
                               {lead.topic}
                             </span>
                           ) : (
                             lead.source && (
-                              <span>{lead.source}</span>
+                              <span className="min-w-0 [overflow-wrap:anywhere]">
+                                {lead.source}
+                              </span>
                             )
                           )}
                         </div>
@@ -1019,8 +1047,8 @@ export const AdminLeadsModal: React.FC<
                         </p>
                       </div>
 
-                      <div className="flex shrink-0 items-center justify-between gap-3 text-left sm:block sm:space-y-2 sm:text-right">
-                        <div className="font-mono text-[10px] text-slate-400">
+                      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 text-left lg:block lg:shrink-0 lg:space-y-2 lg:text-right">
+                        <div className="min-w-0 [overflow-wrap:anywhere] font-mono text-[10px] text-slate-400">
                           {dateText(lead.createdAt)}
                         </div>
 
@@ -1028,6 +1056,7 @@ export const AdminLeadsModal: React.FC<
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
+
                             if (lead.id) {
                               requestDelete(
                                 lead.id,
@@ -1053,6 +1082,7 @@ export const AdminLeadsModal: React.FC<
                       <h4 className="text-sm font-bold text-slate-900">
                         Chi tiết khách hàng
                       </h4>
+
                       <p className="mt-1 font-mono text-[10px] text-slate-400">
                         {activeTab === 'DEMO'
                           ? 'DEMO REGISTRATION'
@@ -1076,6 +1106,7 @@ export const AdminLeadsModal: React.FC<
                       <span className="block font-mono text-[10px] uppercase text-slate-400">
                         Email
                       </span>
+
                       <span className="break-all text-sm font-bold text-blue-600">
                         {selectedLead.email}
                       </span>
@@ -1086,6 +1117,7 @@ export const AdminLeadsModal: React.FC<
                         <span className="block font-mono text-[10px] uppercase text-slate-400">
                           Họ và tên
                         </span>
+
                         <span className="font-semibold text-slate-900">
                           {selectedLead.fullName}
                         </span>
@@ -1098,6 +1130,7 @@ export const AdminLeadsModal: React.FC<
                         <span className="block font-mono text-[10px] uppercase text-slate-400">
                           Chức danh / Công ty
                         </span>
+
                         <span className="text-slate-900">
                           {selectedLead.jobTitle ||
                             'N/A'}{' '}
@@ -1113,6 +1146,7 @@ export const AdminLeadsModal: React.FC<
                         <span className="block font-mono text-[10px] uppercase text-slate-400">
                           Số điện thoại
                         </span>
+
                         <span className="font-mono font-bold text-emerald-600">
                           {selectedLead.phone}
                         </span>
@@ -1126,6 +1160,7 @@ export const AdminLeadsModal: React.FC<
                         <span className="block font-mono text-[10px] uppercase text-slate-400">
                           Nội dung cần tư vấn
                         </span>
+
                         <span className="font-semibold text-cyan-700">
                           {selectedLead.topic}
                         </span>
@@ -1136,6 +1171,7 @@ export const AdminLeadsModal: React.FC<
                           <span className="block font-mono text-[10px] uppercase text-slate-400">
                             Kênh biết đến
                           </span>
+
                           <span>{selectedLead.source}</span>
                         </div>
                       )
@@ -1145,6 +1181,7 @@ export const AdminLeadsModal: React.FC<
                       <span className="mb-1 block font-mono text-[10px] uppercase text-slate-400">
                         Nội dung
                       </span>
+
                       <div className="whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 leading-relaxed text-slate-700">
                         {selectedLead.message}
                       </div>
@@ -1210,6 +1247,7 @@ export const AdminLeadsModal: React.FC<
                 <h4 className="text-base font-bold text-slate-900">
                   Xóa yêu cầu này?
                 </h4>
+
                 <p className="mt-2 text-sm leading-6 text-slate-600">
                   Bạn sắp xóa yêu cầu của{' '}
                   <strong className="font-semibold text-slate-900">
@@ -1223,7 +1261,9 @@ export const AdminLeadsModal: React.FC<
             <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4">
               <button
                 type="button"
-                onClick={() => setDeleteTarget(null)}
+                onClick={() =>
+                  setDeleteTarget(null)
+                }
                 disabled={isDeleting}
                 className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >

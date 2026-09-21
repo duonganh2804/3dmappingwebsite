@@ -87,6 +87,23 @@ model Project {
   measurements Measurement[]
   surveys      Survey[]
   issues       Issue[]
+  flowLines    FlowLine[]
+}
+
+model FlowLine {
+  id          String @id @default(uuid())
+  projectId   String
+  label       String?
+  startLon    Float
+  startLat    Float
+  startHeight Float?
+  endLon      Float
+  endLat      Float
+  endHeight   Float?
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
 }
 
 model Issue {

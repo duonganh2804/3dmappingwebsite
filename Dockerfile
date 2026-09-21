@@ -31,21 +31,11 @@ WORKDIR /app
 COPY web-gis-platform/apps/api/package*.json ./
 RUN npm ci --omit=dev
 
-# Copy code đã biên dịch từ builder
+# Copy code đã biên dịch từ builder (bao gồm cả dist/generated/prisma)
 COPY --from=builder /app/dist ./dist
 
-# Copy prisma schema và generate client tại runtime
+# Copy prisma schema phòng khi cần
 COPY web-gis-platform/apps/api/prisma ./prisma
-COPY web-gis-platform/apps/api/prisma.config.ts ./prisma.config.ts
-
-# Dummy URL chỉ cho bước generate trong production image
-ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
-ENV DIRECT_URL="postgresql://dummy:dummy@localhost:5432/dummy"
-RUN npx prisma generate
-
-# Xóa dummy env — runtime sẽ nhận env thật từ Render dashboard
-ENV DATABASE_URL=""
-ENV DIRECT_URL=""
 
 ENV NODE_ENV=production
 ENV PORT=7860
@@ -53,3 +43,4 @@ ENV PORT=7860
 EXPOSE 7860
 
 CMD ["node", "dist/server.js"]
+
